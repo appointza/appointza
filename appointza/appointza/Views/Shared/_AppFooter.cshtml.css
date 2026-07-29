@@ -1,0 +1,34 @@
+﻿.footer {
+    /* position: absolute;
+    bottom: 0;
+    width: 100%;*/
+    /*white-space: nowrap;
+    line-height: 60px;*/
+}
+
+.footer_a {
+    text-decoration: none;
+}
+
+    .footer_a:hover {
+        color: #d81b60;
+        cursor: pointer;
+    }
+
+.text-grey {
+    color: #cacaca
+}
+
+   
+
+.hover-clr:hover {
+    color: white
+}
+
+.hover-clr2 {
+    color: white
+}
+
+.hover-clr2:hover {
+    color: #d81b60;
+}

@@ -1,0 +1,12 @@
+﻿@{
+    Layout = "_Layout.cshtml";
+}
+@await Component.InvokeAsync("AppHeader")
+<div class="container-fluid p-0">
+    @RenderBody()
+</div>
+@*<partial name="_AppFooter"/>*@
+@await Component.InvokeAsync("AppFooter")
+
+
+

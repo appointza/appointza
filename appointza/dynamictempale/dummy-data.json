@@ -1,0 +1,81 @@
+{
+  "organization": {
+    "organisationid": 1,
+    "organisationname": "GreenPlay Turf",
+    "organisationlocationid": 101,
+    "tagline": "Play. Practice. Perform.",
+    "gstnumber": "22ABCDE1234F1Z5",
+    "organisationlogo": 9
+  },
+  "location": {
+    "addressline1": "253/A Mettukuppam Street",
+    "addressline2": "Lalpuram Post",
+    "city": "Chidambaram",
+    "state": "Tamil Nadu",
+    "pincode": "608602",
+    "country": "India",
+    "latitude": 11.3994,
+    "longitude": 79.6935,
+    "googlelocation": "https://www.google.com/maps/dir/?api=1&destination=253%2FA%20Mettukuppam%20st%20lalpuram%20post%20Chidambaram%20TK%2C%20Cuddalore%2C%20Tamil%20Nadu%2C%20608602%2C%20India&destination_place_id=&travelmode=driving",
+    "images": [15, 16, 17, 18],
+    "customurl": "https://greenplayturf.com"
+  },
+  "services": [
+    {
+      "servicename": "Hourly Turf Booking",
+      "servicedescription": "Book premium 5-a-side turf for your group",
+      "price": 1500,
+      "duration": "1 Hour"
+    },
+    {
+      "servicename": "Coaching Sessions",
+      "servicedescription": "Train with certified coaches",
+      "price": 2000,
+      "duration": "1 Hour"
+    },
+    {
+      "servicename": "Tournament Booking",
+      "servicedescription": "Full day tournament with facilities",
+      "price": 8000,
+      "duration": "8 Hours"
+    },
+    {
+      "servicename": "Night Play",
+      "servicedescription": "Evening games with LED lighting",
+      "price": 2000,
+      "duration": "1 Hour"
+    }
+  ],
+  "timings": [
+    {
+      "day": "Monday",
+      "hours": "6:00 AM - 11:00 PM"
+    },
+    {
+      "day": "Tuesday", 
+      "hours": "6:00 AM - 11:00 PM"
+    },
+    {
+      "day": "Wednesday",
+      "hours": "6:00 AM - 11:00 PM"
+    },
+    {
+      "day": "Thursday",
+      "hours": "6:00 AM - 11:00 PM"
+    },
+    {
+      "day": "Friday",
+      "hours": "6:00 AM - 11:00 PM"
+    },
+    {
+      "day": "Saturday",
+      "hours": "6:00 AM - 12:00 AM"
+    },
+    {
+      "day": "Sunday",
+      "hours": "6:00 AM - 12:00 AM"
+    }
+  ],
+  "bookingUrl": "https://appointza.com/book/greenplay-turf",
+  "currentYear": 2024
+}

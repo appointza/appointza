@@ -1,0 +1,591 @@
+@using appointza.ViewModels
+
+@{
+    Layout = "/Views/Shared/_NoSidebarLayout.cshtml";
+    ViewData["Title"] = "Explore Services & Events";
+    // Base URL configuration (injected by BaseUrlViewDataFilter from appsettings.json)
+    var baseUrl = ViewData["BaseUrl"] as string ?? $"{Context.Request.Scheme}:/{Context.Request.Host}";
+}
+
+<div class="container-fluid">
+    <!-- Hero Section -->
+    <div class="row">
+        <div class="col-12">
+            <div class="hero-section bg-primary text-white py-5 mb-4" style="background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);">
+                <div class="container text-center">
+                    <h1 class="display-3 fw-bold mb-4">Explore Services & Events</h1>
+                    <p class="lead fs-3 mb-4">Discover services and exciting events near you</p>
+                    <div class="row justify-content-center">
+                        <div class="col-md-8">
+                            <div class="input-group input-group-lg">
+                                <input type="text" id="searchInput" class="form-control" placeholder="Search services or events..." aria-label="Search">
+                                <button class="btn btn-light" type="button" onclick="performSearch()">
+                                    <i class="fas fa-search"></i> Search
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Tabs Navigation -->
+    <div class="container mb-4">
+        <ul class="nav nav-tabs nav-justified" id="exploreTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="services-tab" data-bs-toggle="tab" data-bs-target="#services" type="button" role="tab" aria-controls="services" aria-selected="true">
+                    <i class="fas fa-concierge-bell me-2"></i> Services
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="events-tab" data-bs-toggle="tab" data-bs-target="#events" type="button" role="tab" aria-controls="events" aria-selected="false">
+                    <i class="fas fa-calendar-alt me-2"></i> Events
+                </button>
+            </li>
+        </ul>
+    </div>
+    
+    <!-- Tab Content -->
+    <div class="tab-content" id="exploreTabContent">
+        <!-- Services Tab -->
+        <div class="tab-pane fade show active" id="services" role="tabpanel" aria-labelledby="services-tab">
+    
+    <div class="container">
+        <!-- Service Categories -->
+        <div class="row mb-5">
+            <div class="col-12">
+                <h2 class="text-center mb-5">Service Categories</h2>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-5">
+            <!-- Category 1 -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card category-card h-100 border-0 shadow-lg">
+                    <div class="card-body text-center p-4">
+                        <div class="category-icon mb-3">
+                            <i class="fas fa-laptop-code fa-4x text-primary"></i>
+                        </div>
+                        <h4 class="card-title">Web Development</h4>
+                        <p class="card-text">Custom web applications, e-commerce solutions, and responsive websites built with modern technologies.</p>
+                        <ul class="list-unstyled text-start">
+                            <li><i class="fas fa-check text-success me-2"></i>React & Angular Applications</li>
+                            <li><i class="fas fa-check text-success me-2"></i>E-commerce Platforms</li>
+                            <li><i class="fas fa-check text-success me-2"></i>API Development</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Mobile-First Design</li>
+                        </ul>
+                        <a href="#" class="btn btn-primary mt-3">Explore Services</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 2 -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card category-card h-100 border-0 shadow-lg">
+                    <div class="card-body text-center p-4">
+                        <div class="category-icon mb-3">
+                            <i class="fas fa-mobile-alt fa-4x text-success"></i>
+                        </div>
+                        <h4 class="card-title">Mobile Development</h4>
+                        <p class="card-text">Native and cross-platform mobile applications for iOS and Android with seamless user experiences.</p>
+                        <ul class="list-unstyled text-start">
+                            <li><i class="fas fa-check text-success me-2"></i>iOS & Android Apps</li>
+                            <li><i class="fas fa-check text-success me-2"></i>React Native</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Flutter Development</li>
+                            <li><i class="fas fa-check text-success me-2"></i>App Store Optimization</li>
+                        </ul>
+                        <a href="#" class="btn btn-success mt-3">Explore Services</a>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Category 3 -->
+            <div class="col-md-6 col-lg-4">
+                <div class="card category-card h-100 border-0 shadow-lg">
+                    <div class="card-body text-center p-4">
+                        <div class="category-icon mb-3">
+                            <i class="fas fa-cloud fa-4x text-info"></i>
+                        </div>
+                        <h4 class="card-title">Cloud Solutions</h4>
+                        <p class="card-text">Scalable cloud infrastructure, migration services, and DevOps solutions for modern businesses.</p>
+                        <ul class="list-unstyled text-start">
+                            <li><i class="fas fa-check text-success me-2"></i>AWS & Azure Migration</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Docker & Kubernetes</li>
+                            <li><i class="fas fa-check text-success me-2"></i>CI/CD Pipelines</li>
+                            <li><i class="fas fa-check text-success me-2"></i>Monitoring & Security</li>
+                        </ul>
+                        <a href="#" class="btn btn-info mt-3">Explore Services</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Featured Services -->
+        <div class="row mb-5">
+            <div class="col-12">
+                <h2 class="text-center mb-5">Featured Services</h2>
+            </div>
+        </div>
+
+        <div class="row g-4 mb-5">
+            <!-- Service 1 -->
+            <div class="col-md-6 col-lg-3">
+                <div class="card service-card h-100 border-0 shadow">
+                    <div class="card-header bg-gradient text-white text-center" style="background: linear-gradient(45deg, #ff6b6b, #ee5a24);">
+                        <i class="fas fa-chart-line fa-2x mb-2"></i>
+                        <h5 class="mb-0">Business Analytics</h5>
+                    </div>
+                    <div class="card-body d-flex flex-column">
+                        <p class="card-text">Transform your data into actionable insights with our advanced analytics solutions.</p>
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="h5 text-primary mb-0">$299/mo</span>
+                                <span class="badge bg-warning">Popular</span>
+                            </div>
+                            <a href="#" class="btn btn-outline-primary w-100">Learn More</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service 2 -->
+            <div class="col-md-6 col-lg-3">
+                <div class="card service-card h-100 border-0 shadow">
+                    <div class="card-header bg-gradient text-white text-center" style="background: linear-gradient(45deg, #4834d4, #686de0);">
+                        <i class="fas fa-users fa-2x mb-2"></i>
+                        <h5 class="mb-0">Team Management</h5>
+                    </div>
+                    <div class="card-body d-flex flex-column">
+                        <p class="card-text">Streamline your team operations with our comprehensive management tools.</p>
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="h5 text-primary mb-0">$199/mo</span>
+                                <span class="badge bg-success">Best Value</span>
+                            </div>
+                            <a href="#" class="btn btn-outline-primary w-100">Learn More</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service 3 -->
+            <div class="col-md-6 col-lg-3">
+                <div class="card service-card h-100 border-0 shadow">
+                    <div class="card-header bg-gradient text-white text-center" style="background: linear-gradient(45deg, #00d2d3, #54a0ff);">
+                        <i class="fas fa-calendar-alt fa-2x mb-2"></i>
+                        <h5 class="mb-0">Appointment Booking</h5>
+                    </div>
+                    <div class="card-body d-flex flex-column">
+                        <p class="card-text">Efficient appointment scheduling with automated reminders and calendar sync.</p>
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="h5 text-primary mb-0">$149/mo</span>
+                                <span class="badge bg-info">New</span>
+                            </div>
+                            <a href="#" class="btn btn-outline-primary w-100">Learn More</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Service 4 -->
+            <div class="col-md-6 col-lg-3">
+                <div class="card service-card h-100 border-0 shadow">
+                    <div class="card-header bg-gradient text-white text-center" style="background: linear-gradient(45deg, #ff9ff3, #f368e0);">
+                        <i class="fas fa-shield-alt fa-2x mb-2"></i>
+                        <h5 class="mb-0">Security Solutions</h5>
+                    </div>
+                    <div class="card-body d-flex flex-column">
+                        <p class="card-text">Advanced security measures to protect your data and systems from threats.</p>
+                        <div class="mt-auto">
+                            <div class="d-flex justify-content-between align-items-center mb-3">
+                                <span class="h5 text-primary mb-0">$399/mo</span>
+                                <span class="badge bg-danger">Premium</span>
+                            </div>
+                            <a href="#" class="btn btn-outline-primary w-100">Learn More</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Why Choose Us Section -->
+        <div class="row mb-5">
+            <div class="col-12">
+                <div class="card bg-light border-0">
+                    <div class="card-body py-5">
+                        <h2 class="text-center mb-5">Why Choose Our Services?</h2>
+                        <div class="row g-4">
+                            <div class="col-md-4 text-center">
+                                <i class="fas fa-award fa-3x text-primary mb-3"></i>
+                                <h5>Expert Team</h5>
+                                <p>Certified professionals with years of experience in cutting-edge technologies.</p>
+                            </div>
+                            <div class="col-md-4 text-center">
+                                <i class="fas fa-clock fa-3x text-success mb-3"></i>
+                                <h5>24/7 Support</h5>
+                                <p>Round-the-clock technical support to ensure your systems run smoothly.</p>
+                            </div>
+                            <div class="col-md-4 text-center">
+                                <i class="fas fa-dollar-sign fa-3x text-warning mb-3"></i>
+                                <h5>Competitive Pricing</h5>
+                                <p>Transparent pricing with no hidden costs and flexible payment options.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Call to Action -->
+        <div class="row">
+            <div class="col-12">
+                <div class="card bg-primary text-white border-0">
+                    <div class="card-body text-center py-5">
+                        <h2 class="card-title mb-4">Ready to Get Started?</h2>
+                        <p class="card-text lead mb-4">Contact us today to discuss your project requirements and get a customized solution.</p>
+                        <div class="d-flex justify-content-center gap-3 flex-wrap">
+                            <a href="#" class="btn btn-light btn-lg">Get Free Quote</a>
+                            <a href="#" class="btn btn-outline-light btn-lg">Schedule Consultation</a>
+                            <a href="#" class="btn btn-outline-light btn-lg">View Portfolio</a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+        </div>
+        
+        <!-- Events Tab -->
+        <div class="tab-pane fade" id="events" role="tabpanel" aria-labelledby="events-tab">
+            <div class="container">
+                <!-- Events Header -->
+                <div class="row mb-5">
+                    <div class="col-12">
+                        <h2 class="text-center mb-5">Upcoming Events</h2>
+                        <p class="text-center text-muted">Discover exciting events happening near you</p>
+                    </div>
+                </div>
+
+                <!-- Events Loading -->
+                <div id="eventsLoading" class="text-center py-5">
+                    <div class="spinner-border text-primary" role="status">
+                        <span class="visually-hidden">Loading events...</span>
+                    </div>
+                    <p class="mt-3">Loading events...</p>
+                </div>
+
+                <!-- Events Container -->
+                <div id="eventsContainer" class="row g-4 mb-5" style="display: none;">
+                    <!-- Events will be dynamically loaded here -->
+                </div>
+
+                <!-- No Events Message -->
+                <div id="noEventsMessage" class="text-center py-5" style="display: none;">
+                    <i class="fas fa-calendar-times fa-4x text-muted mb-3"></i>
+                    <h4>No Events Available</h4>
+                    <p class="text-muted">Check back later for upcoming events</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .hero-section {
+        border-radius: 15px;
+        margin: 20px;
+    }
+    
+    .category-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-radius: 15px;
+    }
+    
+    .category-card:hover {
+        transform: translateY(-10px);
+        box-shadow: 0 20px 40px rgba(0,0,0,0.1) !important;
+    }
+    
+    .service-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-radius: 10px;
+    }
+    
+    .service-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 30px rgba(0,0,0,0.1) !important;
+    }
+    
+    .category-icon {
+        height: 80px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    
+    .card-header {
+        border-radius: 10px 10px 0 0 !important;
+        border: none !important;
+    }
+    
+    .bg-gradient {
+        background: linear-gradient(45deg, #007bff, #0056b3);
+    }
+    
+    .nav-tabs {
+        border-bottom: 2px solid #dee2e6;
+    }
+    
+    .nav-tabs .nav-link {
+        color: #6c757d;
+        border: none;
+        border-bottom: 3px solid transparent;
+        padding: 1rem 2rem;
+        font-weight: 500;
+        transition: all 0.3s ease;
+    }
+    
+    .nav-tabs .nav-link:hover {
+        color: #007bff;
+        border-bottom-color: #007bff;
+    }
+    
+    .nav-tabs .nav-link.active {
+        color: #007bff;
+        background-color: transparent;
+        border-bottom-color: #007bff;
+        font-weight: 600;
+    }
+    
+    .event-card {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+        border-radius: 15px;
+        overflow: hidden;
+    }
+    
+    .event-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 15px 30px rgba(0,0,0,0.1) !important;
+    }
+    
+    .event-image {
+        height: 200px;
+        object-fit: cover;
+        width: 100%;
+    }
+
+    /* Mobile Responsive Styles */
+    @@media (max-width: 768px) {
+        .hero-section {
+            padding: 2rem 1rem !important;
+            margin: 10px !important;
+        }
+
+        .hero-section h1.display-3 {
+            font-size: 2.5rem;
+        }
+
+        .hero-section .lead {
+            font-size: 1.25rem;
+        }
+
+        /* Scrollable Tabs */
+        .nav-tabs {
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            white-space: nowrap;
+            border-bottom: 2px solid #dee2e6;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 5px; /* Space for scrollbar */
+        }
+
+        .nav-tabs .nav-item {
+            display: inline-block;
+        }
+
+        .nav-tabs .nav-link {
+            padding: 0.75rem 1.25rem;
+        }
+    }
+</style>
+
+<script>
+    const baseUrl = '@baseUrl';
+    let currentTab = 'services';
+    
+    // Load events when events tab is clicked
+    document.addEventListener('DOMContentLoaded', function() {
+        const eventsTab = document.getElementById('events-tab');
+        if (eventsTab) {
+            eventsTab.addEventListener('shown.bs.tab', function() {
+                currentTab = 'events';
+                loadEvents();
+            });
+        }
+        
+        const servicesTab = document.getElementById('services-tab');
+        if (servicesTab) {
+            servicesTab.addEventListener('shown.bs.tab', function() {
+                currentTab = 'services';
+            });
+        }
+        
+        // Load events on page load if events tab is active
+        const activeTab = document.querySelector('.nav-link.active');
+        if (activeTab && activeTab.id === 'events-tab') {
+            loadEvents();
+        }
+    });
+    
+    function performSearch() {
+        const searchTerm = document.getElementById('searchInput').value;
+        if (currentTab === 'services') {
+            // Filter services
+            filterServices(searchTerm);
+        } else {
+            // Filter events
+            filterEvents(searchTerm);
+        }
+    }
+    
+    function filterServices(searchTerm) {
+        const serviceCards = document.querySelectorAll('#services .service-card, #services .category-card');
+        serviceCards.forEach(card => {
+            const text = card.textContent.toLowerCase();
+            if (text.includes(searchTerm.toLowerCase())) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+    
+    function filterEvents(searchTerm) {
+        const eventCards = document.querySelectorAll('#eventsContainer .event-card');
+        eventCards.forEach(card => {
+            const text = card.textContent.toLowerCase();
+            if (text.includes(searchTerm.toLowerCase())) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+    }
+    
+    async function loadEvents() {
+        const eventsContainer = document.getElementById('eventsContainer');
+        const eventsLoading = document.getElementById('eventsLoading');
+        const noEventsMessage = document.getElementById('noEventsMessage');
+        
+        try {
+            eventsLoading.style.display = 'block';
+            eventsContainer.style.display = 'none';
+            noEventsMessage.style.display = 'none';
+            
+            // Fetch events from API
+            const response = await fetch(`${baseUrl}/api/Event/Select`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    item: {
+                        id: 0,
+                        organisation_id: 0,
+                        organisation_location_id: 0,
+                        status: "",
+                        is_public: true
+                    }
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('Failed to load events');
+            }
+            
+            const result = await response.json();
+            const events = result.item || [];
+            
+            // Filter active, public events
+            const activeEvents = events.filter(e => 
+                e.isactive && 
+                e.is_public && 
+                e.status !== 'cancelled' && 
+                e.status !== 'completed'
+            );
+            
+            eventsLoading.style.display = 'none';
+            
+            if (activeEvents.length === 0) {
+                noEventsMessage.style.display = 'block';
+                return;
+            }
+            
+            // Render events
+            eventsContainer.innerHTML = activeEvents.map(event => createEventCard(event)).join('');
+            eventsContainer.style.display = 'flex';
+            
+        } catch (error) {
+            console.error('Error loading events:', error);
+            eventsLoading.style.display = 'none';
+            noEventsMessage.style.display = 'block';
+            noEventsMessage.innerHTML = `
+                <i class="fas fa-exclamation-triangle fa-4x text-warning mb-3"></i>
+                <h4>Error Loading Events</h4>
+                <p class="text-muted">Please try again later</p>
+            `;
+        }
+    }
+    
+    function createEventCard(event) {
+        const eventDate = event.event_date 
+            ? new Date(event.event_date).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
+            : event.from_date && event.to_date
+            ? `${new Date(event.from_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} - ${new Date(event.to_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`
+            : 'Date TBA';
+        
+        const imageUrl = event.images?.ImageIds && event.images.ImageIds.length > 0
+            ? `${baseUrl}/api/Files/get?id=${event.images.ImageIds[0]}`
+            : '';
+        
+        const remainingSlots = event.remainingslot || 0;
+        const totalSlots = event.slot_limit || 0;
+        const entryAmount = event.entry_amount || 0;
+        
+        return `
+            <div class="col-md-6 col-lg-4">
+                <div class="card event-card h-100 border-0 shadow">
+                    ${imageUrl ? `
+                        <img src="${imageUrl}" class="event-image" alt="${event.event_name || 'Event'}" onerror="this.style.display='none'">
+                    ` : `
+                        <div class="event-image bg-gradient text-white d-flex align-items-center justify-content-center">
+                            <i class="fas fa-calendar-alt fa-4x"></i>
+                        </div>
+                    `}
+                    <div class="card-body">
+                        <h5 class="card-title">${event.event_name || 'Untitled Event'}</h5>
+                        <p class="card-text text-muted">${event.description || 'No description available'}</p>
+                        <div class="mb-3">
+                            <p class="mb-1"><i class="fas fa-calendar me-2 text-primary"></i><strong>Date:</strong> ${eventDate}</p>
+                            ${event.location ? `<p class="mb-1"><i class="fas fa-map-marker-alt me-2 text-danger"></i><strong>Location:</strong> ${event.location}</p>` : ''}
+                            ${remainingSlots > 0 ? `<p class="mb-1"><i class="fas fa-users me-2 text-success"></i><strong>Slots:</strong> ${remainingSlots} / ${totalSlots} available</p>` : '<p class="mb-1 text-danger"><i class="fas fa-times-circle me-2"></i>Fully Booked</p>'}
+                            ${entryAmount > 0 ? `<p class="mb-1"><i class="fas fa-rupee-sign me-2 text-warning"></i><strong>Entry:</strong> ₹${entryAmount}</p>` : '<p class="mb-1 text-success"><i class="fas fa-gift me-2"></i>Free Entry</p>'}
+                        </div>
+                        <a href="${baseUrl}/user/events/${event.id}/book" class="btn btn-primary w-100">
+                            <i class="fas fa-eye me-2"></i>View Details
+                        </a>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    // Allow Enter key to trigger search
+    document.getElementById('searchInput')?.addEventListener('keypress', function(e) {
+        if (e.key === 'Enter') {
+            performSearch();
+        }
+    });
+</script>

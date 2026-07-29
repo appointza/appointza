@@ -1,0 +1,3 @@
+package com.appointza
+
+object NotificationOpenPackage

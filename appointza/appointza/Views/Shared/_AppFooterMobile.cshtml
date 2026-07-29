@@ -1,0 +1,87 @@
+﻿@*<div ng-controller="AppFooterMobileController" class="d-flex bg-white flex-row align-items-center justify-content-center border-top shadow-lg p-0 m-0" style="position:fixed;bottom:0px;width:100%">
+
+    <a asp-controller="HomeMobile" asp-action="Index"
+    class="flex-grow-1 d-flex align-items-center justify-content-center   my-2  border-end">
+    <img ng-if="tabIndex != 1" src="~/images/homeicon2mobile.png" style="width: 20px;" />
+
+    <img ng-if="tabIndex == 1" src="~/images/homeicon2mobile-red.png" style="width: 20px;" />
+
+    </a>
+    <a asp-controller="DesignsMobile" asp-action="Menu"
+    class="flex-grow-1 d-flex align-items-center justify-content-center my-2  border-end"> <img ng-if="tabIndex != 2" src="~/images/category.png" style="width: 20px" />
+    <img ng-if="tabIndex == 2" src="~/images/category-red.png" style="width: 20px" /></a>
+
+
+    <a asp-controller="UserMobile" asp-action="Cart"
+
+    class=" p-0 flex-grow-1 d-flex align-items-center justify-content-center border-end my-2">
+    <div class=" position-relative">
+    <img ng-if="tabIndex != 3" src="~/images/shopping-bag.png" class="position-relative" style="width:20px" />
+    <img ng-if="tabIndex == 3" src="~/images/shopping-bag-red.png" class="position-relative" style="width:20px" />
+    <span ng-if="cartcount > 0" class="position-absolute  start-100 translate-middle badge badge-sm rounded-pill bg-danger" style="font-size: 8px;top:4px">
+    <span class="small" style="font-size: 8px; font-family: inherit;">{{cartcount}}</span>
+    <span class="visually-hidden">unread messages</span>
+    </span>
+    </div>
+    </a>
+
+
+
+
+    <a asp-controller="UserMobile" style="text-decoration:none" asp-action="Account" class="flex-grow-1 d-flex align-items-center justify-content-center my-2  ">
+
+
+    <div class="rounded-circle text-truncate d-flex align-items-center justify-content-center"
+    ng-class="{ 'profile-tab-1': tabIndex == 4,
+    'profile-tab-2': tabIndex != 4}">
+    <span ng-if="firstInitial.length > 0" class="small fw-bold my-0">{{firstInitial}}</span>
+    <span ng-if="firstInitial == ''" class="small fw-bold my-0"><i class="fa-solid fa-user"></i></span>
+    </div>
+    </a>
+
+
+    </div>*@
+
+
+<div ng-controller="AppFooterMobileController" class="d-flex bg-white flex-row align-items-center justify-content-center border-top shadow-lg p-0 m-0" style="position:fixed;bottom:0px;width:100%">
+
+    <a asp-controller="HomeMobile" asp-action="Index"
+       class="flex-grow-1 d-flex align-items-center justify-content-center   my-2  border-end">
+        <img src="~/images/homeicon2mobile.png" style="width: 20px;" />
+
+
+    </a>
+    <a asp-controller="DesignsMobile" asp-action="Menu"
+       class="flex-grow-1 d-flex align-items-center justify-content-center my-2  border-end">
+        <img src="~/images/category.png" style="width: 20px" />
+    </a>
+
+
+    <a asp-controller="UserMobile" asp-action="Cart"
+       class=" p-0 flex-grow-1 d-flex align-items-center justify-content-center border-end my-2">
+        <div class=" position-relative">
+            <img src="~/images/shopping-bag.png" class="position-relative" style="width:20px" />
+
+            <span ng-if="cartcount > 0" class="position-absolute  start-100 translate-middle badge badge-sm rounded-pill bg-danger" style="font-size: 8px;top:4px">
+                <span class="small" style="font-size: 8px; font-family: inherit;">{{cartcount}}</span>
+                <span class="visually-hidden">unread messages</span>
+            </span>
+        </div>
+    </a>
+
+
+
+
+    <a asp-controller="UserMobile" style="text-decoration:none" asp-action="Account" class="flex-grow-1 d-flex align-items-center justify-content-center my-2  ">
+
+
+        <div class="rounded-circle text-truncate profile-tab-1 d-flex align-items-center justify-content-center">
+            <span ng-if="firstInitial.length > 0" class="small fw-bold my-0">{{firstInitial}}</span>
+            <span ng-if="firstInitial == ''" class="small fw-bold my-0"><i class="fa-solid fa-user"></i></span>
+        </div>
+    </a>
+
+
+</div>
+
+<script src="~/js/appfootermobilecontroller.js"></script>

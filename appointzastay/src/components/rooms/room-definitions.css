@@ -1,0 +1,260 @@
+.room-def-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  overflow: hidden;
+  background: hsl(var(--muted) / 0.35);
+  position: relative;
+}
+
+.room-def-list-panel {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.room-def-detail-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgb(0 0 0 / 0.45);
+  border: none;
+  padding: 0;
+  cursor: default;
+  animation: room-def-fade-in 0.2s ease-out;
+}
+
+@keyframes room-def-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.room-def-detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  width: min(100vw, 36rem);
+  max-width: none;
+  min-height: 0;
+  overflow: hidden;
+  background: hsl(var(--background));
+  border-left: 1px solid hsl(var(--border));
+  box-shadow: -12px 0 40px rgb(0 0 0 / 0.12);
+  animation: room-def-drawer-in 0.28s ease-out;
+}
+
+@media (min-width: 1024px) {
+  .room-def-detail-panel {
+    /* 2 columns of a 4-column list grid */
+    width: min(calc((100vw - 15rem) * 0.5), 48rem);
+  }
+}
+
+/* ── 2-column layouts inside edit/create drawers ─────────────── */
+.room-def-detail-panel .detail-panel-sections-2col {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 768px) {
+  .room-def-detail-panel .detail-panel-sections-2col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.room-def-detail-panel .detail-panel-col-span-2 {
+  grid-column: 1 / -1;
+}
+
+.room-def-detail-panel .detail-panel-fields-2 {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  .room-def-detail-panel .detail-panel-fields-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.room-def-detail-panel .detail-panel-body-2col {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 768px) {
+  .room-def-detail-panel .detail-panel-body-2col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@keyframes room-def-drawer-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 767px) {
+  .room-def-detail-panel {
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: 100%;
+    max-width: none;
+    max-height: 88dvh;
+    border-left: none;
+    border-top: 1px solid hsl(var(--border));
+    border-radius: 1.25rem 1.25rem 0 0;
+    box-shadow: 0 -12px 40px rgb(0 0 0 / 0.15);
+    animation: room-def-sheet-in 0.25s ease-out;
+  }
+}
+
+@keyframes room-def-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.room-def-header {
+  flex-shrink: 0;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid hsl(var(--border));
+  background: hsl(var(--background));
+}
+
+.room-def-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+}
+
+.room-def-card {
+  display: block;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.75rem;
+  padding: 1rem;
+  background: hsl(var(--background));
+  transition: border-color 0.15s, box-shadow 0.15s;
+  text-align: left;
+}
+
+.room-def-card:hover {
+  border-color: hsl(var(--primary) / 0.4);
+}
+
+.room-def-card-selected {
+  border-color: hsl(var(--primary));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25);
+}
+
+.room-def-form-section {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  padding: 1rem;
+  background: hsl(var(--background));
+  margin-bottom: 1rem;
+}
+
+.room-def-section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 0.75rem;
+}
+
+.room-def-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: hsl(var(--muted-foreground));
+  margin-bottom: 0.25rem;
+}
+
+.room-def-input {
+  width: 100%;
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.875rem;
+  background: hsl(var(--background));
+}
+
+.room-def-input:focus {
+  outline: 2px solid hsl(var(--primary) / 0.3);
+}
+
+.room-def-status-option {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.5rem;
+  cursor: pointer;
+}
+
+.room-def-status-option.is-selected {
+  border-color: hsl(var(--primary));
+  background: hsl(var(--primary) / 0.08);
+}
+
+.room-def-asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+  gap: 0.5rem;
+}
+
+.room-def-asset-item {
+  border: 1px solid hsl(var(--border));
+  border-radius: 0.375rem;
+  overflow: hidden;
+  text-align: left;
+  font-size: 10px;
+}
+
+.room-def-asset-item img {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+}
+
+.room-def-asset-item p {
+  padding: 0.25rem 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-def-gallery-preview {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.room-def-gallery-preview img {
+  width: 3.5rem;
+  height: 3.5rem;
+  object-fit: cover;
+  border-radius: 0.25rem;
+  border: 1px solid hsl(var(--border));
+}

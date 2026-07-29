@@ -1,0 +1,13 @@
+User-agent: *
+Allow: /
+
+# Sitemap
+Sitemap: https://appointza.com/sitemap.xml
+
+# Disallow admin and API routes
+Disallow: /api/
+Disallow: /organization/
+Disallow: /user/
+Disallow: /login
+Disallow: /register
+Disallow: /otp

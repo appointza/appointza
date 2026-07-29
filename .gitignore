@@ -1,0 +1,59 @@
+# Dependencies & build output
+**/node_modules/
+**/dist/
+**/dist-ssr/
+appointzabuild/
+**/bin/
+**/obj/
+**/publish/
+**/.vs/
+**/.idea/
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+**/appsettings.json
+!**/appsettings.example.json
+**/_build_out/
+**/*firebase-adminsdk*.json
+**/secrets/
+*.pem
+*.pfx
+*.key
+
+# Logs & caches
+*.log
+npm-debug.log*
+yarn-error.log*
+**/.cache/
+**/.turbo/
+**/coverage/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.suo
+*.user
+*.userosscache
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Mobile / native build noise
+**/android/.gradle/
+**/android/app/build/
+**/android/local.properties
+**/ios/App/Pods/
+**/ios/App/build/
+**/ios/App/*.xcuserdata/
+
+# Misc
+*.sw?
+*.tmp
+*~
+
+# Local build artifacts
+**/dist-test/
+

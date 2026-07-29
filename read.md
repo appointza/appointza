@@ -1,0 +1,1 @@
+powershell -ExecutionPolicy Bypass -File "d:\aravindan\project\appointza\buildallacw.ps1"

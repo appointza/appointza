@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <!-- Web client ID: must match Google Cloud OAuth Web client (serverClientId). Required for ID tokens on native sign-in. -->
+    <string name="server_client_id">1029193730608-vd43iqlt8bi3nc5mv76ot7j1do8035ma.apps.googleusercontent.com</string>
+    <string name="app_name">Appointza</string>
+    <string name="title_activity_main">Appointza</string>
+    <string name="package_name">com.apppointza</string>
+    <string name="custom_url_scheme">com.apppointza</string>
+</resources>

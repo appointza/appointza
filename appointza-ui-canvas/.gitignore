@@ -1,0 +1,50 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Capacitor
+android/app/build
+android/.gradle
+android/.idea
+android/local.properties
+android/captures
+android/.externalNativeBuild
+android/.cxx
+*.iml
+
+# iOS
+ios/App/build
+ios/App/Pods
+ios/App/Podfile.lock
+ios/App/*.xcworkspace
+ios/App/*.xcuserdata
+ios/App/.swiftpm
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcuserstate
+project.xcworkspace
+xcuserdata
+.DS_Store
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

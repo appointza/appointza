@@ -1,0 +1,1628 @@
+@using appointza.ViewModels
+@using appointza.Models
+
+@functions {
+    private string SanitizeForUrl(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return "unknown";
+        return input.Trim()
+            .ToLowerInvariant()
+            .Replace(" ", "")
+            .Replace("_", "-")
+            .Replace(".", "-")
+            .Replace(",", "-")
+            .Replace("(", "-")
+            .Replace(")", "-")
+            .Replace("&", "and")
+            .Replace("+", "plus")
+            .Replace("'", "")
+            .Replace("\"", "")
+            .Replace("!", "")
+            .Replace("?", "")
+            .Replace("@", "at")
+            .Replace("#", "")
+            .Replace("$", "")
+            .Replace("%", "")
+            .Replace("^", "")
+            .Replace("*", "")
+            .Replace("=", "")
+            .Replace("[", "")
+            .Replace("]", "")
+            .Replace("{", "")
+            .Replace("}", "")
+            .Replace("|", "")
+            .Replace("\\", "")
+            .Replace(":", "")
+            .Replace(";", "")
+            .Replace("<", "")
+            .Replace(">", "")
+            .Replace("/", "")
+            .Replace("~", "")
+            .Replace("`", "");
+    }
+}
+
+@{
+    Layout = "/Views/Shared/_NoSidebarLayout.cshtml";
+    ViewData["Title"] = "Explore Services & Events";
+    var services = ViewData["Services"] as List<OrganisationServices> ?? new List<OrganisationServices>();
+    var servicesCount = ViewData["ServicesCount"] as int? ?? 0;
+    var organisations = ViewData["Organisations"] as List<OrganisationDetail> ?? new List<OrganisationDetail>();
+    var events = ViewData["Events"] as List<Event> ?? new List<Event>();
+    var eventsCount = ViewData["EventsCount"] as int? ?? 0;
+    var error = ViewData["Error"] as string;
+    var primaryBusinessTypes = ViewData["PrimaryBusinessTypes"] as List<ReferenceValue> ?? new List<ReferenceValue>();
+    var secondaryBusinessTypes = ViewData["SecondaryBusinessTypes"] as List<ReferenceValue> ?? new List<ReferenceValue>();
+    
+    // Filter and search state
+    var searchTerm = ViewData["SearchTerm"] as string ?? "";
+    var selectedPrimaryType = ViewData["SelectedPrimaryType"] as int?;
+    var selectedSecondaryType = ViewData["SelectedSecondaryType"] as int?;
+    var activeTab = ViewData["ActiveTab"] as string ?? "organisation";
+    var showFilters = ViewData["ShowFilters"] as bool? ?? false;
+    
+    // Base URL configuration
+    var baseUrl = ViewData["BaseUrl"] as string ?? $"{Context.Request.Scheme}://{Context.Request.Host}";
+    
+    // Create service view models with organization info
+    var servicesWithOrg = new List<dynamic>();
+    foreach (var service in services)
+    {
+        var org = organisations.FirstOrDefault(o => o.organisationid == service.organisationid);
+        servicesWithOrg.Add(new
+        {
+            Service = service,
+            OrganisationName = org?.organisationname ?? "Unknown",
+            OrganisationLocationId = org?.organisationlocationid ?? 0,
+            OrganisationLocationCity = org?.organisationlocationcity ?? "",
+            OrganisationLocationState = org?.organisationlocationstate ?? "",
+            OrganisationImageId = org?.organisationimageid ?? 0
+        });
+    }
+}
+
+<!-- Inter Font Import -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+<div class="explore-services-container">
+    <!-- Tabs Navigation -->
+    <div class="tabs-navigation">
+        <ul class="nav nav-tabs nav-justified" id="exploreTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(activeTab == "organisation" ? "active" : "")" 
+                        id="organisation-tab" 
+                        data-bs-toggle="tab" 
+                        data-bs-target="#organisation-content" 
+                        type="button" 
+                        role="tab" 
+                        aria-controls="organisation-content" 
+                        aria-selected="@(activeTab == "organisation" ? "true" : "false")"
+                        onclick="setActiveTab('organisation')">
+                    <i class="fas fa-building me-2"></i> Organisation
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(activeTab == "service" ? "active" : "")" 
+                        id="service-tab" 
+                        data-bs-toggle="tab" 
+                        data-bs-target="#service-content" 
+                        type="button" 
+                        role="tab" 
+                        aria-controls="service-content" 
+                        aria-selected="@(activeTab == "service" ? "true" : "false")"
+                        onclick="setActiveTab('service')">
+                    <i class="fas fa-briefcase me-2"></i> Service
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link @(activeTab == "event" ? "active" : "")" 
+                        id="event-tab" 
+                        data-bs-toggle="tab" 
+                        data-bs-target="#event-content" 
+                        type="button" 
+                        role="tab" 
+                        aria-controls="event-content" 
+                        aria-selected="@(activeTab == "event" ? "true" : "false")"
+                        onclick="setActiveTab('event')">
+                    <i class="fas fa-calendar-alt me-2"></i> Event
+                </button>
+            </li>
+        </ul>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="tab-content" id="exploreTabContent">
+        <!-- Organisation Tab -->
+        <div class="tab-pane fade @(activeTab == "organisation" ? "show active" : "")" 
+             id="organisation-content" 
+             role="tabpanel" 
+             aria-labelledby="organisation-tab">
+            <div class="tab-content-wrapper">
+                <!-- Search and Filters -->
+                <div class="search-filters-section">
+                    <form method="get" action="/services" class="search-form">
+                        <input type="hidden" name="tab" value="organisation" />
+                        @if (selectedPrimaryType.HasValue)
+                        {
+                            <input type="hidden" name="primaryType" value="@selectedPrimaryType.Value" />
+                        }
+                        @if (selectedSecondaryType.HasValue)
+                        {
+                            <input type="hidden" name="secondaryType" value="@selectedSecondaryType.Value" />
+                        }
+                        <div class="search-input-container">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" 
+                                   name="search"
+                                   id="orgSearchInput"
+                                   value="@searchTerm"
+                                   placeholder="Search by business name, location, or service type..." 
+                                   class="search-input">
+                            @if (!string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button type="button" onclick="clearSearch('organisation')" class="clear-search-btn">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            }
+                        </div>
+                        <button type="submit" class="search-btn">
+                            <i class="fas fa-search"></i>
+                            <span>Search</span>
+                        </button>
+                    </form>
+                    
+                    <button onclick="toggleFilters('organisation')" class="filter-toggle-btn" id="orgFilterBtn">
+                        <i class="fas fa-filter"></i>
+                        <span>Filters</span>
+                    </button>
+                </div>
+
+                <!-- Filters Panel -->
+                <div class="filters-panel @(showFilters ? "show" : "")" id="orgFiltersPanel">
+                    <div class="filters-content">
+                        <div class="filters-header">
+                            <h3 class="filters-title">
+                                <i class="fas fa-filter"></i>
+                                Filter by Business Type
+                            </h3>
+                            <button type="button" onclick="toggleFilters('organisation')" class="close-filters-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="filters-body">
+                            <!-- Primary Types -->
+                            <div class="filter-group">
+                                <label class="filter-label">Primary Business Type</label>
+                                <div class="filter-tags">
+                                    @foreach (var type in primaryBusinessTypes)
+                                    {
+                                        <button type="button" 
+                                                onclick="selectPrimaryType(@type.id, 'organisation')"
+                                                class="filter-tag @(selectedPrimaryType == type.id ? "active" : "")">
+                                            @type.displaytext
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Secondary Types -->
+                            @if (selectedPrimaryType.HasValue && secondaryBusinessTypes.Any())
+                            {
+                                <div class="filter-group">
+                                    <label class="filter-label">Secondary Business Type</label>
+                                    <div class="filter-tags">
+                                        @foreach (var type in secondaryBusinessTypes)
+                                        {
+                                            <button type="button" 
+                                                    onclick="selectSecondaryType(@type.id, 'organisation')"
+                                                    class="filter-tag @(selectedSecondaryType == type.id ? "active" : "")">
+                                                @type.displaytext
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <!-- Clear Filters -->
+                            @if (selectedPrimaryType.HasValue || selectedSecondaryType.HasValue || !string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button onclick="clearAllFilters('organisation')" class="clear-all-btn">
+                                    <i class="fas fa-eraser"></i>
+                                    Clear All Filters
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <div class="error-message">
+                        <i class="fas fa-exclamation-triangle error-icon"></i>
+                        <div class="error-content">
+                            <h3 class="error-title">Error</h3>
+                            <p class="error-text">@error</p>
+                        </div>
+                    </div>
+                }
+                else if (organisations.Any())
+                {
+                    <div class="results-header">
+                        <div class="results-info">
+                            <h2 class="results-title">
+                                Found <span class="results-count">@organisations.Count</span> 
+                                @(organisations.Count == 1 ? "organisation" : "organisations")
+                            </h2>
+                        </div>
+                        <button onclick="refreshResults()" class="refresh-btn">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div class="business-grid">
+                        @foreach (var org in organisations)
+                        {
+                            <div class="business-card">
+                                <div class="card-header">
+                                    <div class="business-logo">
+                                        @{
+                                            var imageId = org.organisationimageid > 0 ? org.organisationimageid : org.organisationlogo;
+                                            var imageUrl = imageId > 0 ? $"{baseUrl}/api/Files/Get?id={imageId}" : "";
+                                        }
+                                        @if (!string.IsNullOrEmpty(imageUrl))
+                                        {
+                                            <img src="@imageUrl" 
+                                                 alt="@org.organisationname" 
+                                                 class="logo-image"
+                                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                            <div class="logo-placeholder" style="display: none;">
+                                                @(org.organisationname?.Length > 0 ? org.organisationname.Substring(0, 1).ToUpper() : "A")
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="logo-placeholder">
+                                                @(org.organisationname?.Length > 0 ? org.organisationname.Substring(0, 1).ToUpper() : "A")
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="business-info">
+                                        <h3 class="business-name">@org.organisationname</h3>
+                                        <div class="business-location">
+                                            <i class="fas fa-map-marker-alt"></i>
+                                            <span>@org.organisationlocationcity, @org.organisationlocationstate</span>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(org.organisationprimarytypecode))
+                                        {
+                                            <span class="business-type-badge">@org.organisationprimarytypecode</span>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="card-body">
+                                    <div class="business-address">
+                                        <p class="address-line">@org.organisationlocationaddressline1</p>
+                                        <p class="address-pincode">@org.organisationlocationpincode</p>
+                                    </div>
+                                </div>
+
+                                <div class="card-footer">
+                                    @{
+                                        // Generate clean names for subdomain URL
+                                        var cleanOrganisationName = SanitizeForUrl(org.organisationname ?? "");
+                                        var cleanLocationName = SanitizeForUrl(org.organisationlocationname ?? "");
+                                        var cleanCity = SanitizeForUrl(org.organisationlocationcity ?? "");
+                                        var cleanState = SanitizeForUrl(org.organisationlocationstate ?? "");
+                                        
+                                        // Generate subdomain URL using the configured base URL domain
+                                        var baseUrlDomain = baseUrl.Replace("https://", "").Replace("http://", "").Split('/')[0];
+                                        var viewDetailsUrl = $"https://{cleanOrganisationName}-{cleanLocationName}-{cleanCity}-{cleanState}.{baseUrlDomain}";
+                                        var bookingUrl = $"{baseUrl}/book-appointment/{org.organisationid}/{org.organisationlocationid}";
+                                    }
+                                    <a href="@viewDetailsUrl" target="_blank" class="action-btn secondary">
+                                        <i class="fas fa-external-link-alt"></i>
+                                        View Details
+                                    </a>
+                                    <a href="@bookingUrl" target="_blank" class="action-btn primary">
+                                        <i class="fas fa-calendar-plus"></i>
+                                        Book Now
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <i class="fas fa-search"></i>
+                        </div>
+                        <h3 class="empty-title">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "No organisations match your filters" : "No organisations available")
+                        </h3>
+                        <p class="empty-text">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "Try adjusting your search criteria or filters" : "Check back later for available organisations")
+                        </p>
+                        @if (searchTerm != "" || selectedPrimaryType.HasValue)
+                        {
+                            <button onclick="clearAllFilters('organisation')" class="empty-action-btn">
+                                Clear Filters
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Service Tab -->
+        <div class="tab-pane fade @(activeTab == "service" ? "show active" : "")" 
+             id="service-content" 
+             role="tabpanel" 
+             aria-labelledby="service-tab">
+            <div class="tab-content-wrapper">
+                <!-- Search and Filters -->
+                <div class="search-filters-section">
+                    <form method="get" action="/services" class="search-form">
+                        <input type="hidden" name="tab" value="service" />
+                        @if (selectedPrimaryType.HasValue)
+                        {
+                            <input type="hidden" name="primaryType" value="@selectedPrimaryType.Value" />
+                        }
+                        @if (selectedSecondaryType.HasValue)
+                        {
+                            <input type="hidden" name="secondaryType" value="@selectedSecondaryType.Value" />
+                        }
+                        <div class="search-input-container">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" 
+                                   name="search"
+                                   id="serviceSearchInput"
+                                   value="@searchTerm"
+                                   placeholder="Search services by name, organisation, or location..." 
+                                   class="search-input">
+                            @if (!string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button type="button" onclick="clearSearch('service')" class="clear-search-btn">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            }
+                        </div>
+                        <button type="submit" class="search-btn">
+                            <i class="fas fa-search"></i>
+                            <span>Search</span>
+                        </button>
+                    </form>
+                    
+                    <button onclick="toggleFilters('service')" class="filter-toggle-btn" id="serviceFilterBtn">
+                        <i class="fas fa-filter"></i>
+                        <span>Filters</span>
+                    </button>
+                </div>
+
+                <!-- Filters Panel -->
+                <div class="filters-panel" id="serviceFiltersPanel">
+                    <div class="filters-content">
+                        <div class="filters-header">
+                            <h3 class="filters-title">
+                                <i class="fas fa-filter"></i>
+                                Filter by Business Type
+                            </h3>
+                            <button type="button" onclick="toggleFilters('service')" class="close-filters-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="filters-body">
+                            <!-- Primary Types -->
+                            <div class="filter-group">
+                                <label class="filter-label">Primary Business Type</label>
+                                <div class="filter-tags">
+                                    @foreach (var type in primaryBusinessTypes)
+                                    {
+                                        <button type="button" 
+                                                onclick="selectPrimaryType(@type.id, 'service')"
+                                                class="filter-tag @(selectedPrimaryType == type.id ? "active" : "")">
+                                            @type.displaytext
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Secondary Types -->
+                            @if (selectedPrimaryType.HasValue && secondaryBusinessTypes.Any())
+                            {
+                                <div class="filter-group">
+                                    <label class="filter-label">Secondary Business Type</label>
+                                    <div class="filter-tags">
+                                        @foreach (var type in secondaryBusinessTypes)
+                                        {
+                                            <button type="button" 
+                                                    onclick="selectSecondaryType(@type.id, 'service')"
+                                                    class="filter-tag @(selectedSecondaryType == type.id ? "active" : "")">
+                                                @type.displaytext
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <!-- Clear Filters -->
+                            @if (selectedPrimaryType.HasValue || selectedSecondaryType.HasValue || !string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button onclick="clearAllFilters('service')" class="clear-all-btn">
+                                    <i class="fas fa-eraser"></i>
+                                    Clear All Filters
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                @if (servicesWithOrg.Any())
+                {
+                    <div class="results-header">
+                        <div class="results-info">
+                            <h2 class="results-title">
+                                Found <span class="results-count">@servicesWithOrg.Count</span> 
+                                @(servicesWithOrg.Count == 1 ? "service" : "services")
+                            </h2>
+                        </div>
+                        <button onclick="refreshResults()" class="refresh-btn">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div class="business-grid">
+                        @foreach (var item in servicesWithOrg)
+                        {
+                            var service = item.Service;
+                            <div class="business-card service-card">
+                                <div class="card-header">
+                                    <div class="business-info">
+                                        <h3 class="business-name">@service.Servicename</h3>
+                                        <div class="business-location">
+                                            <i class="fas fa-building"></i>
+                                            <span>@item.OrganisationName</span>
+                                        </div>
+                                        <div class="business-location">
+                                            <i class="fas fa-map-marker-alt"></i>
+                                            <span>@item.OrganisationLocationCity, @item.OrganisationLocationState</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="card-body">
+                                    <div class="service-details">
+                                        @if (service.show_price)
+                                        {
+                                            <div class="service-detail-item">
+                                                <span class="detail-label">Price:</span>
+                                                <div class="price-container">
+                                                    @if (service.offerprize > 0)
+                                                    {
+                                                        <span class="original-price">₹@service.prize</span>
+                                                        <span class="offer-price">₹@service.offerprize</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="current-price">₹@service.prize</span>
+                                                    }
+                                                </div>
+                                            </div>
+                                        }
+                                        <div class="service-detail-item">
+                                            <span class="detail-label">Duration:</span>
+                                            <span class="detail-value">@service.timetaken minutes</span>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(service.notes))
+                                        {
+                                            <p class="service-notes">@service.notes</p>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="card-footer">
+                                    <a href="@baseUrl/book-appointment/@service.organisationid/@item.OrganisationLocationId" class="action-btn primary">
+                                        <i class="fas fa-calendar-plus"></i>
+                                        Book Service
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <i class="fas fa-briefcase"></i>
+                        </div>
+                        <h3 class="empty-title">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "No services match your filters" : "No services available")
+                        </h3>
+                        <p class="empty-text">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "Try adjusting your search criteria or filters" : "Check back later for available services")
+                        </p>
+                        @if (searchTerm != "" || selectedPrimaryType.HasValue)
+                        {
+                            <button onclick="clearAllFilters('service')" class="empty-action-btn">
+                                Clear Filters
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- Event Tab -->
+        <div class="tab-pane fade @(activeTab == "event" ? "show active" : "")" 
+             id="event-content" 
+             role="tabpanel" 
+             aria-labelledby="event-tab">
+            <div class="tab-content-wrapper">
+                <!-- Search and Filters -->
+                <div class="search-filters-section">
+                    <form method="get" action="/services" class="search-form">
+                        <input type="hidden" name="tab" value="event" />
+                        @if (selectedPrimaryType.HasValue)
+                        {
+                            <input type="hidden" name="primaryType" value="@selectedPrimaryType.Value" />
+                        }
+                        @if (selectedSecondaryType.HasValue)
+                        {
+                            <input type="hidden" name="secondaryType" value="@selectedSecondaryType.Value" />
+                        }
+                        <div class="search-input-container">
+                            <i class="fas fa-search search-icon"></i>
+                            <input type="text" 
+                                   name="search"
+                                   id="eventSearchInput"
+                                   value="@searchTerm"
+                                   placeholder="Search events by name, description, or location..." 
+                                   class="search-input">
+                            @if (!string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button type="button" onclick="clearSearch('event')" class="clear-search-btn">
+                                    <i class="fas fa-times"></i>
+                                </button>
+                            }
+                        </div>
+                        <button type="submit" class="search-btn">
+                            <i class="fas fa-search"></i>
+                            <span>Search</span>
+                        </button>
+                    </form>
+                    
+                    <button onclick="toggleFilters('event')" class="filter-toggle-btn" id="eventFilterBtn">
+                        <i class="fas fa-filter"></i>
+                        <span>Filters</span>
+                    </button>
+                </div>
+
+                <!-- Filters Panel -->
+                <div class="filters-panel" id="eventFiltersPanel">
+                    <div class="filters-content">
+                        <div class="filters-header">
+                            <h3 class="filters-title">
+                                <i class="fas fa-filter"></i>
+                                Filter Events
+                            </h3>
+                            <button type="button" onclick="toggleFilters('event')" class="close-filters-btn">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                        <div class="filters-body">
+                            <!-- Primary Types -->
+                            <div class="filter-group">
+                                <label class="filter-label">Primary Business Type</label>
+                                <div class="filter-tags">
+                                    @foreach (var type in primaryBusinessTypes)
+                                    {
+                                        <button type="button" 
+                                                onclick="selectPrimaryType(@type.id, 'event')"
+                                                class="filter-tag @(selectedPrimaryType == type.id ? "active" : "")">
+                                            @type.displaytext
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Secondary Types -->
+                            @if (selectedPrimaryType.HasValue && secondaryBusinessTypes.Any())
+                            {
+                                <div class="filter-group">
+                                    <label class="filter-label">Secondary Business Type</label>
+                                    <div class="filter-tags">
+                                        @foreach (var type in secondaryBusinessTypes)
+                                        {
+                                            <button type="button" 
+                                                    onclick="selectSecondaryType(@type.id, 'event')"
+                                                    class="filter-tag @(selectedSecondaryType == type.id ? "active" : "")">
+                                                @type.displaytext
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <!-- Clear Filters -->
+                            @if (selectedPrimaryType.HasValue || selectedSecondaryType.HasValue || !string.IsNullOrEmpty(searchTerm))
+                            {
+                                <button onclick="clearAllFilters('event')" class="clear-all-btn">
+                                    <i class="fas fa-eraser"></i>
+                                    Clear All Filters
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results -->
+                @if (events.Any())
+                {
+                    <div class="results-header">
+                        <div class="results-info">
+                            <h2 class="results-title">
+                                Found <span class="results-count">@events.Count</span> 
+                                @(events.Count == 1 ? "event" : "events")
+                            </h2>
+                        </div>
+                        <button onclick="refreshResults()" class="refresh-btn">
+                            <i class="fas fa-sync-alt"></i>
+                            Refresh
+                        </button>
+                    </div>
+
+                    <div class="business-grid">
+                        @foreach (var evt in events)
+                        {
+                            var imageIds = evt.images?.ImageIds ?? new List<long>();
+                            var imageUrl = imageIds.Count > 0 ? $"{baseUrl}/api/Files/Get?id={imageIds[0]}" : "";
+                            var eventTypeColor = evt.event_type?.ToLower() == "single" ? "bg-blue-100 text-blue-800" :
+                                                evt.event_type?.ToLower() == "range" ? "bg-purple-100 text-purple-800" :
+                                                evt.event_type?.ToLower() == "daily" ? "bg-green-100 text-green-800" :
+                                                "bg-gray-100 text-gray-800";
+                            var eventTypeDisplay = evt.event_type?.ToLower() == "single" ? "Single Event" :
+                                                  evt.event_type?.ToLower() == "range" ? "Date Range" :
+                                                  evt.event_type?.ToLower() == "daily" ? "Daily Recurring" :
+                                                  evt.event_type ?? "Event";
+                            
+                            <div class="business-card event-card">
+                                @if (!string.IsNullOrEmpty(imageUrl))
+                                {
+                                    <div class="event-image-container">
+                                        <img src="@imageUrl" alt="@evt.event_name" class="event-image" onerror="this.style.display='none';">
+                                        <div class="event-type-badge @eventTypeColor">@eventTypeDisplay</div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="event-image-placeholder">
+                                        <i class="fas fa-calendar-alt"></i>
+                                        <div class="event-type-badge @eventTypeColor">@eventTypeDisplay</div>
+                                    </div>
+                                }
+                                
+                                <div class="card-content">
+                                    <h3 class="business-name">@evt.event_name</h3>
+                                    @if (!string.IsNullOrEmpty(evt.description))
+                                    {
+                                        <p class="event-description">@evt.description</p>
+                                    }
+                                    
+                                    <div class="event-details">
+                                        @if (!string.IsNullOrEmpty(evt.location))
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-map-marker-alt"></i>
+                                                <span>@evt.location</span>
+                                            </div>
+                                        }
+                                        
+                                        @if (evt.event_type == "single" && evt.event_date.HasValue)
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-calendar"></i>
+                                                <span>@evt.event_date.Value.ToString("MMMM dd, yyyy")</span>
+                                            </div>
+                                        }
+                                        else if (evt.event_type == "range" && evt.from_date.HasValue && evt.to_date.HasValue)
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-calendar"></i>
+                                                <span>@evt.from_date.Value.ToString("MMM dd") - @evt.to_date.Value.ToString("MMM dd, yyyy")</span>
+                                            </div>
+                                        }
+                                        else if (evt.event_type == "daily")
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-calendar"></i>
+                                                <span>Daily Recurring</span>
+                                            </div>
+                                        }
+                                        
+                                        @if (evt.entry_amount > 0)
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-ticket-alt"></i>
+                                                <span>Entry: ₹@evt.entry_amount</span>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="event-detail-item text-success">
+                                                <i class="fas fa-gift"></i>
+                                                <span>Free Entry</span>
+                                            </div>
+                                        }
+                                        
+                                        @if (evt.slot_limit > 0)
+                                        {
+                                            <div class="event-detail-item">
+                                                <i class="fas fa-users"></i>
+                                                <span>Slots: @evt.remainingslot / @evt.slot_limit available</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+
+                                <div class="card-footer">
+                                    <a href="@baseUrl/user/events/@evt.id/book" class="action-btn primary">
+                                        <i class="fas fa-calendar-plus"></i>
+                                        Book Event
+                                    </a>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="empty-state">
+                        <div class="empty-icon">
+                            <i class="fas fa-calendar-times"></i>
+                        </div>
+                        <h3 class="empty-title">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "No events match your filters" : "No events available")
+                        </h3>
+                        <p class="empty-text">
+                            @(searchTerm != "" || selectedPrimaryType.HasValue ? "Try adjusting your search criteria or filters" : "Check back later for available events")
+                        </p>
+                        @if (searchTerm != "" || selectedPrimaryType.HasValue)
+                        {
+                            <button onclick="clearAllFilters('event')" class="empty-action-btn">
+                                Clear Filters
+                            </button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Modern CSS Reset and Base Styles */
+    * {
+        box-sizing: border-box;
+    }
+    
+    body {
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        line-height: 1.6;
+        color: #212121;
+        background-color: #f5f5f5;
+        margin: 0;
+        padding: 0;
+    }
+    
+    .explore-services-container {
+        max-width: 1400px;
+        margin: 0 auto;
+        padding: 24px 16px;
+    }
+    
+    /* Tabs Navigation */
+    .tabs-navigation {
+        background: white;
+        border-radius: 16px;
+        padding: 8px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        margin-bottom: 24px;
+    }
+    
+    .nav-tabs {
+        border-bottom: none;
+        margin: 0;
+    }
+    
+    .nav-tabs .nav-link {
+        color: #757575;
+        border: none;
+        border-bottom: 2px solid transparent;
+        padding: 1rem 2rem;
+        font-weight: 500;
+        font-size: 15px;
+        transition: all 0.3s ease;
+        background: transparent;
+    }
+    
+    .nav-tabs .nav-link:hover {
+        color: #1976D2;
+        border-bottom-color: rgba(25, 118, 210, 0.3);
+        background: rgba(25, 118, 210, 0.04);
+    }
+    
+    .nav-tabs .nav-link.active {
+        color: #1976D2;
+        background-color: transparent;
+        border-bottom-color: #1976D2;
+        font-weight: 600;
+    }
+    
+    .tab-content-wrapper {
+        background: white;
+        border-radius: 16px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    
+    /* Search and Filters Section */
+    .search-filters-section {
+        display: flex;
+        gap: 12px;
+        margin-bottom: 24px;
+        align-items: center;
+    }
+    
+    .search-form {
+        flex: 1;
+        display: flex;
+        gap: 8px;
+    }
+    
+    .search-input-container {
+        flex: 1;
+        position: relative;
+    }
+    
+    .search-icon {
+        position: absolute;
+        left: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+        color: #757575;
+        font-size: 18px;
+        z-index: 2;
+        pointer-events: none;
+    }
+    
+    .search-input {
+        width: 100%;
+        padding: 14px 16px 14px 50px;
+        border: 1px solid #E0E0E0;
+        border-radius: 12px;
+        font-size: 15px;
+        transition: all 0.3s ease;
+        background: white;
+        color: #212121;
+    }
+    
+    .search-input:focus {
+        outline: none;
+        border-color: #1976D2;
+        box-shadow: 0 0 0 4px rgba(25, 118, 210, 0.08);
+    }
+    
+    .clear-search-btn {
+        position: absolute;
+        right: 12px;
+        top: 50%;
+        transform: translateY(-50%);
+        background: #F5F5F5;
+        border: none;
+        border-radius: 50%;
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        color: #757575;
+        z-index: 3;
+    }
+    
+    .search-btn {
+        padding: 14px 24px;
+        background: #1976D2;
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        white-space: nowrap;
+    }
+    
+    .filter-toggle-btn {
+        padding: 14px 20px;
+        background: white;
+        border: 1px solid #E0E0E0;
+        border-radius: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #424242;
+    }
+    
+    /* Filters Panel */
+    .filters-panel {
+        background: white;
+        border-radius: 16px;
+        margin-bottom: 24px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        overflow: hidden;
+        max-height: 0;
+        opacity: 0;
+        transition: max-height 0.3s ease, opacity 0.3s ease, margin-bottom 0.3s ease;
+        border: 1px solid #F5F5F5;
+    }
+    
+    .filters-panel.show {
+        max-height: 1000px;
+        opacity: 1;
+        margin-bottom: 24px;
+    }
+    
+    .filters-content {
+        padding: 20px;
+    }
+    
+    .filters-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid #F5F5F5;
+    }
+    
+    .filters-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #1f2937;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin: 0;
+    }
+    
+    .close-filters-btn {
+        background: #f3f4f6;
+        border: none;
+        border-radius: 50%;
+        width: 40px;
+        height: 40px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+    }
+    
+    .filter-group {
+        margin-bottom: 20px;
+    }
+    
+    .filter-label {
+        display: block;
+        font-weight: 600;
+        color: #374151;
+        margin-bottom: 12px;
+    }
+    
+    .filter-tags {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    
+    .filter-tag {
+        padding: 10px 20px;
+        background: white;
+        border: 1.5px solid #E0E0E0;
+        border-radius: 24px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.3s ease;
+        color: #757575;
+        font-size: 14px;
+    }
+    
+    .filter-tag:hover {
+        border-color: #1976D2;
+        color: #1976D2;
+        background: rgba(25, 118, 210, 0.05);
+    }
+    
+    .filter-tag.active {
+        background: #1976D2;
+        color: white;
+        border-color: #1976D2;
+    }
+    
+    .clear-all-btn {
+        background: #ef4444;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 20px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 16px;
+    }
+    
+    /* Results */
+    .results-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 24px;
+    }
+    
+    .results-title {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #212121;
+        margin: 0;
+    }
+    
+    .results-count {
+        color: #1976D2;
+    }
+    
+    .refresh-btn {
+        background: white;
+        border: 1.5px solid #E0E0E0;
+        border-radius: 12px;
+        padding: 12px 20px;
+        font-weight: 500;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    /* Business Grid */
+    .business-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        gap: 24px;
+    }
+    
+    .business-card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        overflow: hidden;
+        transition: all 0.3s ease;
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .business-card:hover {
+        box-shadow: 0 12px 24px rgba(0, 0, 0, 0.12);
+        transform: translateY(-4px);
+    }
+    
+    .card-header {
+        padding: 24px;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+    }
+    
+    .business-logo {
+        width: 64px;
+        height: 64px;
+        border-radius: 12px;
+        overflow: hidden;
+        flex-shrink: 0;
+        border: 1px solid #E0E0E0;
+    }
+    
+    .logo-image {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .logo-placeholder {
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(135deg, #1976D2 0%, #1565C0 100%);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.5rem;
+        font-weight: 600;
+    }
+    
+    .business-info {
+        flex: 1;
+        min-width: 0;
+    }
+    
+    .business-name {
+        font-size: 1.25rem;
+        font-weight: 600;
+        color: #212121;
+        margin: 0 0 10px 0;
+    }
+    
+    .business-location {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: #757575;
+        font-size: 0.9375rem;
+        margin-bottom: 8px;
+    }
+    
+    .business-type-badge {
+        display: inline-block;
+        background: #E3F2FD;
+        color: #1976D2;
+        padding: 4px 12px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 500;
+    }
+    
+    .card-body {
+        padding: 0 24px 16px 24px;
+    }
+    
+    .business-address {
+        color: #757575;
+        font-size: 0.9375rem;
+    }
+    
+    .card-footer {
+        padding: 16px 24px 24px 24px;
+        display: flex;
+        gap: 12px;
+        margin-top: auto;
+        border-top: 1px solid #F5F5F5;
+    }
+    
+    .action-btn {
+        flex: 1;
+        padding: 12px 20px;
+        border-radius: 10px;
+        font-weight: 500;
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        transition: all 0.3s ease;
+        border: none;
+        cursor: pointer;
+    }
+    
+    .action-btn.secondary {
+        background: transparent;
+        color: #1976D2;
+        border: 1.5px solid #1976D2;
+    }
+    
+    .action-btn.primary {
+        background: #1976D2;
+        color: white;
+    }
+    
+    /* Service Card Styles */
+    .service-card .service-details {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .service-detail-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .detail-label {
+        color: #757575;
+        font-size: 0.9375rem;
+    }
+    
+    .price-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    
+    .original-price {
+        text-decoration: line-through;
+        color: #9E9E9E;
+        font-size: 0.875rem;
+    }
+    
+    .offer-price {
+        color: #4CAF50;
+        font-weight: 600;
+    }
+    
+    .current-price {
+        font-weight: 600;
+        color: #212121;
+    }
+    
+    .service-notes {
+        color: #757575;
+        font-size: 0.9375rem;
+        margin-top: 8px;
+    }
+    
+    /* Event Card Styles */
+    .event-card {
+        display: flex;
+        flex-direction: column;
+    }
+    
+    .event-image-container {
+        position: relative;
+        width: 100%;
+        height: 200px;
+        overflow: hidden;
+        background: #F5F5F5;
+    }
+    
+    .event-image {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .event-image-placeholder {
+        width: 100%;
+        height: 200px;
+        background: linear-gradient(135deg, #1976D2 0%, #1565C0 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+    }
+    
+    .event-image-placeholder i {
+        font-size: 4rem;
+        color: white;
+        opacity: 0.5;
+    }
+    
+    .event-type-badge {
+        position: absolute;
+        top: 12px;
+        right: 12px;
+        padding: 6px 12px;
+        border-radius: 12px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    
+    .card-content {
+        padding: 24px;
+        flex: 1;
+    }
+    
+    .event-description {
+        color: #757575;
+        font-size: 0.9375rem;
+        margin-bottom: 16px;
+    }
+    
+    .event-details {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    
+    .event-detail-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        color: #424242;
+        font-size: 0.9375rem;
+    }
+    
+    .text-success {
+        color: #4CAF50 !important;
+    }
+    
+    /* Empty State */
+    .empty-state {
+        text-align: center;
+        padding: 60px 32px;
+        background: white;
+        border-radius: 16px;
+    }
+    
+    .empty-icon {
+        font-size: 4rem;
+        color: #d1d5db;
+        margin-bottom: 16px;
+    }
+    
+    .empty-title {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #374151;
+        margin: 0 0 12px 0;
+    }
+    
+    .empty-text {
+        font-size: 1rem;
+        color: #6b7280;
+        margin: 0 0 24px 0;
+    }
+    
+    .empty-action-btn {
+        background: #1976D2;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 12px 24px;
+        font-weight: 500;
+        cursor: pointer;
+    }
+    
+    /* Error Message */
+    .error-message {
+        background: #fef2f2;
+        border: 2px solid #fecaca;
+        border-radius: 16px;
+        padding: 24px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 24px;
+    }
+    
+    .error-icon {
+        color: #ef4444;
+        font-size: 24px;
+    }
+    
+    .error-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        color: #991b1b;
+        margin: 0 0 8px 0;
+    }
+    
+    .error-text {
+        color: #b91c1c;
+        margin: 0;
+    }
+ 
+
+    /* Mobile Responsive Styles */
+    @@media (max-width: 768px) {
+        .explore-services-container {
+            padding: 16px 12px;
+        }
+
+        /* Scrollable Tabs */
+        .tabs-navigation {
+            padding: 4px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+
+        .nav-tabs {
+            flex-wrap: nowrap;
+            white-space: nowrap;
+        }
+
+        .nav-tabs .nav-link {
+            padding: 0.75rem 1.25rem;
+            font-size: 14px;
+        }
+
+        /* Stack Search and Filters */
+        .search-filters-section {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 16px;
+        }
+
+        .search-form {
+            flex-direction: column;
+        }
+
+        .search-btn {
+            justify-content: center;
+            width: 100%;
+        }
+
+        .filter-toggle-btn {
+            justify-content: center;
+            width: 100%;
+        }
+
+        /* Adjust Grid for Mobile */
+        .business-grid {
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        /* Card Adjustments */
+        .business-card {
+            border-radius: 12px;
+        }
+        
+        .card-header {
+            padding: 16px;
+        }
+
+        .business-logo {
+            width: 48px;
+            height: 48px;
+        }
+
+        .business-name {
+            font-size: 1.1rem;
+        }
+
+        .business-location {
+            font-size: 0.85rem;
+        }
+
+        .card-body {
+            padding: 0 16px 16px 16px;
+        }
+
+        .card-footer {
+            padding: 16px;
+            flex-direction: column;
+        }
+
+        .action-btn {
+            width: 100%;
+        }
+        
+        /* Filters Panel Mobile */
+        .filters-panel.show {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            z-index: 1050;
+            margin: 0;
+            border-radius: 0;
+            overflow-y: auto;
+        }
+        
+        .filters-content {
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filters-body {
+            flex: 1;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            padding: 40px 20px;
+        }
+        
+        .empty-icon {
+            font-size: 3rem;
+        }
+        
+        .empty-title {
+            font-size: 1.25rem;
+        }
+    }
+</style>
+
+<script>
+    let currentTab = '@activeTab';
+    
+    function setActiveTab(tab) {
+        currentTab = tab;
+        // Update URL without reload
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tab);
+        window.history.pushState({}, '', url);
+    }
+    
+    function toggleFilters(tab) {
+        const panelId = tab + 'FiltersPanel';
+        const panel = document.getElementById(panelId);
+        const btn = document.getElementById(tab + 'FilterBtn');
+        
+        if (panel && btn) {
+            const isVisible = panel.classList.contains('show');
+            if (isVisible) {
+                panel.classList.remove('show');
+                btn.classList.remove('active');
+            } else {
+                // Close all other panels
+                document.querySelectorAll('.filters-panel').forEach(p => p.classList.remove('show'));
+                document.querySelectorAll('.filter-toggle-btn').forEach(b => b.classList.remove('active'));
+                
+                panel.classList.add('show');
+                btn.classList.add('active');
+            }
+        }
+    }
+    
+    function selectPrimaryType(typeId, tab) {
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tab);
+        url.searchParams.set('primaryType', typeId);
+        url.searchParams.delete('secondaryType');
+        window.location.href = url.toString();
+    }
+    
+    function selectSecondaryType(typeId, tab) {
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tab);
+        url.searchParams.set('secondaryType', typeId);
+        window.location.href = url.toString();
+    }
+    
+    function clearAllFilters(tab) {
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tab);
+        url.searchParams.delete('search');
+        url.searchParams.delete('primaryType');
+        url.searchParams.delete('secondaryType');
+        window.location.href = url.toString();
+    }
+    
+    function clearSearch(tab) {
+        const url = new URL(window.location);
+        url.searchParams.set('tab', tab);
+        url.searchParams.delete('search');
+        window.location.href = url.toString();
+    }
+    
+    function refreshResults() {
+        window.location.reload();
+    }
+    
+    // Initialize Bootstrap tabs
+    document.addEventListener('DOMContentLoaded', function() {
+        // Tab switching
+        const tabButtons = document.querySelectorAll('[data-bs-toggle="tab"]');
+        tabButtons.forEach(button => {
+            button.addEventListener('shown.bs.tab', function (e) {
+                const tabId = e.target.getAttribute('data-bs-target').replace('#', '').replace('-content', '');
+                setActiveTab(tabId);
+            });
+        });
+    });
+</script>

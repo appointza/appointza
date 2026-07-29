@@ -1,0 +1,616 @@
+@model appointza.ViewModels.OrganizationIndexViewModel
+
+@{
+    Layout = null;
+    ViewData["Title"] = "Dynamic Template";
+    
+    // Basic Organization Info
+    var OrganizationName = Model.OrganizationName ?? "";
+    var OrganizationId = Model.OrganizationId;
+    var OrganizationLocationId = Model.OrganizationLocationId;
+    var LocationName = Model.LocationName ?? "";
+    
+    // Location Details
+    var Address = Model.Address ?? "";
+    var City = Model.City ?? "";
+    var State = Model.State ?? "";
+    var Pincode = Model.Pincode ?? "";
+    var Country = Model.Country ?? "";
+    var Latitude = Model.Latitude;
+    var Longitude = Model.Longitude;
+    var GoogleLocation = Model.GoogleLocation ?? "";
+    
+    // Organization Object Properties
+    var OrganisationId = Model.Organization?.organisationid ?? 0;
+    var OrganisationName = Model.Organization?.organisationname ?? "";
+    var OrganisationTagline = Model.Organization?.organisationtagline ?? "";
+    var OrganisationGstNumber = Model.Organization?.organisationgstnumber ?? "";
+    var OrganisationLogo = Model.Organization?.organisationlogo ?? 0;
+    var OrganisationPrimaryTypeCode = Model.Organization?.organisationprimarytypecode ?? "";
+    var OrganisationSecondaryTypeCode = Model.Organization?.organisationsecondarytypecode ?? "";
+    var OrganisationNotes = Model.Organization?.organisationnotes ?? "";
+    
+    // LocationDetail Object Properties
+    var LocationDetailId = Model.LocationDetail?.id ?? 0;
+    var LocationDetailName = Model.LocationDetail?.name ?? "";
+    var AddressLine1 = Model.LocationDetail?.addressline1 ?? "";
+    var AddressLine2 = Model.LocationDetail?.addressline2 ?? "";
+    var LocationDetailCity = Model.LocationDetail?.city ?? "";
+    var LocationDetailState = Model.LocationDetail?.state ?? "";
+    var LocationDetailCountry = Model.LocationDetail?.country ?? "";
+    var LocationDetailPincode = Model.LocationDetail?.pincode ?? "";
+    var LocationDetailLatitude = Model.LocationDetail?.latitude ?? 0;
+    var LocationDetailLongitude = Model.LocationDetail?.longitude ?? 0;
+    var LocationDetailGoogleLocation = Model.LocationDetail?.googlelocation ?? "";
+    var LocationDetailCustomUrl = Model.LocationDetail?.customurl ?? "";
+    var LocationImages = Model.LocationDetail?.images ?? new List<long>();
+    var LocationImagesCount = Model.LocationDetail?.images?.Count ?? 0;
+    // Facility List - raw IDs from OrganisationLocation.facility_list (stored as JSON array in database)
+    var FacilityList = Model.LocationDetail?.facility_list ?? new List<long>();
+    var FacilityListCount = Model.LocationDetail?.facility_list?.Count ?? 0;
+    
+    // Try to get mobile from attributes or use empty string
+    var LocationMobile = "";
+    if (Model.LocationDetail?.attributes != null)
+    {
+        try
+        {
+            var attributesJson = System.Text.Json.JsonSerializer.Serialize(Model.LocationDetail.attributes);
+            var attributesDict = System.Text.Json.JsonSerializer.Deserialize<System.Collections.Generic.Dictionary<string, object>>(attributesJson);
+            if (attributesDict != null && attributesDict.ContainsKey("mobile"))
+            {
+                LocationMobile = attributesDict["mobile"]?.ToString() ?? "";
+            }
+            else if (attributesDict != null && attributesDict.ContainsKey("phone"))
+            {
+                LocationMobile = attributesDict["phone"]?.ToString() ?? "";
+            }
+        }
+        catch
+        {
+            // If attributes parsing fails, try to get it directly
+            var attrs = Model.LocationDetail.attributes;
+            if (attrs != null)
+            {
+                var attrsType = attrs.GetType();
+                var mobileProp = attrsType.GetProperty("mobile");
+                if (mobileProp != null)
+                {
+                    LocationMobile = mobileProp.GetValue(attrs)?.ToString() ?? "";
+                }
+                else
+                {
+                    var phoneProp = attrsType.GetProperty("phone");
+                    if (phoneProp != null)
+                    {
+                        LocationMobile = phoneProp.GetValue(attrs)?.ToString() ?? "";
+                    }
+                }
+            }
+        }
+    }
+    
+    // Facilities Collection - displaytext strings from ReferenceValue
+    // These are converted from FacilityList IDs in HomeController.Index() 
+    // by querying ReferenceValue table using facility_list IDs
+    var Facilities = Model.Facilities ?? new List<string>();
+    var FacilitiesCount = Facilities.Count;
+    
+    // Services Collection
+    var Services = Model.Services?.Select(s => new {
+        Id = s.id,
+        ServiceName = s.Servicename ?? "",
+        Prize = s.prize,
+        TimeTaken = s.timetaken,
+        Notes = s.notes ?? ""
+    }).ToList<object>() ?? new List<object>();
+    var ServicesCount = Model.Services?.Count ?? 0;
+    
+    // Service Timing Collection
+    var timeFormat = "hh\\:mm";
+    var ServiceTiming = Model.ServiceTiming?.Select(t => new {
+        Id = t.id,
+        DayOfWeek = t.day_of_week,
+        StartTime = t.start_time.ToString(timeFormat),
+        EndTime = t.end_time.ToString(timeFormat),
+        OrganisationId = t.organisationid,
+        OrganisationLocationId = t.organisationlocationid
+    }).ToList<object>() ?? new List<object>();
+    var ServiceTimingCount = Model.ServiceTiming?.Count ?? 0;
+    
+    // Events Collection
+    // Debug: Log events count
+    System.Diagnostics.Debug.WriteLine($"Index.cshtml - Model.Events count: {Model.Events?.Count ?? 0}");
+    var Events = Model.Events?.Select(e => new {
+        Id = e.id,
+        EventName = e.event_name ?? "",
+        EventDate = e.event_date?.ToString("yyyy-MM-dd HH:mm:ss") ?? "",
+        FromDate = e.from_date?.ToString("yyyy-MM-dd") ?? "",
+        ToDate = e.to_date?.ToString("yyyy-MM-dd") ?? "",
+        Description = e.description ?? "",
+        EntryAmount = e.entry_amount,
+        RemainingSlot = e.remainingslot,
+        Status = e.status ?? "",
+        IsPublic = e.is_public,
+        ImageIds = e.images?.ImageIds ?? new List<long>(),
+        ImageIdsCount = e.images?.ImageIds?.Count ?? 0
+    }).ToList<object>() ?? new List<object>();
+    var EventsCount = Model.Events?.Count ?? 0;
+    System.Diagnostics.Debug.WriteLine($"Index.cshtml - Events transformed count: {EventsCount}");
+    
+    // Reviews Collection
+    var Reviews = Model.Reviews?.Select(r => new {
+        Id = r.id,
+        Rating = r.rating,
+        Comment = r.comment ?? "",
+        CreatedAt = r.created_at.ToString("yyyy-MM-dd HH:mm:ss"),
+        ServiceId = r.organisation_service_id ?? 0L,
+        EventId = r.event_id ?? 0L
+    }).ToList<object>() ?? new List<object>();
+    var ReviewsCount = Model.Reviews?.Count ?? 0;
+    
+    // Template Info
+    var HasTemplate = Model.HasTemplate;
+    var TemplateHtml = Model.TemplateHtml ?? "";
+    var TemplateHtmlLength = Model.TemplateHtml?.Length ?? 0;
+    
+    // Feature Flags
+    var HasServices = Model.HasServices;
+    var HasServiceTiming = Model.HasServiceTiming;
+    var HasEvents = Model.HasEvents;
+    var HasReviews = Model.HasReviews;
+    var HasFacilities = Model.HasFacilities;
+    var HasError = Model.HasError;
+    var Error = Model.Error ?? "";
+    
+    // Base URL for frontend (injected by BaseUrlViewDataFilter from appsettings.json)
+    var BaseUrl = ViewData["BaseUrl"]?.ToString() ?? $"{Context.Request.Scheme}://{Context.Request.Host}";
+}
+
+@if (Model.HasError)
+{
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Error - @Model.OrganizationName</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    </head>
+    <body>
+        <div class="container mt-5">
+            <div class="alert alert-danger">
+                <h4>Error</h4>
+                <p>@Model.Error</p>
+            </div>
+        </div>
+    </body>
+    </html>
+}
+else if (HasTemplate)
+{
+    @* Get HTML template from ReferenceValue and replace variables with stored values *@
+    var boundTemplate = TemplateHtml;
+    
+    // Replace simple placeholder values
+    boundTemplate = boundTemplate.Replace("{{organisationdetail.name}}", OrganizationName);
+    boundTemplate = boundTemplate.Replace("{{organisationdetail.tagline}}", OrganisationTagline);
+    boundTemplate = boundTemplate.Replace("{{organisationdetail.organisationlogo}}", OrganisationLogo.ToString());
+    boundTemplate = boundTemplate.Replace("{{organisationdetail.notes}}", OrganisationNotes);
+    boundTemplate = boundTemplate.Replace("{{organisation.notes}}", OrganisationNotes);
+    boundTemplate = boundTemplate.Replace("{{OrganisationNotes}}", OrganisationNotes);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.addressline1}}", Address);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.addressline2}}", AddressLine2);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.city}}", City);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.state}}", State);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.pincode}}", Pincode);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.country}}", Country);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.mobile}}", LocationMobile);
+    boundTemplate = boundTemplate.Replace("{{locationdetail.googlelocation}}", GoogleLocation);
+    boundTemplate = boundTemplate.Replace("{{BOOKNOWURL}}", $"{BaseUrl}/book-appointment/{OrganizationId}/{OrganizationLocationId}");
+    boundTemplate = boundTemplate.Replace("{{currentyear}}", DateTime.Now.Year.ToString());
+    boundTemplate = boundTemplate.Replace("{{organizationemail}}", "");
+    
+    // Bind organization logo
+    if (OrganisationLogo > 0)
+    {
+        boundTemplate = boundTemplate.Replace("{{#organizationlogo}}", "").Replace("{{/organizationlogo}}", "");
+        boundTemplate = boundTemplate.Replace("{{organisationdetail.organisationlogo}}", OrganisationLogo.ToString());
+    }
+    else
+    {
+        // Remove logo section if no logo
+        var logoStartMarker = "{{#organizationlogo}}";
+        var logoEndMarker = "{{/organizationlogo}}";
+        var logoStartIdx = boundTemplate.IndexOf(logoStartMarker);
+        var logoEndIdx = boundTemplate.IndexOf(logoEndMarker);
+        if (logoStartIdx >= 0 && logoEndIdx > logoStartIdx)
+        {
+            boundTemplate = boundTemplate.Substring(0, logoStartIdx) + boundTemplate.Substring(logoEndIdx + logoEndMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#organizationlogo}}", "").Replace("{{/organizationlogo}}", "");
+        }
+    }
+    
+    // Remove conditional section markers (template HTML structure is in DB)
+    boundTemplate = boundTemplate.Replace("{{#addressline2}}", "").Replace("{{/addressline2}}", "");
+    boundTemplate = boundTemplate.Replace("{{#country}}", "").Replace("{{/country}}", "");
+    boundTemplate = boundTemplate.Replace("{{#googlemaps}}", "").Replace("{{/googlemaps}}", "");
+    boundTemplate = boundTemplate.Replace("{{#coordinates}}", "").Replace("{{/coordinates}}", "");
+    boundTemplate = boundTemplate.Replace("{{#customurl}}", "").Replace("{{/customurl}}", "");
+    boundTemplate = boundTemplate.Replace("{{#gstnumber}}", "").Replace("{{/gstnumber}}", "");
+    
+    // Bind location images - extract template between markers and replace variables for each item
+    if (LocationImagesCount > 0)
+    {
+        var locationImagesStartMarker = "{{#locationimages}}";
+        var locationImagesEndMarker = "{{/locationimages}}";
+        var locationImagesStartIdx = boundTemplate.IndexOf(locationImagesStartMarker);
+        var locationImagesEndIdx = boundTemplate.IndexOf(locationImagesEndMarker);
+        
+        if (locationImagesStartIdx >= 0 && locationImagesEndIdx > locationImagesStartIdx)
+        {
+            var loopTemplate = boundTemplate.Substring(locationImagesStartIdx + locationImagesStartMarker.Length, locationImagesEndIdx - locationImagesStartIdx - locationImagesStartMarker.Length);
+            var locationImagesContent = string.Join("", LocationImages.Select(imageId => {
+                return loopTemplate.Replace("{{location_image_id}}", imageId.ToString());
+            }));
+            boundTemplate = boundTemplate.Substring(0, locationImagesStartIdx) + locationImagesContent + boundTemplate.Substring(locationImagesEndIdx + locationImagesEndMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#locationimages}}", "").Replace("{{/locationimages}}", "");
+        }
+    }
+    else
+    {
+        // Remove location images section if no images
+        var locationImagesStartMarker = "{{#locationimages}}";
+        var locationImagesEndMarker = "{{/locationimages}}";
+        var locationImagesStartIdx = boundTemplate.IndexOf(locationImagesStartMarker);
+        var locationImagesEndIdx = boundTemplate.IndexOf(locationImagesEndMarker);
+        if (locationImagesStartIdx >= 0 && locationImagesEndIdx > locationImagesStartIdx)
+        {
+            boundTemplate = boundTemplate.Substring(0, locationImagesStartIdx) + boundTemplate.Substring(locationImagesEndIdx + locationImagesEndMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#locationimages}}", "").Replace("{{/locationimages}}", "");
+        }
+    }
+    
+    // Bind services - extract template between markers and replace variables for each item
+    if (HasServices)
+    {
+        var startMarker = "{{#orgnaisatinservice}}";
+        var endMarker = "{{/orgnaisatinservice}}";
+        var startIdx = boundTemplate.IndexOf(startMarker);
+        var endIdx = boundTemplate.IndexOf(endMarker);
+        
+        if (startIdx >= 0 && endIdx > startIdx)
+        {
+            var loopTemplate = boundTemplate.Substring(startIdx + startMarker.Length, endIdx - startIdx - startMarker.Length);
+            var servicesContent = string.Join("", ((List<object>)Services).Cast<dynamic>().Select(service => {
+                var serviceTemplate = loopTemplate
+                    .Replace("{{Servicename}}", service.ServiceName?.ToString() ?? "")
+                    .Replace("{{prize}}", service.Prize?.ToString() ?? "0")
+                    .Replace("{{timetaken}}", service.TimeTaken?.ToString() ?? "0")
+                    .Replace("{{notes}}", service.Notes?.ToString() ?? "");
+                
+                // Handle service image - services don't have images, so remove the conditional
+                var serviceImageStartMarker = "{{#service_image_id}}";
+                var serviceImageEndMarker = "{{/service_image_id}}";
+                var serviceImageStartIdx = serviceTemplate.IndexOf(serviceImageStartMarker);
+                var serviceImageEndIdx = serviceTemplate.IndexOf(serviceImageEndMarker);
+                if (serviceImageStartIdx >= 0 && serviceImageEndIdx > serviceImageStartIdx)
+                {
+                    serviceTemplate = serviceTemplate.Substring(0, serviceImageStartIdx) + serviceTemplate.Substring(serviceImageEndIdx + serviceImageEndMarker.Length);
+                }
+                serviceTemplate = serviceTemplate.Replace("{{service_image_id}}", "");
+                
+                return serviceTemplate;
+            }));
+            boundTemplate = boundTemplate.Substring(0, startIdx) + servicesContent + boundTemplate.Substring(endIdx + endMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#orgnaisatinservice}}", "").Replace("{{/orgnaisatinservice}}", "");
+        }
+    }
+    else
+    {
+        boundTemplate = boundTemplate.Replace("{{#orgnaisatinservice}}", "").Replace("{{/orgnaisatinservice}}", "");
+    }
+    
+    // Bind service timings - extract template between markers and replace variables for each item
+    if (HasServiceTiming)
+    {
+        var dayNames = new[] { "", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+        var startMarker = "{{#OrganisationServiceTiming}}";
+        var endMarker = "{{/OrganisationServiceTiming}}";
+        var startIdx = boundTemplate.IndexOf(startMarker);
+        var endIdx = boundTemplate.IndexOf(endMarker);
+        
+        if (startIdx >= 0 && endIdx > startIdx)
+        {
+            var loopTemplate = boundTemplate.Substring(startIdx + startMarker.Length, endIdx - startIdx - startMarker.Length);
+            var timingsContent = string.Join("", ((List<object>)ServiceTiming).Cast<dynamic>().Select(timing => {
+                return loopTemplate
+                    .Replace("{{day_name}}", dayNames[timing.DayOfWeek])
+                    .Replace("{{day_of_week}}", timing.DayOfWeek?.ToString() ?? "")
+                    .Replace("{{start_time}}", timing.StartTime?.ToString() ?? "")
+                    .Replace("{{end_time}}", timing.EndTime?.ToString() ?? "");
+            }));
+            boundTemplate = boundTemplate.Substring(0, startIdx) + timingsContent + boundTemplate.Substring(endIdx + endMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#OrganisationServiceTiming}}", "").Replace("{{/OrganisationServiceTiming}}", "");
+        }
+    }
+    else
+    {
+        boundTemplate = boundTemplate.Replace("{{#OrganisationServiceTiming}}", "").Replace("{{/OrganisationServiceTiming}}", "");
+    }
+    
+    // Handle conditional events wrapper sections
+    // Support both {{#hasevents}} and {{#events.0}} patterns
+    // Process this BEFORE the events loop so the wrapper is handled correctly
+    
+    // Pattern 1: {{#hasevents}}...{{/hasevents}}
+    var hasEventsStartMarker = "{{#hasevents}}";
+    var hasEventsEndMarker = "{{/hasevents}}";
+    var hasEventsStartIdx = boundTemplate.IndexOf(hasEventsStartMarker);
+    var hasEventsEndIdx = boundTemplate.IndexOf(hasEventsEndMarker);
+    
+    if (hasEventsStartIdx >= 0 && hasEventsEndIdx > hasEventsStartIdx)
+    {
+        if (HasEvents)
+        {
+            // Events exist - remove the conditional markers but keep the content
+            var wrapperContent = boundTemplate.Substring(hasEventsStartIdx + hasEventsStartMarker.Length, 
+                                                         hasEventsEndIdx - hasEventsStartIdx - hasEventsStartMarker.Length);
+            boundTemplate = boundTemplate.Substring(0, hasEventsStartIdx) + 
+                          wrapperContent +
+                          boundTemplate.Substring(hasEventsEndIdx + hasEventsEndMarker.Length);
+        }
+        else
+        {
+            // No events - remove the entire section including wrapper HTML
+            boundTemplate = boundTemplate.Substring(0, hasEventsStartIdx) + 
+                          boundTemplate.Substring(hasEventsEndIdx + hasEventsEndMarker.Length);
+        }
+    }
+    
+    // Pattern 2: {{#events.0}}...{{/events.0}} - checks if first event exists
+    var events0StartMarker = "{{#events.0}}";
+    var events0EndMarker = "{{/events.0}}";
+    var events0StartIdx = boundTemplate.IndexOf(events0StartMarker);
+    var events0EndIdx = boundTemplate.IndexOf(events0EndMarker);
+    
+    if (events0StartIdx >= 0 && events0EndIdx > events0StartIdx)
+    {
+        if (HasEvents && EventsCount > 0)
+        {
+            // Events exist - remove the conditional markers but keep the content
+            var wrapperContent = boundTemplate.Substring(events0StartIdx + events0StartMarker.Length, 
+                                                         events0EndIdx - events0StartIdx - events0StartMarker.Length);
+            boundTemplate = boundTemplate.Substring(0, events0StartIdx) + 
+                          wrapperContent +
+                          boundTemplate.Substring(events0EndIdx + events0EndMarker.Length);
+        }
+        else
+        {
+            // No events - remove the entire section including wrapper HTML
+            boundTemplate = boundTemplate.Substring(0, events0StartIdx) + 
+                          boundTemplate.Substring(events0EndIdx + events0EndMarker.Length);
+        }
+    }
+    
+    // Bind events - extract template between markers and replace variables for each item
+    // Also handle {{#../events}} pattern (parent context reference - treat as {{#events}})
+    if (HasEvents)
+    {
+        System.Diagnostics.Debug.WriteLine($"Index.cshtml - Binding {EventsCount} events to template");
+        
+        // First, normalize {{#../events}} to {{#events}} for easier processing
+        boundTemplate = boundTemplate.Replace("{{#../events}}", "{{#events}}").Replace("{{/../events}}", "{{/events}}");
+        
+        var startMarker = "{{#events}}";
+        var endMarker = "{{/events}}";
+        var startIdx = boundTemplate.IndexOf(startMarker);
+        var endIdx = boundTemplate.IndexOf(endMarker);
+        
+        if (startIdx >= 0 && endIdx > startIdx)
+        {
+            var loopTemplate = boundTemplate.Substring(startIdx + startMarker.Length, endIdx - startIdx - startMarker.Length);
+            var eventsContent = string.Join("", ((List<object>)Events).Cast<dynamic>().Select((evt, index) => {
+                System.Diagnostics.Debug.WriteLine($"Index.cshtml - Processing event {index + 1}: {evt.EventName?.ToString() ?? "Unknown"}");
+                // Format dates to show only date part (YYYY-MM-DD)
+                string formattedEventDate = "";
+                string formattedFromDate = "";
+                string formattedToDate = "";
+                
+                if (!string.IsNullOrEmpty(evt.EventDate?.ToString()))
+                {
+                    if (DateTime.TryParse(evt.EventDate.ToString(), out DateTime eventDt))
+                    {
+                        formattedEventDate = eventDt.ToString("yyyy-MM-dd");
+                    }
+                    else
+                    {
+                        formattedEventDate = evt.EventDate.ToString();
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(evt.FromDate?.ToString()))
+                {
+                    if (DateTime.TryParse(evt.FromDate.ToString(), out DateTime fromDt))
+                    {
+                        formattedFromDate = fromDt.ToString("yyyy-MM-dd");
+                    }
+                    else
+                    {
+                        formattedFromDate = evt.FromDate.ToString();
+                    }
+                }
+                
+                if (!string.IsNullOrEmpty(evt.ToDate?.ToString()))
+                {
+                    if (DateTime.TryParse(evt.ToDate.ToString(), out DateTime toDt))
+                    {
+                        formattedToDate = toDt.ToString("yyyy-MM-dd");
+                    }
+                    else
+                    {
+                        formattedToDate = evt.ToDate.ToString();
+                    }
+                }
+                
+                var eventDate = !string.IsNullOrEmpty(formattedEventDate) ? formattedEventDate 
+                               : (!string.IsNullOrEmpty(formattedFromDate) && !string.IsNullOrEmpty(formattedToDate) 
+                                  ? $"{formattedFromDate} - {formattedToDate}" 
+                                  : (!string.IsNullOrEmpty(formattedFromDate) ? formattedFromDate : ""));
+                
+                var firstImageId = (evt.ImageIds != null && ((List<long>)evt.ImageIds).Any()) 
+                    ? ((List<long>)evt.ImageIds).First().ToString() 
+                    : "";
+                
+                var eventId = evt.Id?.ToString() ?? "0";
+                var eventBookUrl = $"{BaseUrl}/user/events/{eventId}/book";
+                
+                var eventTemplate = loopTemplate
+                    .Replace("{{event_name}}", evt.EventName?.ToString() ?? "")
+                    .Replace("{{event_date}}", eventDate)
+                    .Replace("{{from_date}}", formattedFromDate)
+                    .Replace("{{to_date}}", formattedToDate)
+                    .Replace("{{description}}", evt.Description?.ToString() ?? "")
+                    .Replace("{{entry_amount}}", evt.EntryAmount?.ToString() ?? "0")
+                    .Replace("{{remainingslot}}", evt.RemainingSlot?.ToString() ?? "0")
+                    .Replace("{{status}}", evt.Status?.ToString() ?? "")
+                    .Replace("{{event_image_id}}", firstImageId)
+                    .Replace("{{EVENTBOOKURL}}", eventBookUrl);
+                
+                // Handle event image conditional
+                if (!string.IsNullOrEmpty(firstImageId))
+                {
+                    eventTemplate = eventTemplate.Replace("{{#event_image_id}}", "").Replace("{{/event_image_id}}", "");
+                }
+                else
+                {
+                    var eventImageStartMarker = "{{#event_image_id}}";
+                    var eventImageEndMarker = "{{/event_image_id}}";
+                    var eventImageStartIdx = eventTemplate.IndexOf(eventImageStartMarker);
+                    var eventImageEndIdx = eventTemplate.IndexOf(eventImageEndMarker);
+                    if (eventImageStartIdx >= 0 && eventImageEndIdx > eventImageStartIdx)
+                    {
+                        eventTemplate = eventTemplate.Substring(0, eventImageStartIdx) + eventTemplate.Substring(eventImageEndIdx + eventImageEndMarker.Length);
+}
+else
+{
+                        eventTemplate = eventTemplate.Replace("{{#event_image_id}}", "").Replace("{{/event_image_id}}", "");
+                    }
+                }
+                
+                // Handle other conditionals
+                eventTemplate = eventTemplate.Replace("{{#description}}", string.IsNullOrEmpty(evt.Description?.ToString()) ? "" : "").Replace("{{/description}}", "");
+                eventTemplate = eventTemplate.Replace("{{#event_date}}", string.IsNullOrEmpty(evt.EventDate?.ToString()) ? "" : "").Replace("{{/event_date}}", "");
+                eventTemplate = eventTemplate.Replace("{{#from_date}}", string.IsNullOrEmpty(evt.FromDate?.ToString()) ? "" : "").Replace("{{/from_date}}", "");
+                eventTemplate = eventTemplate.Replace("{{#to_date}}", string.IsNullOrEmpty(evt.ToDate?.ToString()) ? "" : "").Replace("{{/to_date}}", "");
+                eventTemplate = eventTemplate.Replace("{{#entry_amount}}", (evt.EntryAmount == null || evt.EntryAmount.ToString() == "0") ? "" : "").Replace("{{/entry_amount}}", "");
+                eventTemplate = eventTemplate.Replace("{{#remainingslot}}", (evt.RemainingSlot == null || evt.RemainingSlot.ToString() == "0") ? "" : "").Replace("{{/remainingslot}}", "");
+                
+                return eventTemplate;
+            }));
+            boundTemplate = boundTemplate.Substring(0, startIdx) + eventsContent + boundTemplate.Substring(endIdx + endMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#events}}", "").Replace("{{/events}}", "");
+        }
+    }
+    else
+    {
+        boundTemplate = boundTemplate.Replace("{{#events}}", "").Replace("{{/events}}", "");
+    }
+    
+    // Bind reviews - extract template between markers and replace variables for each item
+    if (HasReviews)
+    {
+        var startMarker = "{{#reviews}}";
+        var endMarker = "{{/reviews}}";
+        var startIdx = boundTemplate.IndexOf(startMarker);
+        var endIdx = boundTemplate.IndexOf(endMarker);
+        
+        if (startIdx >= 0 && endIdx > startIdx)
+        {
+            var loopTemplate = boundTemplate.Substring(startIdx + startMarker.Length, endIdx - startIdx - startMarker.Length);
+            var reviewsContent = string.Join("", ((List<object>)Reviews).Cast<dynamic>().Select(review => {
+                var rating = (int)review.Rating;
+                var stars = "";
+                for (int i = 1; i <= 5; i++)
+                {
+                    stars += i <= rating ? "<i class=\"fas fa-star text-warning\"></i>" : "<i class=\"far fa-star text-muted\"></i>";
+                }
+                
+                return loopTemplate
+                    .Replace("{{rating}}", rating.ToString())
+                    .Replace("{{rating_stars}}", stars)
+                    .Replace("{{comment}}", review.Comment?.ToString() ?? "")
+                    .Replace("{{created_at}}", review.CreatedAt?.ToString() ?? "")
+                    .Replace("{{service_id}}", review.ServiceId?.ToString() ?? "")
+                    .Replace("{{event_id}}", review.EventId?.ToString() ?? "");
+            }));
+            boundTemplate = boundTemplate.Substring(0, startIdx) + reviewsContent + boundTemplate.Substring(endIdx + endMarker.Length);
+        }
+        else
+        {
+            boundTemplate = boundTemplate.Replace("{{#reviews}}", "").Replace("{{/reviews}}", "");
+        }
+    }
+    else
+    {
+        boundTemplate = boundTemplate.Replace("{{#reviews}}", "").Replace("{{/reviews}}", "");
+    }
+    
+    // Bind facilities - extract template between markers and replace variables for each item
+    // Data source: FacilityList (IDs) -> converted to Facilities (displaytext) in HomeController
+    // Template placeholders: {{facility_identifier}}, {{facility_displaytext}}, {{facility_identifier_lower}}
+    // If no facilities, remove the entire section (markers only - wrapper HTML should be inside markers in template)
+    var facilitiesStartMarker = "{{#facilities}}";
+    var facilitiesEndMarker = "{{/facilities}}";
+    var facilitiesStartIdx = boundTemplate.IndexOf(facilitiesStartMarker);
+    var facilitiesEndIdx = boundTemplate.IndexOf(facilitiesEndMarker);
+    
+    if (HasFacilities && facilitiesStartIdx >= 0 && facilitiesEndIdx > facilitiesStartIdx)
+    {
+        // Facilities exist - process the loop
+        // Facilities contains displaytext values from ReferenceValue table (queried using FacilityList IDs)
+        var loopTemplate = boundTemplate.Substring(facilitiesStartIdx + facilitiesStartMarker.Length, facilitiesEndIdx - facilitiesStartIdx - facilitiesStartMarker.Length);
+        var facilitiesContent = string.Join("", Facilities.Select(displaytext => {
+            var displaytextLower = displaytext.ToLower().Replace("_", "-").Replace(" ", "-");
+            return loopTemplate
+                .Replace("{{facility_identifier}}", displaytext)
+                .Replace("{{facility_displaytext}}", displaytext)
+                .Replace("{{facility_identifier_lower}}", displaytextLower);
+        }));
+        boundTemplate = boundTemplate.Substring(0, facilitiesStartIdx) + facilitiesContent + boundTemplate.Substring(facilitiesEndIdx + facilitiesEndMarker.Length);
+    }
+    else if (facilitiesStartIdx >= 0 && facilitiesEndIdx > facilitiesStartIdx)
+    {
+        // No facilities - remove everything between markers (including wrapper HTML if it's inside markers)
+        boundTemplate = boundTemplate.Substring(0, facilitiesStartIdx) + boundTemplate.Substring(facilitiesEndIdx + facilitiesEndMarker.Length);
+    }
+    else
+    {
+        // Markers not found or invalid - just remove markers if they exist
+        boundTemplate = boundTemplate.Replace("{{#facilities}}", "").Replace("{{/facilities}}", "");
+    }
+    
+    // Clean up any remaining unused placeholders
+    boundTemplate = boundTemplate.Replace("{{day_name}}", "");
+    boundTemplate = boundTemplate.Replace("{{#debug}}", "");
+    
+    @Html.Raw(boundTemplate)
+}

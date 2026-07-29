@@ -1,0 +1,129 @@
+import { ActionReq } from '../models/actionreq.model';
+import { ActionRes } from '../models/actionres.model';
+import {
+    Organisation,
+    OrganisationSelectReq,
+    OrganisationDeleteReq,
+    OrganisationDetail,
+    OrganisationReferralInfoRes,
+    OrganisationReferralSelectReq,
+    OrganisationReferralApplyReq,
+    OrganisationReferralApplyRes,
+} from '../models/organisation.model';
+import { AxiosHelperUtils } from '../utils/axioshelper.utils';
+import { environment } from '../utils/environment';
+
+export class OrganisationService {
+    http: AxiosHelperUtils;
+
+    constructor() {
+        this.http = new AxiosHelperUtils();
+    }
+
+    get baseurl(): string {
+        return environment.baseurl + '/api/Organisation';
+    }
+
+    async select(req: OrganisationSelectReq) {
+        let postdata: ActionReq<OrganisationSelectReq> = new ActionReq<OrganisationSelectReq>();
+        postdata.item = req;
+        console.log('📤 OrganisationService.select sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<Organisation[]>>(
+            this.baseurl + '/Select',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async insert(organisation: Organisation) {
+        let postdata: ActionReq<Organisation> = new ActionReq<Organisation>();
+        postdata.item = organisation;
+        console.log('📤 OrganisationService.insert sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<Organisation>>(
+            this.baseurl + '/Insert',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async update(organisation: Organisation) {
+        let postdata: ActionReq<Organisation> = new ActionReq<Organisation>();
+        postdata.item = organisation;
+        console.log('📤 OrganisationService.update sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<boolean>>(
+            this.baseurl + '/Update',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async delete(req: OrganisationDeleteReq) {
+        let postdata: ActionReq<OrganisationDeleteReq> = new ActionReq<OrganisationDeleteReq>();
+        postdata.item = req;
+        console.log('📤 OrganisationService.delete sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<boolean>>(
+            this.baseurl + '/Delete',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async selectOrganisationDetail(req: OrganisationSelectReq) {
+        let postdata: ActionReq<OrganisationSelectReq> = new ActionReq<OrganisationSelectReq>();
+        postdata.item = req;
+        console.log('📤 OrganisationService.selectOrganisationDetail sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<OrganisationDetail[]>>(
+            this.baseurl + '/SelectOrganisationDetail',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async findOrganisationByLocation(area: string, city: string, state: string) {
+        let postdata: ActionReq<any> = new ActionReq<any>();
+        postdata.item = { area, city, state };
+        console.log('📤 OrganisationService.findOrganisationByLocation sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<ActionRes<OrganisationDetail>>(
+            this.baseurl + '/FindOrganisationByLocation',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async getOrganisationBySubdomainLocation(area: string, city: string, state: string, organisation: string) {
+        let postdata = { area, city, state, organisation: organisation };
+        console.log('📤 OrganisationService.getOrganisationBySubdomainLocation sending:', JSON.stringify(postdata, null, 2));
+        let resp = await this.http.post<any>(
+            this.baseurl + '/GetOrganisationBySubdomainLocation',
+            postdata
+        );
+        return resp;
+    }
+
+    async getReferral(organisationId?: number) {
+        const postdata = new ActionReq<OrganisationReferralSelectReq>();
+        postdata.item = new OrganisationReferralSelectReq();
+        if (organisationId && organisationId > 0) {
+            postdata.item.organisation_id = organisationId;
+        }
+        const resp = await this.http.post<ActionRes<OrganisationReferralInfoRes>>(
+            this.baseurl + '/GetReferral',
+            postdata,
+        );
+        return resp.item;
+    }
+
+    async applyReferral(referralCode: string, organisationId?: number) {
+        const postdata = new ActionReq<OrganisationReferralApplyReq>();
+        postdata.item = new OrganisationReferralApplyReq();
+        postdata.item.referral_code = referralCode.trim();
+        if (organisationId && organisationId > 0) {
+            postdata.item.organisation_id = organisationId;
+        }
+        const resp = await this.http.post<ActionRes<OrganisationReferralApplyRes>>(
+            this.baseurl + '/ApplyReferral',
+            postdata,
+        );
+        return resp.item;
+    }
+}

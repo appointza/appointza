@@ -1,0 +1,16 @@
+﻿@{
+    Layout = "_Layout.cshtml";
+}
+<div class="container-fluid p-0">
+    <div class="d-flex flex-column">
+        @await Component.InvokeAsync("AppHeaderMobile")
+        <div class="container-fluid p-0">
+            @RenderBody()
+        </div>
+
+    </div>
+</div>
+
+
+
+
