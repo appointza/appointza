@@ -15,9 +15,48 @@ class PushNotificationService {
   private usersService: UsersService;
   private fcmToken: string | null = null;
   private isInitialized: boolean = false;
+  private lastSyncedUserId: number | null = null;
+  private lastSyncedToken: string | null = null;
 
   constructor() {
     this.usersService = new UsersService();
+  }
+
+  private syncStorageKey(userId: number): string {
+    return `appointza:push_token_sync:${userId}`;
+  }
+
+  private isAlreadySynced(userId: number, token: string): boolean {
+    if (this.lastSyncedUserId === userId && this.lastSyncedToken === token) {
+      return true;
+    }
+    try {
+      return sessionStorage.getItem(this.syncStorageKey(userId)) === token;
+    } catch {
+      return false;
+    }
+  }
+
+  private markSynced(userId: number, token: string): void {
+    this.lastSyncedUserId = userId;
+    this.lastSyncedToken = token;
+    try {
+      sessionStorage.setItem(this.syncStorageKey(userId), token);
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  /** Call on logout so the next login re-syncs the token once. */
+  clearSyncedToken(userId?: number): void {
+    this.lastSyncedUserId = null;
+    this.lastSyncedToken = null;
+    if (!userId) return;
+    try {
+      sessionStorage.removeItem(this.syncStorageKey(userId));
+    } catch {
+      // ignore
+    }
   }
 
   /**
@@ -319,6 +358,11 @@ class PushNotificationService {
       return false;
     }
 
+    if (this.isAlreadySynced(userId, this.fcmToken)) {
+      console.log('⏭️ Push token already synced for user — skipping UpdatePushToken');
+      return true;
+    }
+
     try {
       // Detect platform
       const platform = Capacitor.getPlatform();
@@ -338,6 +382,7 @@ class PushNotificationService {
       const saved = await this.usersService.UpdatePushToken(userId, this.fcmToken, platformName);
       
       if (saved) {
+        this.markSynced(userId, this.fcmToken);
         console.log('✅ FCM token saved successfully to server for user:', userId);
         return true;
       } else {

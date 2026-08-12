@@ -1,4 +1,6 @@
-import { useState, useEffect } from 'react';
+import {
+  ORG_SIDEBAR_WIDTH_CLASS,
+} from '@/utils/orgSidebar.util';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   CalendarDays,
@@ -7,9 +9,11 @@ import {
   LayoutGrid, 
   Users, 
   Package,
+  ConciergeBell,
   Settings,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Images,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
@@ -60,10 +64,15 @@ const SidebarLink = ({
   );
 };
 
-const OrganizationSidebar = () => {
+interface OrganizationSidebarProps {
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+}
+
+const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSidebarProps) => {
   const isMobile = useIsMobile();
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(false);
-  
+  const isCollapsed = collapsed;
+
   const getUserContext = () => {
     try {
       const userContextStr = localStorage.getItem('user_context');
@@ -85,16 +94,8 @@ const OrganizationSidebar = () => {
   const hasServicesAccess = !isStaff || (userpermission?.editandviewCreateService === true || userpermission?.editandviewCreateEvent === true);
   const hasClientsAccess = !isStaff || userpermission?.editandviewClients === true;
   
-  useEffect(() => {
-    const stored = localStorage.getItem('org_sidebar_collapsed');
-    setIsCollapsed(stored === '1');
-  }, []);
-
   const toggleCollapse = () => {
-    const next = !isCollapsed;
-    setIsCollapsed(next);
-    localStorage.setItem('org_sidebar_collapsed', next ? '1' : '0');
-    window.dispatchEvent(new CustomEvent('org-sidebar-toggle', { detail: { collapsed: next } }));
+    onCollapsedChange(!isCollapsed);
   };
 
   if (isMobile) {
@@ -105,7 +106,7 @@ const OrganizationSidebar = () => {
     <aside
       className={cn(
         "fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-blue-50 bg-gradient-to-b from-white via-white to-blue-50/40 shadow-[6px_0_30px_-20px_rgba(36,76,170,0.28)] lg:flex transition-all duration-200",
-        isCollapsed ? "w-[4.5rem]" : "w-64"
+        isCollapsed ? ORG_SIDEBAR_WIDTH_CLASS.collapsed : ORG_SIDEBAR_WIDTH_CLASS.expanded
       )}
     >
       <div
@@ -170,6 +171,16 @@ const OrganizationSidebar = () => {
           {hasClientsAccess && (
             <SidebarLink to="/organization/clients" icon={Users} collapsed={isCollapsed}>
               Customers
+            </SidebarLink>
+          )}
+          {!isStaff && (
+            <SidebarLink to="/organization/hospitality" icon={ConciergeBell} collapsed={isCollapsed}>
+              Hospitality
+            </SidebarLink>
+          )}
+          {!isStaff && (
+            <SidebarLink to="/organization/assets" icon={Images} collapsed={isCollapsed}>
+              Assets
             </SidebarLink>
           )}
         </div>

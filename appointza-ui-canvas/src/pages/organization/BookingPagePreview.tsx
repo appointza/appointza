@@ -12,9 +12,11 @@ import { OrganisationLocationService } from "@/services/organisationlocation.ser
 import { OrganisationService } from "@/services/organisation.service";
 import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
 import { Organisation, OrganisationSelectReq } from "@/models/organisation.model";
-import { getAppDomain } from "@/utils/environment";
-import { generateSubdomainUrl } from "@/utils/slug.util";
-import { buildOrganisationPublicSiteUrl } from "@/utils/orgPublicSiteUrl.util";
+import {
+  buildOrganisationTemplateBookingUrl,
+  buildOrganisationCustomUrlHost,
+  buildOrganisationPublicSiteOriginFromHost,
+} from "@/utils/orgPublicSiteUrl.util";
 
 const BookingPagePreview = () => {
   const { user, isAuthenticated } = useAuth();
@@ -29,7 +31,7 @@ const BookingPagePreview = () => {
   const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [encryptedUrl, setEncryptedUrl] = useState<string>('');
+  const [bookingUrl, setBookingUrl] = useState<string>('');
   const [isGeneratingUrl, setIsGeneratingUrl] = useState(false);
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [shareMessage, setShareMessage] = useState('');
@@ -114,21 +116,14 @@ const BookingPagePreview = () => {
 
   // Generate custom URL
   const generateCustomUrl = (location: OrganisationLocation) => {
-    if (!organisationDetails || !location) return '';
-    
-    return generateSubdomainUrl(
-      organisationDetails.name || 'organization',
-      location.name || 'area',
-      location.city || 'city',
-      location.state || 'state',
-      getAppDomain()
-    );
+    if (!location) return '';
+    return buildOrganisationCustomUrlHost({ customUrl: location.customurl });
   };
 
   // Generate encrypted URL when location changes
   useEffect(() => {
     if (selectedLocationId > 0) {
-      generateEncryptedUrl(selectedLocationId);
+      generateBookingUrl(selectedLocationId);
       
       // Generate custom URL
       const selectedLocation = locations.find(loc => loc.id === selectedLocationId);
@@ -137,32 +132,25 @@ const BookingPagePreview = () => {
         setCustomUrl(customUrlGenerated);
       }
     } else {
-      setEncryptedUrl('');
+      setBookingUrl('');
       setCustomUrl('');
     }
   }, [selectedLocationId, locations, organisationDetails]);
 
-  // Generate encrypted URL
-  const generateEncryptedUrl = async (locationId: number) => {
+  const generateBookingUrl = async (locationId: number) => {
     if (locationId > 0) {
       setIsGeneratingUrl(true);
       try {
         const selectedLocation = locations.find((loc) => loc.id === locationId);
-        const url = buildOrganisationPublicSiteUrl({
-          organisationName: organisationDetails?.name || "organization",
-          areaName: selectedLocation?.name || "area",
-          cityName: selectedLocation?.city || "city",
-          stateName: selectedLocation?.state || "state",
-          customUrl: selectedLocation?.customurl,
-        });
-        setEncryptedUrl(url);
+        const url = buildOrganisationTemplateBookingUrl(selectedLocation?.orgloctempid);
+        setBookingUrl(url);
         
         // Generate share message
         const locationName = selectedLocation?.city || 'this location';
         setShareMessage(`Book your appointment at ${locationName}!\n\nClick here to schedule: ${url}`);
       } catch (error) {
         console.error('Error generating encrypted URL:', error);
-        setEncryptedUrl('');
+        setBookingUrl('');
         toast({
           title: "Error",
           description: "Failed to generate booking URL",
@@ -172,15 +160,15 @@ const BookingPagePreview = () => {
         setIsGeneratingUrl(false);
       }
     } else {
-      setEncryptedUrl('');
+      setBookingUrl('');
     }
   };
 
   // Copy URL to clipboard
   const copyUrlToClipboard = async () => {
-    if (encryptedUrl) {
+    if (bookingUrl) {
       try {
-        await navigator.clipboard.writeText(encryptedUrl);
+        await navigator.clipboard.writeText(bookingUrl);
         toast({
           title: "URL Copied",
           description: "Booking URL has been copied to clipboard",
@@ -196,11 +184,13 @@ const BookingPagePreview = () => {
     }
   };
 
+  const customUrlOrigin = customUrl ? buildOrganisationPublicSiteOriginFromHost(customUrl) : "";
+
   // Copy custom URL to clipboard
   const copyCustomUrlToClipboard = async () => {
-    if (customUrl) {
+    if (customUrlOrigin) {
       try {
-        await navigator.clipboard.writeText(customUrl);
+        await navigator.clipboard.writeText(customUrlOrigin);
         toast({
           title: "Custom URL Copied",
           description: "Custom booking URL has been copied to clipboard",
@@ -218,7 +208,7 @@ const BookingPagePreview = () => {
 
   // Share URL
   const shareUrl = async () => {
-    if (encryptedUrl && navigator.share) {
+    if (bookingUrl && navigator.share) {
       try {
         const selectedLocation = locations.find(loc => loc.id === selectedLocationId);
         const locationName = selectedLocation?.city || 'this location';
@@ -226,7 +216,7 @@ const BookingPagePreview = () => {
         await navigator.share({
           title: 'Book Appointment - Appointza',
           text: `Book your appointment at ${locationName}!`,
-          url: encryptedUrl,
+          url: bookingUrl,
         });
       } catch (error) {
         console.error('Error sharing:', error);
@@ -347,7 +337,7 @@ const BookingPagePreview = () => {
                       <ExternalLink className="h-4 w-4 text-gray-500" />
                     )}
                     <span className="text-sm font-mono text-gray-700 flex-1">
-                      {encryptedUrl || 'Generating URL...'}
+                      {bookingUrl || 'Generating URL...'}
                     </span>
                   </div>
                 </div>
@@ -356,7 +346,7 @@ const BookingPagePreview = () => {
                 <div className="flex flex-wrap gap-3">
                   <Button
                     onClick={copyUrlToClipboard}
-                    disabled={!encryptedUrl || isGeneratingUrl}
+                    disabled={!bookingUrl || isGeneratingUrl}
                     variant="outline"
                     className="flex-1 md:flex-none"
                   >
@@ -366,7 +356,7 @@ const BookingPagePreview = () => {
                   
                   <Button
                     onClick={shareUrl}
-                    disabled={!encryptedUrl || isGeneratingUrl}
+                    disabled={!bookingUrl || isGeneratingUrl}
                     variant="outline"
                     className="flex-1 md:flex-none"
                   >
@@ -375,8 +365,8 @@ const BookingPagePreview = () => {
                   </Button>
 
                   <Button
-                    onClick={() => window.open(encryptedUrl, '_blank')}
-                    disabled={!encryptedUrl || isGeneratingUrl}
+                    onClick={() => window.open(bookingUrl, '_blank')}
+                    disabled={!bookingUrl || isGeneratingUrl}
                     variant="default"
                     className="flex-1 md:flex-none"
                   >
@@ -416,8 +406,8 @@ const BookingPagePreview = () => {
                       </Button>
                       
                       <Button
-                        onClick={() => window.open(`https://${customUrl}`, '_blank')}
-                        disabled={!customUrl}
+                        onClick={() => customUrlOrigin && window.open(customUrlOrigin, "_blank")}
+                        disabled={!customUrlOrigin}
                         variant="default"
                         size="sm"
                         className="bg-purple-600 hover:bg-purple-700"

@@ -78,9 +78,6 @@ export class OrganisationSubscriptionStatusRes {
   unpaid_bookings_count: number = 0;
   billing_mode: string = "subscription";
   wallet_credit_balance: number = 0;
-  wallet_free_bookings_used_this_month: number = 0;
-  wallet_free_bookings_remaining: number = 0;
-  wallet_free_bookings_per_month: number = 5;
   credits_per_booking: number = 1;
 }
 
@@ -134,12 +131,7 @@ export class CreditWalletStatusRes {
   organisation_id: number = 0;
   billing_mode: string = "subscription";
   wallet_credit_balance: number = 0;
-  wallet_free_bookings_used_this_month: number = 0;
-  wallet_free_bookings_remaining: number = 0;
-  wallet_free_bookings_per_month: number = 5;
-  monthly_free_credits_amount: number = 5;
-  monthly_free_credits_claimed: boolean = false;
-  can_claim_monthly_free_credits: boolean = true;
+  signup_free_credits: number = 50;
   credits_per_booking: number = 1;
   packs: CreditWalletPack[] = [];
   recent_transactions: CreditWalletTransaction[] = [];

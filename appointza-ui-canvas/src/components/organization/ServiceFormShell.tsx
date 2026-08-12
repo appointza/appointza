@@ -17,7 +17,9 @@ type ServiceFormShellProps = {
   description: string;
   icon?: ElementType;
   children: ReactNode;
-  footer: ReactNode;
+  footer?: ReactNode;
+  /** When true, renders only form fields (for use inside ResponsiveEditSheet). */
+  embedded?: boolean;
 };
 
 export function ServiceFormShell({
@@ -26,7 +28,12 @@ export function ServiceFormShell({
   icon: Icon,
   children,
   footer,
+  embedded = false,
 }: ServiceFormShellProps) {
+  if (embedded) {
+    return <div className="grid gap-5">{children}</div>;
+  }
+
   return (
     <Card className={cn(org.card, "overflow-hidden rounded-3xl border-stone-100")}>
       <CardHeader className="space-y-1 border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 md:p-6">
@@ -44,9 +51,11 @@ export function ServiceFormShell({
       </CardHeader>
       <CardContent className="space-y-5 p-5 md:p-6">
         {children}
-        <div className="flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end">
-          {footer}
-        </div>
+        {footer ?
+          <div className="flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end">
+            {footer}
+          </div>
+        : null}
       </CardContent>
     </Card>
   );

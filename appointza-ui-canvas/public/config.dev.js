@@ -6,10 +6,12 @@
       location.hostname === "127.0.0.1" ||
       location.hostname.endsWith(".localhost"));
   window.APP_CONFIG = {
-  baseurl: isLocal ? "http://localhost:5117" : "https://appointza.com",
-  templateBaseUrl: isLocal ? "http://localhost:5117/template" : "https://appointza.com/template",
+  baseurl: isLocal ? "https://appointza.com" : "https://appointza.com",
+  templateBaseUrl: isLocal ? "https://appointza.com/template" : "https://appointza.com/template",
   uiBaseUrl: isLocal ? "http://localhost:8083" : "https://appointza.com",
   marketingDomain: 'appointza.com',
+  /** Parent host for org subdomains — dev uses localhost:8083 when running Vite locally. */
+  domainname: isLocal ? 'localhost:8083' : 'appointza.com',
   
   // Environment
   production: false,

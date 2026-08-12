@@ -3,7 +3,7 @@
 # Output:
 #   appointzabuild/production/
 #     appointza.exe, appsettings.json, config.js
-#     wwwroot/appointza, wwwroot/campusza, wwwroot/webzys, wwwroot/appointzastay
+#     wwwroot/appointza, wwwroot/campusza, wwwroot/webzys, wwwroot/stay
 #
 # Usage:
 #   .\buildallacw.ps1
@@ -28,7 +28,7 @@ $wwwroot = Join-Path $out "wwwroot"
 $uiProjects = @(
     @{ Name = "Appointza"; Folder = "appointza-ui-canvas"; Segment = "appointza"; BasePath = "/appointza/" },
     @{ Name = "Campusza";  Folder = "campusza";           Segment = "campusza";  BasePath = "/campusza/" },
-    @{ Name = "AppointzaStay"; Folder = "appointzastay"; Segment = "appointzastay"; BasePath = "/appointzastay/" },
+    @{ Name = "AppointzaStay"; Folder = "appointzastay"; Segment = "stay"; BasePath = "/stay/" },
     @{ Name = "Webzys";    Folder = "Webzys";             Segment = "webzys";    BasePath = "/webzys/" }
 )
 
@@ -173,11 +173,26 @@ try {
                 if (Test-Path $rootConfig) {
                     Copy-Item -Path $rootConfig -Destination (Join-Path $target "config.js") -Force
                 }
+            } else {
+                # Stay / Campusza / Webzys: ship config.prod.js as config.js in the SPA folder
+                $prodConfig = Join-Path $projectPath "public\config.prod.js"
+                if (Test-Path $prodConfig) {
+                    Copy-Item -Path $prodConfig -Destination (Join-Path $target "config.js") -Force
+                }
             }
         }
 
         Write-Host ""
         Write-Host "All UI builds copied to appointzabuild\production\wwwroot\" -ForegroundColor Green
+
+        # Root index.html/assets steal /stay/ and /webzys/ via SPA fallback — keep only config.js at wwwroot root.
+        foreach ($junk in @("index.html", "assets", "vite.svg", "favicon.ico", "placeholder.svg", "robots.txt")) {
+            $junkPath = Join-Path $wwwroot $junk
+            if (Test-Path $junkPath) {
+                Remove-Item -Path $junkPath -Recurse -Force
+                Write-Host "Removed wwwroot/$junk (apps live under wwwroot/{appointza|campusza|webzys|stay}/)" -ForegroundColor Yellow
+            }
+        }
     }
 
     if (-not $SkipServer) {
@@ -203,7 +218,7 @@ try {
     Write-Host "Deploy folder: appointzabuild\production\" -ForegroundColor White
     Write-Host "  /appointza  -> Appointza UI" -ForegroundColor DarkGray
     Write-Host "  /campusza   -> Campusza UI" -ForegroundColor DarkGray
-    Write-Host "  /appointzastay -> AppointzaStay UI" -ForegroundColor DarkGray
+    Write-Host "  /stay         -> AppointzaStay UI" -ForegroundColor DarkGray
     Write-Host "  /webzys     -> Webzys UI" -ForegroundColor DarkGray
     Write-Host "  /api        -> shared API" -ForegroundColor DarkGray
     Write-Host ""

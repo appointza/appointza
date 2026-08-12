@@ -16,7 +16,8 @@ namespace appointza.Utils
             ByteArray,
             DateTimeOffset,
             Unknown, TimeSpan,
-            Time
+            Time,
+            Uuid
         }
     }
 }

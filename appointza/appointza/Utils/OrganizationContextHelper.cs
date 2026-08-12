@@ -45,15 +45,15 @@ namespace appointza.Utils
         }
 
         /// <summary>
-        /// Gets the location information from the request context
+        /// Gets the custom URL slug from the request context.
         /// </summary>
-        public static LocationInfo GetLocationInfo(HttpContext context)
+        public static string GetCustomUrlSlug(HttpContext context)
         {
-            if (context?.Items?.ContainsKey("LocationInfo") == true)
+            if (context?.Items?.ContainsKey("CustomUrlSlug") == true)
             {
-                return context.Items["LocationInfo"] as LocationInfo;
+                return context.Items["CustomUrlSlug"]?.ToString() ?? "";
             }
-            return new LocationInfo();
+            return "";
         }
 
         /// <summary>

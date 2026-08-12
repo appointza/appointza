@@ -168,22 +168,18 @@ namespace appointza.Controllers
             }
         }
 
-        [HttpPost("GetOrganisationBySubdomainLocation")]
-        public async Task<ActionResult<dynamic>> GetOrganisationBySubdomainLocation([FromBody] SubdomainLocationReq req)
+        [HttpPost("GetOrganisationByCustomUrl")]
+        public async Task<ActionResult<dynamic>> GetOrganisationByCustomUrl([FromBody] CustomUrlReq req)
         {
             try
             {
-                logger.LogInformation($"🔍 Getting organisation by subdomain: {req.organisation}-{req.area}-{req.city}-{req.state}");
+                logger.LogInformation($"🔍 Getting organisation by custom URL slug: {req.customUrl}");
 
-                var organisationDetail = await organisationService.GetOrganisationBySubdomainLocation(
-                    req.area,
-                    req.city,
-                    req.state,
-                    req.organisation);
+                var organisationDetail = await organisationService.GetOrganisationByCustomUrl(req.customUrl);
 
                 if (organisationDetail == null)
                 {
-                    logger.LogWarning($"⚠️ Organisation not found for subdomain");
+                    logger.LogWarning("⚠️ Organisation not found for custom URL slug");
                     return NotFound(new { error = "Organisation not found" });
                 }
 
@@ -198,7 +194,7 @@ namespace appointza.Controllers
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error getting organisation by subdomain location");
+                logger.LogError(ex, "Error getting organisation by custom URL");
                 return BadRequest(new { error = $"Error: {ex.Message}" });
             }
         }

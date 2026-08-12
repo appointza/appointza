@@ -8,18 +8,17 @@ namespace appointza.Services
 {
     public class OrganisationReferralService
     {
-        const int ReferralBonusMonths = 1;
         const string CodePrefix = "APZ-";
 
         readonly IDbProvider dbprovider;
-        readonly OrganisationSubscriptionService organisationSubscriptionService;
+        readonly CreditWalletService creditWalletService;
 
         public OrganisationReferralService(
             IDbProvider dbprovider,
-            OrganisationSubscriptionService organisationSubscriptionService)
+            CreditWalletService creditWalletService)
         {
             this.dbprovider = dbprovider;
-            this.organisationSubscriptionService = organisationSubscriptionService;
+            this.creditWalletService = creditWalletService;
         }
 
         public async Task<OrganisationReferralInfoRes> GetReferralInfo(long organisationId)
@@ -44,7 +43,7 @@ namespace appointza.Services
             {
                 referral_code = code,
                 successful_referrals = count,
-                bonus_months_per_referral = ReferralBonusMonths,
+                bonus_credits_per_referral = CreditWalletCatalog.ReferralBonusCredits,
                 referral_already_applied = alreadyApplied,
                 can_apply_referral_code = !alreadyApplied,
             };
@@ -251,13 +250,13 @@ namespace appointza.Services
                 INSERT INTO organisation_referral_rewards (
                     referrer_organisation_id,
                     referred_organisation_id,
-                    bonus_months,
+                    bonus_credits,
                     created_at
                 )
                 VALUES (
                     @referrer_organisation_id,
                     @referred_organisation_id,
-                    @bonus_months,
+                    @bonus_credits,
                     @created_at
                 )
                 ON CONFLICT (referred_organisation_id) DO NOTHING";
@@ -265,7 +264,7 @@ namespace appointza.Services
             DbCommand rewardCmd = db.GetCommand(insertReward);
             db.AddParameter(rewardCmd, "referrer_organisation_id", DbTypes.Types.Long).Value = referrerId;
             db.AddParameter(rewardCmd, "referred_organisation_id", DbTypes.Types.Long).Value = newOrganisationId;
-            db.AddParameter(rewardCmd, "bonus_months", DbTypes.Types.Integer).Value = ReferralBonusMonths;
+            db.AddParameter(rewardCmd, "bonus_credits", DbTypes.Types.Integer).Value = CreditWalletCatalog.ReferralBonusCredits;
             db.AddParameter(rewardCmd, "created_at", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
             int rewardRows = await db.ExecuteNonQuery(rewardCmd);
             if (rewardRows <= 0)
@@ -273,10 +272,11 @@ namespace appointza.Services
                 return false;
             }
 
-            await organisationSubscriptionService.ExtendFreePeriodByMonthsTransaction(
+            await creditWalletService.GrantReferralBonusTransaction(
                 db,
                 referrerId,
-                ReferralBonusMonths);
+                newOrganisationId,
+                CreditWalletCatalog.ReferralBonusCredits);
 
             return true;
         }

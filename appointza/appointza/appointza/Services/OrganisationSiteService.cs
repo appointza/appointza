@@ -1,4 +1,5 @@
 using appointza.Models;
+using appointza.Models.Hospitality;
 using appointza.Utils;
 using System.Data.Common;
 
@@ -9,12 +10,21 @@ namespace appointza.Services
         IDbProvider dbprovider;
         IQueryBuilderProvider querybuilderprovider;
         RequestState requeststate;
+        readonly OrganisationHospitalityContentService hospitalityContentService;
+        readonly OrganisationRoomService organisationRoomService;
 
-        public OrganisationSiteService(IDbProvider dbprovider, IQueryBuilderProvider querybuilderprovider, RequestState requeststate)
+        public OrganisationSiteService(
+            IDbProvider dbprovider,
+            IQueryBuilderProvider querybuilderprovider,
+            RequestState requeststate,
+            OrganisationHospitalityContentService hospitalityContentService,
+            OrganisationRoomService organisationRoomService)
         {
             this.dbprovider = dbprovider;
             this.querybuilderprovider = querybuilderprovider;
             this.requeststate = requeststate;
+            this.hospitalityContentService = hospitalityContentService;
+            this.organisationRoomService = organisationRoomService;
         }
 
         public async Task<List<OrganisationSite>> Select(OrganisationSiteSelectReq req)
@@ -193,6 +203,7 @@ namespace appointza.Services
                   ol.longitude,
                   ol.googlelocation,
                   ol.pincode,
+                  ol.orgloctempid AS location_orgloctempid,
                   ol.images AS location_images,
                   ol.version AS location_version,
                   ol.createdby AS location_createdby,
@@ -319,6 +330,7 @@ namespace appointza.Services
                                 longitude = reader["longitude"] == DBNull.Value ? 0 : Convert.ToDouble(reader["longitude"]),
                                 googlelocation = reader["googlelocation"] == DBNull.Value ? "" : reader["googlelocation"].ToString(),
                                 pincode = reader["pincode"] == DBNull.Value ? "" : reader["pincode"].ToString(),
+                                orgloctempid = reader["location_orgloctempid"] == DBNull.Value ? "" : reader["location_orgloctempid"].ToString(),
                                 templateid = reader["templateid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["templateid"]),
                                 images_json = reader["location_images"] == DBNull.Value ? "[]" : reader["location_images"].ToString(),
                                 version = reader["location_version"] == DBNull.Value ? 0 : Convert.ToInt32(reader["location_version"]),
@@ -474,7 +486,54 @@ namespace appointza.Services
             }
             
             result = locationGroups.Values.ToList();
+            await EnrichHospitalityDataTransaction(db, result);
             return result;
+        }
+
+        async Task EnrichHospitalityDataTransaction(IDb db, List<Sitedetails> sites)
+        {
+            foreach (var site in sites)
+            {
+                var orgId = site.organisationdetail?.id ?? site.locationdetail?.organisationid ?? 0;
+                var locId = site.locationdetail?.id ?? 0;
+                if (orgId <= 0)
+                    continue;
+
+                try
+                {
+                    site.hospitality_profile = await hospitalityContentService.GetProfileTransaction(db, orgId);
+                }
+                catch
+                {
+                    site.hospitality_profile = null;
+                }
+
+                if (locId <= 0)
+                {
+                    site.hospitality_rooms = [];
+                    continue;
+                }
+
+                try
+                {
+                    site.hospitality_rooms = await organisationRoomService.SelectTransaction(db, new OrganisationRoomSelectReq
+                    {
+                        organisation_id = orgId,
+                        organisation_location_id = locId,
+                    });
+                    foreach (var room in site.hospitality_rooms)
+                    {
+                        room.guest = null;
+                        room.booking = null;
+                        room.payment = null;
+                        room.cleaning_assignment = null;
+                    }
+                }
+                catch
+                {
+                    site.hospitality_rooms = [];
+                }
+            }
         }
     }
 } 

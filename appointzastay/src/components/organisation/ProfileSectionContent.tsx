@@ -60,6 +60,141 @@ import { buildPropertyWebsiteUrl, getDomainSuffix, getSubdomainParentHost } from
 
 const DOMAIN_SUFFIX = getDomainSuffix();
 
+function bookingTypeLabel(value: string): string {
+  return value === "hourly" ? "Hourly (per hour / slots)" : "Overnight (per night)";
+}
+
+function PoliciesEditForm({
+  org,
+  footer,
+  onSavePolicies,
+}: {
+  org: Record<string, unknown>;
+  footer: ReactNode;
+  onSavePolicies: (payload: Record<string, unknown>) => void;
+}) {
+  const rules = orgObj(org, "rules");
+  const houseRules = orgList<string>(rules as Record<string, unknown>, "houseRules");
+  const [bookingType, setBookingType] = useState(
+    () => orgStr(org, "bookingType") || "overnight",
+  );
+
+  return (
+    <ProfileForm
+      onSubmit={(e) => {
+        e.preventDefault();
+        const fd = new FormData(e.currentTarget);
+        const type = String(fd.get("bookingType") || "overnight");
+        onSavePolicies({
+          bookingType: type,
+          minimumHours: type === "hourly" ? Number(fd.get("minimumHours") || 2) : 0,
+          checkInTime: fd.get("checkInTime"),
+          checkOutTime: fd.get("checkOutTime"),
+          overnightTimeMode: fd.get("overnightTimeMode"),
+          cancellationPolicy: fd.get("cancellationPolicy"),
+          paymentPolicy: fd.get("paymentPolicy"),
+          petPolicy: fd.get("petPolicy"),
+          idProofRequired: fd.get("idProofRequired"),
+          refundPolicy: fd.get("refundPolicy"),
+          houseRules: fd.get("houseRules"),
+        });
+      }}
+    >
+      <ProfileFields>
+        <div className="span-2">
+          <FieldLabel info="Overnight: guests book by check-in / check-out nights. Hourly: guests book a date with start and end time — use for party halls and short slots. Saved on your organisation profile.">
+            Booking type
+          </FieldLabel>
+          <select
+            name="bookingType"
+            className="org-profile-input"
+            value={bookingType}
+            onChange={(e) => setBookingType(e.target.value)}
+          >
+            <option value="overnight">Overnight (per night)</option>
+            <option value="hourly">Hourly (per hour / slots)</option>
+          </select>
+        </div>
+        {bookingType === "hourly" ? (
+          <div>
+            <FieldLabel info="Shortest slot guests can book (in hours). Example: 2 if the hall must be rented for at least 2 hours.">
+              Minimum hours
+            </FieldLabel>
+            <ProfileInput
+              name="minimumHours"
+              type="number"
+              min={1}
+              defaultValue={String(org.minimumHours ?? 2)}
+            />
+          </div>
+        ) : null}
+        <div>
+          <FieldLabel info="Standard arrival time for overnight stays (e.g. 14:00). Guests see this on your site and booking confirmation.">
+            Check-in time
+          </FieldLabel>
+          <ProfileInput name="checkInTime" defaultValue={orgStr(org, "checkInTime")} placeholder="14:00" />
+        </div>
+        <div>
+          <FieldLabel info="Standard departure time for overnight stays (e.g. 11:00). Late checkout can be handled as a special request.">
+            Check-out time
+          </FieldLabel>
+          <ProfileInput name="checkOutTime" defaultValue={orgStr(org, "checkOutTime")} placeholder="11:00" />
+        </div>
+        <div className="span-2">
+          <FieldLabel info="Fixed: booking form locks to your check-in/out times. Dynamic: guests may pick different times. Only applies to overnight booking type — hourly always uses start/end time.">
+            Overnight times (booking form)
+          </FieldLabel>
+          <select
+            name="overnightTimeMode"
+            className="org-profile-input"
+            defaultValue={orgStr(org, "overnightTimeMode") || "fixed"}
+          >
+            <option value="fixed">Fixed — guests use these times only</option>
+            <option value="dynamic">Dynamic — guests can change times</option>
+          </select>
+        </div>
+        <div className="span-2">
+          <FieldLabel info="Explain when guests can cancel and any fees (e.g. free cancel until 24 hours before check-in). Shown on your public page and booking flow.">
+            Cancellation policy
+          </FieldLabel>
+          <ProfileTextarea name="cancellationPolicy" rows={3} defaultValue={orgStr(org, "cancellationPolicy")} />
+        </div>
+        <div className="span-2">
+          <FieldLabel info="How and when guests pay — advance, deposit, full amount at check-in, accepted methods (UPI, card, cash), etc.">
+            Payment policy
+          </FieldLabel>
+          <ProfileTextarea name="paymentPolicy" rows={3} defaultValue={orgStr(org, "paymentPolicy")} />
+        </div>
+        <div>
+          <FieldLabel info="Are pets allowed? Add any limits (size, breed, fee). Example: “Pets not allowed” or “Small pets welcome with prior notice”.">
+            Pet policy
+          </FieldLabel>
+          <ProfileInput name="petPolicy" defaultValue={String(rules.petPolicy || "")} />
+        </div>
+        <div>
+          <FieldLabel info="What ID guests must show at check-in (e.g. Aadhaar, passport, driving licence). Example: “Government photo ID required”.">
+            ID proof required
+          </FieldLabel>
+          <ProfileInput name="idProofRequired" defaultValue={String(rules.idProofRequired || "")} />
+        </div>
+        <div className="span-2">
+          <FieldLabel info="When refunds are given and how long they take. Can overlap with cancellation — keep it clear for guests.">
+            Refund policy
+          </FieldLabel>
+          <ProfileTextarea name="refundPolicy" rows={2} defaultValue={String(rules.refundPolicy || "")} />
+        </div>
+        <div className="span-2">
+          <FieldLabel info="Property rules guests should follow. Enter one rule per line (e.g. No smoking indoors, Quiet hours after 10 PM).">
+            House rules (one per line)
+          </FieldLabel>
+          <ProfileTextarea name="houseRules" rows={4} defaultValue={houseRules.join("\n")} />
+        </div>
+      </ProfileFields>
+      {footer}
+    </ProfileForm>
+  );
+}
+
 function BasicInfoEditForm({
   org,
   footer,
@@ -549,96 +684,25 @@ export function ProfileSectionContent(props: ProfileSectionContentProps) {
     if (editing) {
       return (
         <ProfileCard id="policies" title="Check-in & policies" saved={saved}>
-          <ProfileForm
-            onSubmit={(e) => {
-              e.preventDefault();
-              const fd = new FormData(e.currentTarget);
-              void save(() =>
-                stayApi.organisation.savePolicies({
-                  checkInTime: fd.get("checkInTime"),
-                  checkOutTime: fd.get("checkOutTime"),
-                  overnightTimeMode: fd.get("overnightTimeMode"),
-                  cancellationPolicy: fd.get("cancellationPolicy"),
-                  paymentPolicy: fd.get("paymentPolicy"),
-                  petPolicy: fd.get("petPolicy"),
-                  idProofRequired: fd.get("idProofRequired"),
-                  refundPolicy: fd.get("refundPolicy"),
-                  houseRules: fd.get("houseRules"),
-                })
-              );
-            }}
-          >
-            <ProfileFields>
-              <div>
-                <FieldLabel info="Standard arrival time for overnight stays (e.g. 14:00). Guests see this on your site and booking confirmation.">
-                  Check-in time
-                </FieldLabel>
-                <ProfileInput name="checkInTime" defaultValue={orgStr(org, "checkInTime")} placeholder="14:00" />
-              </div>
-              <div>
-                <FieldLabel info="Standard departure time for overnight stays (e.g. 11:00). Late checkout can be handled as a special request.">
-                  Check-out time
-                </FieldLabel>
-                <ProfileInput name="checkOutTime" defaultValue={orgStr(org, "checkOutTime")} placeholder="11:00" />
-              </div>
-              <div className="span-2">
-                <FieldLabel info="Fixed: booking form locks to your check-in/out times. Dynamic: guests may pick different times. Only applies to overnight booking type — hourly always uses start/end time.">
-                  Overnight times (booking form)
-                </FieldLabel>
-                <select
-                  name="overnightTimeMode"
-                  className="org-profile-input"
-                  defaultValue={orgStr(org, "overnightTimeMode") || "fixed"}
-                >
-                  <option value="fixed">Fixed — guests use these times only</option>
-                  <option value="dynamic">Dynamic — guests can change times</option>
-                </select>
-              </div>
-              <div className="span-2">
-                <FieldLabel info="Explain when guests can cancel and any fees (e.g. free cancel until 24 hours before check-in). Shown on your public page and booking flow.">
-                  Cancellation policy
-                </FieldLabel>
-                <ProfileTextarea name="cancellationPolicy" rows={3} defaultValue={orgStr(org, "cancellationPolicy")} />
-              </div>
-              <div className="span-2">
-                <FieldLabel info="How and when guests pay — advance, deposit, full amount at check-in, accepted methods (UPI, card, cash), etc.">
-                  Payment policy
-                </FieldLabel>
-                <ProfileTextarea name="paymentPolicy" rows={3} defaultValue={orgStr(org, "paymentPolicy")} />
-              </div>
-              <div>
-                <FieldLabel info="Are pets allowed? Add any limits (size, breed, fee). Example: “Pets not allowed” or “Small pets welcome with prior notice”.">
-                  Pet policy
-                </FieldLabel>
-                <ProfileInput name="petPolicy" defaultValue={String(rules.petPolicy || "")} />
-              </div>
-              <div>
-                <FieldLabel info="What ID guests must show at check-in (e.g. Aadhaar, passport, driving licence). Example: “Government photo ID required”.">
-                  ID proof required
-                </FieldLabel>
-                <ProfileInput name="idProofRequired" defaultValue={String(rules.idProofRequired || "")} />
-              </div>
-              <div className="span-2">
-                <FieldLabel info="When refunds are given and how long they take. Can overlap with cancellation — keep it clear for guests.">
-                  Refund policy
-                </FieldLabel>
-                <ProfileTextarea name="refundPolicy" rows={2} defaultValue={String(rules.refundPolicy || "")} />
-              </div>
-              <div className="span-2">
-                <FieldLabel info="Property rules guests should follow. Enter one rule per line (e.g. No smoking indoors, Quiet hours after 10 PM).">
-                  House rules (one per line)
-                </FieldLabel>
-                <ProfileTextarea name="houseRules" rows={4} defaultValue={houseRules.join("\n")} />
-              </div>
-            </ProfileFields>
-            {footer}
-          </ProfileForm>
+          <PoliciesEditForm
+            org={org}
+            footer={footer}
+            onSavePolicies={(payload) =>
+              void save(() => stayApi.organisation.savePolicies(payload))
+            }
+          />
         </ProfileCard>
       );
     }
     return (
       <ProfileCard id="policies" title="Check-in & policies" saved={saved}>
         <ProfileDl>
+          <ProfileDlRow label="Booking type">
+            {bookingTypeLabel(orgStr(org, "bookingType") || "overnight")}
+          </ProfileDlRow>
+          {orgStr(org, "bookingType") === "hourly" ?
+            <ProfileDlRow label="Minimum hours">{dash(org.minimumHours)}</ProfileDlRow>
+          : null}
           <ProfileDlRow label="Check-in">{dash(org.checkInTime)}</ProfileDlRow>
           <ProfileDlRow label="Check-out">{dash(org.checkOutTime)}</ProfileDlRow>
           <ProfileDlRow label="Overnight times">
@@ -704,7 +768,7 @@ export function ProfileSectionContent(props: ProfileSectionContentProps) {
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   Saved automatically from your subdomain on this environment (e.g.{" "}
-                  {subdomain ? buildPropertyWebsiteUrl(subdomain) : "https://myhotel.localhost:8088/appointzastay/"}).
+                  {subdomain ? buildPropertyWebsiteUrl(subdomain) : `${window.location.protocol}//myhotel.localhost:${window.location.port || "5001"}/`}).
                 </p>
               </div>
             </ProfileFields>

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Images, Link2, Loader2, Plus, Save, Trash2, Upload, Video } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Images, Link2, Loader2, Plus, Save, Trash2, Video } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,7 +12,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { FilesService } from "@/services/files.service";
+import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import {
   OrganisationLocation,
@@ -34,14 +34,11 @@ export default function LocationTemplateMediaDialog({
   onSaved,
 }: LocationTemplateMediaDialogProps) {
   const { toast } = useToast();
-  const filesService = useMemo(() => new FilesService(), []);
   const locationService = useMemo(() => new OrganisationLocationService(), []);
-  const inputRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
   const [imageIds, setImageIds] = useState<number[]>([]);
   const [videoUrls, setVideoUrls] = useState<string[]>([]);
   const [videoInput, setVideoInput] = useState("");
-  const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -78,38 +75,6 @@ export default function LocationTemplateMediaDialog({
         description: "Use a complete http or https URL.",
         variant: "destructive",
       });
-    }
-  };
-
-  const uploadImages = async (files: FileList) => {
-    const selected = Array.from(files).filter((file) => file.type.startsWith("image/"));
-    if (!selected.length) {
-      toast({ title: "Choose image files", variant: "destructive" });
-      return;
-    }
-    if (selected.some((file) => file.size > 5 * 1024 * 1024)) {
-      toast({
-        title: "Image too large",
-        description: "Each image must be 5 MB or smaller.",
-        variant: "destructive",
-      });
-      return;
-    }
-    if (imageIds.length + selected.length > MAX_IMAGES) {
-      toast({ title: `Maximum ${MAX_IMAGES} gallery images`, variant: "destructive" });
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const ids = (await filesService.upload(selected)) ?? [];
-      if (!ids.length) throw new Error("No uploaded file IDs returned");
-      setImageIds((current) => [...new Set([...current, ...ids])]);
-      toast({ title: `${ids.length} image${ids.length === 1 ? "" : "s"} uploaded` });
-    } catch {
-      toast({ title: "Image upload failed", variant: "destructive" });
-    } finally {
-      setUploading(false);
     }
   };
 
@@ -155,72 +120,14 @@ export default function LocationTemplateMediaDialog({
 
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
           <section className="space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <Label className="flex items-center gap-2">
-                  <Images className="h-4 w-4 text-orange-600" />
-                  Gallery images
-                </Label>
-                <p className="mt-1 text-xs text-stone-500">
-                  {imageIds.length}/{MAX_IMAGES} images · 5 MB maximum each
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={uploading || imageIds.length >= MAX_IMAGES}
-                onClick={() => inputRef.current?.click()}
-              >
-                {uploading ? (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-1.5 h-4 w-4" />
-                )}
-                Upload
-              </Button>
-            </div>
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              className="hidden"
-              onChange={(event) => {
-                if (event.target.files?.length) void uploadImages(event.target.files);
-                event.target.value = "";
-              }}
+            <OrgImageAssetField
+              label="Gallery images"
+              description={`${imageIds.length}/${MAX_IMAGES} images · 5 MB maximum each`}
+              imageIds={imageIds}
+              onChange={setImageIds}
+              maxImages={MAX_IMAGES}
+              idPrefix="location-template-media"
             />
-            {imageIds.length ? (
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-                {imageIds.map((id) => (
-                  <div
-                    key={id}
-                    className="group relative aspect-square overflow-hidden rounded-xl border bg-stone-100"
-                  >
-                    <img
-                      src={filesService.getImageUrl(id)}
-                      alt=""
-                      className="h-full w-full object-cover"
-                    />
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="secondary"
-                      className="absolute right-1.5 top-1.5 h-7 w-7 rounded-full bg-white/95"
-                      onClick={() => setImageIds((current) => current.filter((item) => item !== id))}
-                      aria-label="Remove image"
-                    >
-                      <Trash2 className="h-3.5 w-3.5 text-red-600" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-dashed p-6 text-center text-sm text-stone-500">
-                No gallery images added.
-              </div>
-            )}
           </section>
 
           <section className="space-y-3 border-t pt-5">
@@ -286,7 +193,7 @@ export default function LocationTemplateMediaDialog({
         <Button
           type="button"
           className="min-h-11 w-full shrink-0 bg-orange-600 hover:bg-orange-700"
-          disabled={!location || saving || uploading}
+          disabled={!location || saving}
           onClick={() => void saveMedia()}
         >
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

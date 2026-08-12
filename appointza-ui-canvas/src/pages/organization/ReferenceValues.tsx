@@ -34,6 +34,7 @@ import {
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { EventFormFieldsEditor } from "@/components/organization/EventFormFieldsEditor";
+import CreateAppointmentTaskValueDialog from "@/components/organization/CreateAppointmentTaskValueDialog";
 
 /** Dialog shell tuned for small screens (near full-width, scroll body, sticky footer). */
 const referenceValueDialogClassName = cn(
@@ -858,6 +859,27 @@ const ReferenceValuesPage = ({ embedded = false }: { embedded?: boolean }) => {
                   <>
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <h4 className="text-base font-semibold">Values</h4>
+                  {selectedType?.identifier === "APPOINTMENTTASK" ? (
+                    <CreateAppointmentTaskValueDialog
+                      open={isCreateDialogOpen}
+                      onOpenChange={setIsCreateDialogOpen}
+                      organizationId={user?.organisationid || 0}
+                      existingTasks={referenceValues}
+                      onCreated={() => {
+                        if (selectedReferenceType) {
+                          void loadReferenceValues(selectedReferenceType);
+                        }
+                      }}
+                      trigger={
+                        <DialogTrigger asChild>
+                          <Button className="h-11 w-full touch-manipulation sm:h-10 sm:w-auto">
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add new
+                          </Button>
+                        </DialogTrigger>
+                      }
+                    />
+                  ) : (
                   <Dialog
                     open={isCreateDialogOpen}
                     onOpenChange={(open) => {
@@ -918,41 +940,6 @@ const ReferenceValuesPage = ({ embedded = false }: { embedded?: boolean }) => {
                             rows={3}
                           />
                         </div>
-                        
-                        {/* Data Type field - only show for APPOINTMENTTASK */}
-                        {(() => {
-                          const selectedType = referenceTypes.find(type => type.id === newReferenceValue.referencetypeid);
-                          return selectedType?.identifier === 'APPOINTMENTTASK' ? (
-                            <div className="space-y-2">
-                              <Label htmlFor="datatype">Data Type</Label>
-                              <Select
-                                value={newReferenceValue.datatype}
-                                onValueChange={(value) => setNewReferenceValue(prev => ({
-                                  ...prev,
-                                  datatype: value
-                                }))}
-                              >
-                                <SelectTrigger id="datatype" className="h-11 w-full touch-manipulation sm:h-10">
-                                  <SelectValue placeholder="Select data type" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="string">String</SelectItem>
-                                  <SelectItem value="number">Number</SelectItem>
-                                  <SelectItem value="boolean">Boolean</SelectItem>
-                                  <SelectItem value="date">Date</SelectItem>
-                                  <SelectItem value="datetime">DateTime</SelectItem>
-                                  <SelectItem value="time">Time</SelectItem>
-                                  <SelectItem value="text">Text</SelectItem>
-                                  <SelectItem value="integer">Integer</SelectItem>
-                                  <SelectItem value="decimal">Decimal</SelectItem>
-                                  <SelectItem value="float">Float</SelectItem>
-                                  <SelectItem value="other">Other</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          ) : null;
-                        })()}
-                        
                           <div className="space-y-2">
                             <Label htmlFor="notes">Notes</Label>
                             <Textarea
@@ -986,9 +973,7 @@ const ReferenceValuesPage = ({ embedded = false }: { embedded?: boolean }) => {
                           disabled={
                             isSaving ||
                             !newReferenceValue.identifier ||
-                            !newReferenceValue.displaytext ||
-                            (referenceTypes.find((type) => type.id === newReferenceValue.referencetypeid)
-                              ?.identifier === "APPOINTMENTTASK" && !newReferenceValue.datatype)
+                            !newReferenceValue.displaytext
                           }
                         >
                           {isSaving ? (
@@ -1005,9 +990,7 @@ const ReferenceValuesPage = ({ embedded = false }: { embedded?: boolean }) => {
                           disabled={
                             isSaving ||
                             !newReferenceValue.identifier ||
-                            !newReferenceValue.displaytext ||
-                            (referenceTypes.find((type) => type.id === newReferenceValue.referencetypeid)
-                              ?.identifier === "APPOINTMENTTASK" && !newReferenceValue.datatype)
+                            !newReferenceValue.displaytext
                           }
                         >
                           {isSaving ? (
@@ -1020,6 +1003,7 @@ const ReferenceValuesPage = ({ embedded = false }: { embedded?: boolean }) => {
                       </DialogFooter>
                     </DialogContent>
                   </Dialog>
+                  )}
                 </div>
 
                 {/* Values List */}

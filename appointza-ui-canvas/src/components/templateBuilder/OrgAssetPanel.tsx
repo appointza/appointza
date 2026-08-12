@@ -1,15 +1,19 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2, RefreshCw, Trash2, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 
 export function OrgAssetPanel() {
-  const { assets, isLoading, isSaving, getImageUrl, refresh, uploadFiles, removeAsset } =
+  const { assets, isLoading, isSaving, getImageUrl, refresh, uploadFiles, removeAsset, ensureLoaded } =
     useOrgTemplateAssets();
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    void ensureLoaded();
+  }, [ensureLoaded]);
 
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList?.length) return;

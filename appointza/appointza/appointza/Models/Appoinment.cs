@@ -215,6 +215,8 @@ public string notes { get; set; }
         public long organisationid { get; set; }
         public long organisationlocationid { get; set; }
         public string mobilenumber { get; set; }
+        /// <summary>When true, include guests from active organisation room bookings.</summary>
+        public bool include_room_customers { get; set; }
     }
 
     public class ClientInfoRes
@@ -223,6 +225,11 @@ public string notes { get; set; }
         public string username { get; set; }
         public string mobile { get; set; }
         public string city { get; set; }
+        public bool is_room_customer { get; set; }
+        public long room_id { get; set; }
+        public string room_number { get; set; } = "";
+        public string booking_reference { get; set; } = "";
+        public string guest_email { get; set; } = "";
     }
 
 

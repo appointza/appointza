@@ -404,7 +404,7 @@ namespace appointza.Authentication.Services
                 longitude = longitude,
                 latitude = latitude,
                 googlelocation = googlelocation,
-                templateid = 60
+                templateid = 0
             };
             if (req.primarytype > 0)
             {

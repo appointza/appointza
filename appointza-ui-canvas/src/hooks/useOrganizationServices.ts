@@ -115,6 +115,7 @@ export const useOrganizationServices = (organizationId?: number) => {
     error,
     refetch,
     createService: createServiceMutation.mutate,
+    createServiceAsync: createServiceMutation.mutateAsync,
     updateService: updateServiceMutation.mutate,
     deleteService: deleteServiceMutation.mutate,
     isCreating: createServiceMutation.isPending,

@@ -1,7 +1,7 @@
 import type { NavigateFunction } from "react-router-dom";
-import { getAppDomain, getUiBaseUrl } from "@/utils/environment";
+import { getUiBaseUrl } from "@/utils/environment";
 import { resolvePostLoginPath } from "@/utils/postAuthNavigation";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
+import { isOrganisationSubdomainHost } from "@/utils/orgPublicSiteUrl.util";
 
 declare global {
   interface Window {
@@ -26,7 +26,7 @@ export function publishMainAppOrigin(): void {
 }
 
 export function isOrgSubdomainHost(host: string = window.location.host): boolean {
-  return !!parseSubdomainLocation(host, getAppDomain());
+  return isOrganisationSubdomainHost(host);
 }
 
 /** Auth pages must run on main UI host, not org *.localhost / *.appointza.com. */

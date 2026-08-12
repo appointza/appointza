@@ -76,7 +76,7 @@ public class OrganisationDetailController : ControllerBase
     {
         _org.SavePolicies(req.item.checkInTime, req.item.checkOutTime, req.item.cancellationPolicy, req.item.paymentPolicy,
             req.item.petPolicy, req.item.idProofRequired, req.item.refundPolicy, req.item.houseRules,
-            req.item.overnightTimeMode);
+            req.item.overnightTimeMode, req.item.bookingType, req.item.minimumHours);
         return Ok(new ActionRes<bool> { item = true });
     }
 

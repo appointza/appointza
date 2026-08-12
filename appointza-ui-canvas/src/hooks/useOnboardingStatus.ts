@@ -1,19 +1,64 @@
 import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
-import { UserTypeUtil } from '@/utils/userType.util';
 import { PrivilegeUtil } from '@/utils/privilege.util';
 import { OrganisationServicesService } from '@/services/organisationservices.service';
 import { OrganisationServiceTimingService } from '@/services/organisationservicetiming.service';
 import { OrganisationServicesSelectReq } from '@/models/organisationservices.model';
 import { OrganisationServiceTimingSelectReq } from '@/models/organisationservicetiming.model';
-import { useState, useEffect } from 'react';
+import { ReferenceValueService } from '@/services/referencevalue.service';
+import { ReferenceValueSelectReq } from '@/models/referencevalue.model';
+import { normalizeCustomUrlSlug } from '@/utils/slug.util';
+import {
+  ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID,
+  clearOnboardingCompleteCache,
+  orgHasWebsiteFromLocations,
+  readOnboardingCompleteCache,
+  writeOnboardingCompleteCache,
+} from '@/utils/organizationOnboarding.util';
+import type { OnboardingStepId } from '@/components/onboarding/OrganizationOnboarding';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useOrganisationLocations } from '@/hooks/useOrganisationLocations';
 
 export interface OnboardingStatus {
+  hasCustomDomain: boolean;
   hasServices: boolean;
+  hasWebsite: boolean;
   hasTiming: boolean;
   isComplete: boolean;
   isLoading: boolean;
-  nextStep: 'services' | 'timing' | null;
+  nextStep: OnboardingStepId | null;
+}
+
+const defaultStatus: OnboardingStatus = {
+  hasCustomDomain: false,
+  hasServices: false,
+  hasWebsite: false,
+  hasTiming: false,
+  isComplete: false,
+  isLoading: false,
+  nextStep: 'customDomain',
+};
+
+const completeStatus: Omit<OnboardingStatus, 'isLoading'> = {
+  hasCustomDomain: true,
+  hasServices: true,
+  hasWebsite: true,
+  hasTiming: true,
+  isComplete: true,
+  nextStep: null,
+};
+
+function resolveNextStep(
+  hasCustomDomain: boolean,
+  hasServices: boolean,
+  hasWebsite: boolean,
+  hasTiming: boolean,
+): OnboardingStepId | null {
+  if (!hasCustomDomain) return 'customDomain';
+  if (!hasServices) return 'services';
+  if (!hasWebsite) return 'website';
+  if (!hasTiming) return 'timing';
+  return null;
 }
 
 export const useOnboardingStatus = () => {
@@ -21,92 +66,111 @@ export const useOnboardingStatus = () => {
   const organizationId = user?.organisationid;
   const isStaff = user?.isStaff === true;
   const [timeoutReached, setTimeoutReached] = useState(false);
-  
-  // For staff users, check if they have dashboard access
-  // If staff doesn't have dashboard access, they should not be able to proceed
-  const staffHasDashboardAccess = isStaff 
+  const [cacheBypass, setCacheBypass] = useState(false);
+
+  const staffHasDashboardAccess = isStaff
     ? PrivilegeUtil.hasDashboardAccess(user?.userpermission)
     : true;
-  
-  // Always call hooks first (React rules)
-  const { data: status, isLoading, error, refetch } = useQuery<OnboardingStatus>({
+
+  const orgId = organizationId ?? 0;
+  const cachedComplete =
+    !cacheBypass && orgId > 0 && readOnboardingCompleteCache(orgId);
+
+  const locationsQuery = useOrganisationLocations({
+    organisationId: orgId,
+    enabled: !!isAuthenticated && orgId > 0 && !isStaff && !cachedComplete,
+  });
+
+  const { data: status, isLoading: onboardingLoading, error, refetch } = useQuery<OnboardingStatus>({
     queryKey: ['onboarding-status', organizationId],
     queryFn: async () => {
-      // Add timeout to prevent hanging
       const timeoutPromise = new Promise<OnboardingStatus>((_, reject) => {
         setTimeout(() => {
           reject(new Error('Onboarding status check timed out'));
-        }, 10000); // 10 second timeout
+        }, 10000);
       });
 
       const fetchPromise = (async () => {
-        try {
-          // Check if organization has at least one service
-          const servicesService = new OrganisationServicesService();
-          const servicesReq = new OrganisationServicesSelectReq();
-          servicesReq.organisationid = organizationId!;
-          const services = await servicesService.select(servicesReq);
-          const hasServices = services && services.length > 0;
+        const locations = locationsQuery.data ?? [];
+        const hasCustomDomain = locations.some(
+          (loc) => !!normalizeCustomUrlSlug(loc.customurl),
+        );
 
-          // Check if organization has timing configured
-          const timingService = new OrganisationServiceTimingService();
-          const timingReq = new OrganisationServiceTimingSelectReq();
-          timingReq.organisationid = organizationId!;
-          const timings = await timingService.select(timingReq);
-          const hasTiming = timings && timings.length > 0;
+        const referenceValueService = new ReferenceValueService();
+        const templateReq = new ReferenceValueSelectReq();
+        templateReq.referencetypeid = ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID;
+        templateReq.organisationid = organizationId!;
+        const orgTemplates = await referenceValueService.select(templateReq);
+        const orgTemplateIds = new Set(
+          (orgTemplates ?? []).map((template) => template.id).filter((id) => id > 0),
+        );
+        const hasWebsite = orgHasWebsiteFromLocations(locations, orgTemplateIds);
 
-          const isComplete = hasServices && hasTiming;
-          const nextStep = !hasServices ? 'services' : !hasTiming ? 'timing' : null;
+        const servicesService = new OrganisationServicesService();
+        const servicesReq = new OrganisationServicesSelectReq();
+        servicesReq.organisationid = organizationId!;
+        const services = await servicesService.select(servicesReq);
+        const hasServices = services && services.length > 0;
 
-          const result = {
-            hasServices,
-            hasTiming,
-            isComplete,
-            isLoading: false,
-            nextStep,
-          };
+        const timingService = new OrganisationServiceTimingService();
+        const timingReq = new OrganisationServiceTimingSelectReq();
+        timingReq.organisationid = organizationId!;
+        const timings = await timingService.select(timingReq);
+        const hasTiming = timings && timings.length > 0;
 
-          console.log('📋 Onboarding Status:', {
-            hasServices,
-            hasTiming,
-            isComplete,
-            nextStep,
-            servicesCount: services?.length || 0,
-            timingsCount: timings?.length || 0,
-          });
+        const isComplete = hasCustomDomain && hasServices && hasWebsite && hasTiming;
+        const nextStep = resolveNextStep(hasCustomDomain, hasServices, hasWebsite, hasTiming);
 
-          return result;
-        } catch (error) {
-          console.error('❌ Error checking onboarding status:', error);
-          throw error;
-        }
+        return {
+          hasCustomDomain,
+          hasServices,
+          hasWebsite,
+          hasTiming,
+          isComplete,
+          isLoading: false,
+          nextStep,
+        };
       })();
 
       try {
         return await Promise.race([fetchPromise, timeoutPromise]);
-      } catch (error) {
-        console.error('❌ Onboarding status check failed or timed out:', error);
-        // Return default values on error/timeout instead of throwing
-        return {
-          hasServices: false,
-          hasTiming: false,
-          isComplete: false,
-          isLoading: false,
-          nextStep: 'services', // Default to services step
-        };
+      } catch (fetchError) {
+        console.error('❌ Onboarding status check failed or timed out:', fetchError);
+        return { ...defaultStatus };
       }
     },
-    enabled: !!isAuthenticated && !!organizationId && !isStaff,
-    staleTime: 30000, // 30 seconds - reasonable cache time
-    gcTime: 60000, // 1 minute garbage collection (formerly cacheTime)
-    retry: 1, // Only retry once
-    retryDelay: 2000, // 2 second delay between retries
-    refetchOnMount: true,
-    refetchOnWindowFocus: false, // Disable to prevent constant refetching
-    refetchOnReconnect: true,
+    enabled:
+      !!isAuthenticated &&
+      !!organizationId &&
+      !isStaff &&
+      !cachedComplete &&
+      locationsQuery.isSuccess,
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+    retry: 1,
+    retryDelay: 2000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
-  // Additional timeout check - if query is still loading after 15 seconds, force it to stop
+  useEffect(() => {
+    if (!organizationId || !status) return;
+    writeOnboardingCompleteCache(organizationId, status.isComplete);
+  }, [organizationId, status]);
+
+  const invalidateAndRefetch = useCallback(() => {
+    if (organizationId) {
+      clearOnboardingCompleteCache(organizationId);
+    }
+    setCacheBypass(true);
+    return refetch().finally(() => setCacheBypass(false));
+  }, [organizationId, refetch]);
+
+  const isLoading = cachedComplete
+    ? false
+    : locationsQuery.isLoading || onboardingLoading;
+
   useEffect(() => {
     if (isLoading && !timeoutReached) {
       const timeout = setTimeout(() => {
@@ -115,57 +179,56 @@ export const useOnboardingStatus = () => {
       }, 15000);
 
       return () => clearTimeout(timeout);
-    } else if (!isLoading) {
+    }
+    if (!isLoading) {
       setTimeoutReached(false);
     }
   }, [isLoading, timeoutReached]);
 
-  // Staff users don't need onboarding setup, but they need dashboard access
-  // If staff doesn't have dashboard access, they should see an access denied message
+  const refetchOnboarding = useMemo(
+    () => () => invalidateAndRefetch(),
+    [invalidateAndRefetch],
+  );
+
   if (isStaff) {
     return {
-      hasServices: staffHasDashboardAccess, // Only true if they have dashboard access
+      hasCustomDomain: staffHasDashboardAccess,
+      hasServices: staffHasDashboardAccess,
+      hasWebsite: staffHasDashboardAccess,
       hasTiming: staffHasDashboardAccess,
       isComplete: staffHasDashboardAccess,
       isLoading: false,
-      nextStep: staffHasDashboardAccess ? null : 'services', // This won't be used for staff
+      nextStep: staffHasDashboardAccess ? null : 'customDomain',
+      refetch: refetchOnboarding,
     };
   }
 
-  // If not authenticated or no organizationId, return immediately (don't wait)
   if (!isAuthenticated || !organizationId) {
     return {
-      hasServices: false,
-      hasTiming: false,
-      isComplete: false,
-      isLoading: false,
+      ...defaultStatus,
       nextStep: null,
+      refetch: refetchOnboarding,
     };
   }
 
-  // If timeout reached or error occurred, return default values
+  if (cachedComplete) {
+    return {
+      ...completeStatus,
+      isLoading: false,
+      refetch: refetchOnboarding,
+    };
+  }
+
   if (timeoutReached || (error && !status)) {
     return {
-      hasServices: false,
-      hasTiming: false,
-      isComplete: false,
-      isLoading: false,
-      nextStep: 'services',
-      refetch: () => refetch(),
+      ...defaultStatus,
+      refetch: refetchOnboarding,
     };
   }
 
-  // Return status or default values
   return {
-    ...(status || {
-      hasServices: false,
-      hasTiming: false,
-      isComplete: false,
-      isLoading: false,
-      nextStep: 'services',
-    }),
-    isLoading: isLoading && !timeoutReached, // Only show loading if not timed out
-    refetch: () => refetch(),
+    ...(status || defaultStatus),
+    isLoading: isLoading && !timeoutReached,
+    refetch: refetchOnboarding,
   };
 };
-

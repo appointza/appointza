@@ -14,6 +14,7 @@ import { GOOGLE_WEB_CLIENT_ID } from "./config/google";
 import { initializeFirebase } from "./config/firebase.config";
 import { useSafeArea } from "./hooks/useSafeArea";
 import { usePushNotifications } from "./hooks/usePushNotifications";
+import { pushNotificationService } from "./services/pushnotification.service";
 import { NotificationHandler } from "./components/notifications/NotificationHandler";
 import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Capacitor } from '@capacitor/core';
@@ -35,6 +36,7 @@ import OrganizationDashboard from "./pages/organization/Dashboard";
 import OrganizationTimingSetup from "./pages/organization/TimingSetup";
 import TimingScreen from "./pages/organization/Timing";
 import OrganizationServices from "./pages/organization/Services";
+import CustomDomainScreen from "./pages/organization/CustomDomain";
 import OrganizationAppointments from "./pages/organization/Appointments";
 import OrganizationCalendar from "./pages/organization/OrganizationCalendar";
 import OrganizationLocations from "./pages/organization/Locations";
@@ -67,7 +69,13 @@ import UserEvents from "./pages/user/UserEvents";
 import EventBookingPage from "./pages/user/EventBookingPage";
 import MyEventBookings from "./pages/user/MyEventBookings";
 import AppointmentBooking from "./pages/user/AppointmentBooking";
+import RoomBookingPage from "./pages/RoomBookingPage";
+import OrganizationAssets from "./pages/organization/Assets";
 import EventBookings from "./pages/organization/EventBookings";
+import HospitalityContentPage from "./pages/organization/HospitalityContent";
+import OrganisationLegacyRedirect from "./pages/organization/OrganisationLegacyRedirect";
+import RoomDefinitionsPage from "./pages/organization/RoomDefinitions";
+import RoomStatusPage from "./pages/organization/RoomStatus";
 import OrganizationPublicPage from "./pages/OrganizationPublicPage";
 import DynamicTemplatePage from "./pages/DynamicTemplatePage";
 import CustomDomainRedirect from "./pages/CustomDomainRedirect";
@@ -79,7 +87,7 @@ import CrmLeadPage from "./pages/crm/CrmLeadPage";
 import CrmClientPage from "./pages/crm/CrmClientPage";
 import CrmTemplatePage from "./pages/crm/CrmTemplatePage";
 import CrmBillingPage from "./pages/crm/CrmBillingPage";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
+import { isOrganisationSubdomainHost } from "@/utils/orgPublicSiteUrl.util";
 import { mustUseMainAppForAuth, redirectToLogin } from "@/utils/authNavigation.util";
 import { EnsureAuthOnMainHost } from "@/components/auth/EnsureAuthOnMainHost";
 import OrganizationLayout from "@/components/layout/OrganizationLayout";
@@ -151,25 +159,10 @@ const UserOutletLayout = () => (
   </UserLayout>
 );
 
-// Push Notification Initializer Component
+// Registers push notifications once for the whole app (single hook instance).
 const PushNotificationInitializer = () => {
-  const { isInitialized, pushToken, updateTokenForUser } = usePushNotifications();
-  const { isAuthenticated, user } = useAuth();
-  
-  useEffect(() => {
-    if (isInitialized && pushToken) {
-      console.log('✅ Push notifications ready with token:', pushToken.substring(0, 20) + '...');
-      
-      // Ensure token is updated on server when user is authenticated
-      if (isAuthenticated && user?.id) {
-        updateTokenForUser(user.id).catch(error => {
-          console.error('❌ Error updating push token on app load:', error);
-        });
-      }
-    }
-  }, [isInitialized, pushToken, isAuthenticated, user?.id, updateTokenForUser]);
-  
-  return null; // This component doesn't render anything
+  usePushNotifications();
+  return null;
 };
 
 const NOTIF_DISMISSED_KEY = "appointza:notif-prompt-dismissed-until";
@@ -177,7 +170,7 @@ const NOTIF_SNOOZE_DAYS = 30;
 
 // Web-only prompt to enable notifications when permission is not granted
 const PushNotificationPrompt = () => {
-  const { initialize, isLoading } = usePushNotifications();
+  const [isLoading, setIsLoading] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
   const [dismissed, setDismissed] = useState(false);
 
@@ -203,7 +196,12 @@ const PushNotificationPrompt = () => {
   };
 
   const handleEnable = async () => {
-    await initialize();
+    setIsLoading(true);
+    try {
+      await pushNotificationService.initialize();
+    } finally {
+      setIsLoading(false);
+    }
     if ("Notification" in window) {
       setPermission(Notification.permission);
     }
@@ -266,7 +264,7 @@ const AppRoutes = () => {
     initializeFirebase();
   }, []);
 
-  const isCustomDomain = !!parseSubdomainLocation(window.location.host);
+  const isCustomDomain = isOrganisationSubdomainHost(window.location.host);
   
   return (
     <Routes>
@@ -295,7 +293,6 @@ const AppRoutes = () => {
       <Route path="/org/template/:orgId/:templateType" element={<OrganizationTemplate />} />
       <Route path="/public/org/:organizationId" element={<OrganizationPublicPage />} />
       <Route path="/template/:templateId" element={<DynamicTemplatePage />} />
-      <Route path="/organization/:id/template" element={<DynamicTemplatePage />} />
       
       {/* User routes - all protected with proper paths */}
       <Route
@@ -315,6 +312,7 @@ const AppRoutes = () => {
         <Route path="my-event-bookings" element={<MyEventBookings />} />
       </Route>
       <Route path="/user/events/:eventId/book" element={<EventBookingPage />} />
+      <Route path="/book" element={<RoomBookingPage />} />
       <Route path="/book-appointment/:organisationId/:organisationLocationId" element={<AppointmentBooking />} />
       
       {/* Legacy user routes - redirect to new paths */}
@@ -335,6 +333,7 @@ const AppRoutes = () => {
       >
         <Route path=":id/dashboard" element={<OrganizationDashboard />} />
         <Route path="dashboard" element={<OrganizationDashboard />} />
+        <Route path="custom-domain" element={<CustomDomainScreen />} />
         <Route path="timing" element={<TimingScreen />} />
         <Route path="services" element={<OrganizationServices />} />
         <Route path="appointments/:id/record" element={<AppointmentRecordPage />} />
@@ -354,6 +353,11 @@ const AppRoutes = () => {
         <Route path="clients" element={<ClientManagement />} />
         <Route path="clients/on-spot-registration" element={<OnSpotRegistration />} />
         <Route path="clients/:clientId/book" element={<ClientBookAppointment />} />
+        <Route path="hospitality" element={<HospitalityContentPage />} />
+        <Route path="assets" element={<OrganizationAssets />} />
+        <Route path="organisation" element={<OrganisationLegacyRedirect />} />
+        <Route path="rooms/definitions" element={<RoomDefinitionsPage />} />
+        <Route path="rooms/status" element={<RoomStatusPage />} />
       </Route>
       
       {/* Momantza and Campusza routes - no layout (sidebar/bottom nav hidden) */}

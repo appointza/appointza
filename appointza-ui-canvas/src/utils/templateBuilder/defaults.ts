@@ -383,6 +383,11 @@ export function getDefaultBlockData(blockType: string): Record<string, unknown> 
     "appointza-reviews": { variant: 1 },
     "appointza-facilities": { variant: 1 },
     "appointza-location-images": { variant: 1 },
+    "appointza-rooms": { variant: 1 },
+    "appointza-hospitality-policies": { variant: 1 },
+    "appointza-hospitality-packages": { variant: 1 },
+    "appointza-food-menu": { variant: 1 },
+    "appointza-nearby-places": { variant: 1 },
   };
   return map[blockType] ? { ...map[blockType] } : { title: blockType };
 }

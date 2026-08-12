@@ -1,4 +1,4 @@
-﻿import { useState, useRef, useMemo, useEffect } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -61,11 +62,11 @@ import { useEventBookingForm } from "@/hooks/useEventBookingForm";
 import { EventFormFieldsEditor } from "@/components/organization/EventFormFieldsEditor";
 import { EventDetailsFormFields } from "@/components/organization/EventDetailsFormFields";
 import { ServicePricingFields } from "@/components/organization/ServicePricingFields";
+import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
 import {
-  ServiceFormShell,
-  serviceFormInputClass,
-  serviceFormLabelClass,
-} from "@/components/organization/ServiceFormShell";
+  ComboEditorFields,
+  ServiceEditorFields,
+} from "@/components/organization/ServiceEditorFields";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
 import type { EventBookingFormField } from "@/utils/eventBookingFormFields.util";
@@ -80,6 +81,8 @@ import { FilesService } from "@/services/files.service";
 import { getServicePriceSummary } from "@/utils/servicePricing.util";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
+import { ServicesEventsExplainer } from "@/components/onboarding/ServicesEventsExplainer";
+import { onboardingStepRoute } from "@/utils/organizationOnboarding.util";
 import {
   compareDateOnly,
   formatEventDateOnly,
@@ -210,7 +213,15 @@ function parseTimeToMinutes(value: string): number | null {
 const OrganizationServices = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { isComplete, nextStep, hasServices, hasTiming } = useOnboardingStatus();
+  const {
+    isComplete,
+    nextStep,
+    hasCustomDomain,
+    hasServices,
+    hasWebsite,
+    hasTiming,
+    refetch: refetchOnboarding,
+  } = useOnboardingStatus();
   const { user, isAuthenticated, userType } = useAuth();
   const { id: globalLocationId } = useGlobalId();
   const organizationId = user?.organisationid || 1; // Default to 1 for demo
@@ -233,11 +244,9 @@ const OrganizationServices = () => {
 
   // Event image upload state
   const [eventImages, setEventImages] = useState<number[]>([]);
-  const [isUploadingEventImage, setIsUploadingEventImage] = useState(false);
 
   // Service image upload state (stored in OrganisationServices.attributes.ImageIds)
   const [serviceImages, setServiceImages] = useState<number[]>([]);
-  const [isUploadingServiceImage, setIsUploadingServiceImage] = useState(false);
 
   // Events state - use globalLocationId from GlobalIdContext
   const eventLocationId = globalLocationId ? Number(globalLocationId) : undefined;
@@ -316,7 +325,7 @@ const OrganizationServices = () => {
   const {
     services,
     isLoading,
-    createService,
+    createServiceAsync,
     updateService,
     deleteService,
     isCreating,
@@ -408,42 +417,6 @@ const OrganizationServices = () => {
     }
   };
 
-  const handleServiceImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-    if (!file.type.startsWith("image/")) {
-      toast({ title: "Invalid File", description: "Please select an image file", variant: "destructive" });
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      toast({ title: "File Too Large", description: "Please select an image smaller than 5MB", variant: "destructive" });
-      return;
-    }
-
-    setIsUploadingServiceImage(true);
-    try {
-      const resp = await filesService.upload([file]);
-      if (resp && resp.length > 0) {
-        setServiceImages((prev) => [...prev, resp[0]]);
-        toast({ title: "Success", description: "Image uploaded successfully" });
-      } else {
-        throw new Error("Upload failed");
-      }
-    } catch (error) {
-      console.error("Service image upload error:", error);
-      toast({ title: "Upload Failed", description: "Failed to upload image. Please try again.", variant: "destructive" });
-    } finally {
-      setIsUploadingServiceImage(false);
-      e.target.value = "";
-    }
-  };
-
-  const handleRemoveServiceImage = (imageId: number) => {
-    setServiceImages((prev) => prev.filter((id) => id !== imageId));
-  };
-
   const handleSaveService = async () => {
     if (!validateService()) return;
 
@@ -465,23 +438,23 @@ const OrganizationServices = () => {
         setSelectedComboServices([]);
         setServiceImages([]);
       } else {
-        const isFirstService = services.length === 0;
-        createService(serviceToSave, {
-          onSuccess: () => {
-            if (isFirstService && !isComplete) {
-              toast({
-                title: "Service saved!",
-                description: "Next step: set your business hours so customers can book.",
-              });
-              navigate("/organization/timing");
-            }
-          },
-        });
+        const wasFirstService = services.length === 0;
+        await createServiceAsync(serviceToSave);
         setShowAddForm(false);
         setShowComboForm(false);
         setService(new OrganisationServices());
         setSelectedComboServices([]);
         setServiceImages([]);
+
+        if (!isComplete && wasFirstService) {
+          await refetchOnboarding();
+          navigate(
+            onboardingStepRoute(
+              "website",
+              selectedLocationId > 0 ? selectedLocationId : undefined,
+            ),
+          );
+        }
       }
     } catch (error) {
       console.error("Error saving service:", error);
@@ -702,6 +675,16 @@ const OrganizationServices = () => {
     setEditingEvent(null);
   };
 
+  const closeServiceForm = () => {
+    setShowAddForm(false);
+    setShowEditForm(false);
+    setShowComboForm(false);
+    setEditingService(null);
+    setService(new OrganisationServices());
+    setSelectedComboServices([]);
+    setServiceImages([]);
+  };
+
   const openEventBookingForm = async (eventItem: Event) => {
     setShowAddEventForm(false);
     setShowEditEventForm(false);
@@ -776,68 +759,6 @@ const OrganizationServices = () => {
       setExistingBookingFormValue(null);
       setEditingEvent(null);
     }
-  };
-
-  // Handle event image upload
-  const handleEventImageUpload = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-
-    // Validate file type
-    if (!file.type.startsWith("image/")) {
-      toast({
-        title: "Invalid File",
-        description: "Please select an image file",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: "File Too Large",
-        description: "Please select an image smaller than 5MB",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploadingEventImage(true);
-
-    try {
-      const response = await filesService.upload([file]);
-
-      if (response && response.length > 0) {
-        setEventImages((prev) => [...prev, response[0]]);
-        toast({
-          title: "Success",
-          description: "Image uploaded successfully",
-        });
-      } else {
-        throw new Error("Upload failed");
-      }
-    } catch (error) {
-      console.error("Upload error:", error);
-      toast({
-        title: "Upload Failed",
-        description: "Failed to upload image. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploadingEventImage(false);
-      // Reset the input
-      event.target.value = "";
-    }
-  };
-
-  // Remove event image
-  const handleRemoveEventImage = (imageId: number) => {
-    setEventImages((prev) => prev.filter((id) => id !== imageId));
   };
 
   const handleSaveEvent = async () => {
@@ -1025,8 +946,8 @@ const OrganizationServices = () => {
   };
 
   const handleEnableClick = () => {
-    if (!isComplete && nextStep === "timing") {
-      navigate("/organization/timing");
+    if (!isComplete && nextStep) {
+      navigate(onboardingStepRoute(nextStep));
       return;
     }
     navigate("/organization/dashboard");
@@ -1078,28 +999,32 @@ const OrganizationServices = () => {
     );
   }
 
+  const showServicesEventsGuide =
+    !isComplete || (services.length === 0 && events.length === 0);
+
   return (
     <div className="org-page">
       {!isComplete && (
-        <OnboardingPageGuide
-          stepId="services"
-          hasServices={hasServices}
-          hasTiming={hasTiming}
+        <div className="org-page-section pb-0 pt-2 sm:pt-4">
+          <OnboardingPageGuide
+            compact
+            stepId="services"
+            hasCustomDomain={hasCustomDomain}
+            hasServices={hasServices}
+            hasWebsite={hasWebsite}
+            hasTiming={hasTiming}
+            locationId={selectedLocationId > 0 ? selectedLocationId : undefined}
+          />
+        </div>
+      )}
+
+      {showServicesEventsGuide && (
+        <ServicesEventsExplainer
+          activeTab={activeTab}
+          onTabChange={setActiveTab}
+          inOnboarding={!isComplete}
         />
       )}
-      <header className="org-page-header flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="org-title">Service & Event Management</h1>
-          <p className="org-description">Manage the services and events your business offers.</p>
-        </div>
-          {/* <Button
-            type="button"
-            onClick={handleEnableClick}
-            className="shrink-0 bg-gradient-coral hover:bg-orange-600 text-white px-5 py-2 rounded-xl text-sm font-medium shadow-none"
-          >
-            Enable
-          </Button> */}
-      </header>
 
         <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "services" | "events")} className="w-full">
           {/* Tabs + primary action in one row */}
@@ -1169,213 +1094,20 @@ const OrganizationServices = () => {
 
           <TabsContent value="services" className="mt-0 px-6 md:px-8 py-6 space-y-6 focus-visible:outline-none">
             {/* Search row (actions live in the top segmented header) */}
-            {!showAddForm && !showEditForm && !showComboForm && (
-              <div className="flex flex-wrap items-center gap-3 mb-5">
-                <div className="relative flex-1 min-w-[200px]">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
-                  <Input
-                    placeholder="Search services..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="h-11 w-full rounded-xl border-blue-100 bg-white py-2.5 pl-11 pr-4 shadow-sm focus-visible:border-blue-400 focus-visible:ring-blue-100"
-                  />
-                </div>
+            <div className="mb-5 flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-stone-400" />
+                <Input
+                  placeholder="Search services..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="h-11 w-full rounded-xl border-blue-100 bg-white py-2.5 pl-11 pr-4 shadow-sm focus-visible:border-blue-400 focus-visible:ring-blue-100"
+                />
               </div>
-            )}
+            </div>
 
-            {/* Add Service Form Card */}
-            {showAddForm && (
-              <ServiceFormShell
-                title="Add new service"
-                description="Enter the details of the service you want to offer."
-                icon={Plus}
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setShowAddForm(false);
-                        setService(new OrganisationServices());
-                        setSelectedComboServices([]);
-                        setServiceImages([]);
-                      }}
-                      className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={handleSaveService}
-                      disabled={isCreating}
-                      className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
-                    >
-                      {isCreating ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Addingâ€¦
-                        </>
-                      ) : (
-                        <>
-                          <Check className="mr-2 h-4 w-4" />
-                          Add service
-                        </>
-                      )}
-                    </Button>
-                  </>
-                }
-              >
-                <div className="grid gap-5">
-                  <div className="grid gap-2">
-                    <Label htmlFor="name" className={serviceFormLabelClass}>
-                      Service name *
-                    </Label>
-                    <Input
-                      id="name"
-                      value={service.Servicename}
-                      onChange={(e) =>
-                        setService({
-                          ...service,
-                          Servicename: e.target.value,
-                        })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Enter service name"
-                    />
-                  </div>
-
-                  {!service.Iscombo && (
-                    <ServicePricingFields
-                      service={service}
-                      onChange={(patch) => setService({ ...service, ...patch })}
-                    />
-                  )}
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="duration" className={serviceFormLabelClass}>
-                      Duration (minutes) *
-                    </Label>
-                    <Input
-                      id="duration"
-                      type="number"
-                      value={service.timetaken.toString()}
-                      onChange={(e) =>
-                        setService({
-                          ...service,
-                          timetaken: parseInt(e.target.value) || 0,
-                        })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Enter duration in minutes"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="notes" className={serviceFormLabelClass}>
-                      Notes
-                    </Label>
-                    <Input
-                      id="notes"
-                      value={service.notes || ""}
-                      onChange={(e) =>
-                        setService({ ...service, notes: e.target.value })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Optional notes about this service"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="service-images" className={serviceFormLabelClass}>
-                      Service images
-                    </Label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="file"
-                        id="service-images"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleServiceImageUpload}
-                        disabled={isUploadingServiceImage}
-                      />
-                      <label htmlFor="service-images">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          asChild
-                          disabled={isUploadingServiceImage}
-                          className={cn(org.btnOutline, "min-h-10")}
-                        >
-                          <span>
-                            {isUploadingServiceImage ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Uploadingâ€¦
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload image
-                              </>
-                            )}
-                          </span>
-                        </Button>
-                      </label>
-                      <span className="text-xs text-stone-500">JPG, PNG Â· max 5MB</span>
-                    </div>
-
-                    {serviceImages.length > 0 && (
-                      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                        {serviceImages.map((imageId) => (
-                          <div
-                            key={imageId}
-                            className="group relative aspect-square overflow-hidden rounded-2xl border border-stone-100 bg-appointza-cream/50"
-                          >
-                            <img
-                              src={filesService.getImageUrl(imageId)}
-                              alt={`Service image ${imageId}`}
-                              className="h-full w-full object-cover"
-                            />
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              className="absolute right-2 top-2 h-7 w-7 p-0 opacity-0 transition-opacity group-hover:opacity-100"
-                              onClick={() => handleRemoveServiceImage(imageId)}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 rounded-2xl border border-stone-100 bg-appointza-cream/40 px-4 py-3">
-                    <Checkbox
-                      id="show-price"
-                      checked={service.show_price ?? true}
-                      onCheckedChange={(checked) =>
-                        setService({
-                          ...service,
-                          show_price: checked === true,
-                        })
-                      }
-                    />
-                    <Label
-                      htmlFor="show-price"
-                      className="cursor-pointer text-sm font-normal text-stone-700"
-                    >
-                      Show price to customers
-                    </Label>
-                  </div>
-                </div>
-              </ServiceFormShell>
-            )}
-
-            {/* Services List - Only show when no form is open */}
-            {!showAddForm && !showEditForm && !showComboForm && (
-              <div className="space-y-4">
+            {/* Services List */}
+            <div className="space-y-4">
                 {filteredServices.length === 0 ? (
                   <div className="rounded-3xl border border-stone-100 bg-appointza-cream/60/80 p-10 shadow-sm text-center space-y-4">
                     <Package className="h-12 w-12 mx-auto text-zinc-400 mb-2" aria-hidden />
@@ -1515,528 +1247,10 @@ const OrganizationServices = () => {
                   </>
                 )}
               </div>
-            )}
-
-            {/* Combo Service Form Card */}
-            {showComboForm && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Create Combo Package</CardTitle>
-                  <CardDescription>
-                    Create a combo package by selecting multiple services.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid gap-4 py-4">
-                    {/* Service Selection */}
-                    <div className="grid gap-2">
-                      <Label>Select Services for Combo</Label>
-                      <div className="border rounded-md p-4 max-h-60 overflow-y-auto">
-                        {services
-                          .filter((s) => !s.Iscombo)
-                          .map((serviceItem) => (
-                            <div
-                              key={serviceItem.id}
-                              className="flex items-center space-x-2 py-2"
-                            >
-                              <Checkbox
-                                id={`combo-${serviceItem.id}`}
-                                checked={selectedComboServices.some(
-                                  (s) => s.id === serviceItem.id
-                                )}
-                                onCheckedChange={(checked) => {
-                                  if (checked) {
-                                    setSelectedComboServices([
-                                      ...selectedComboServices,
-                                      serviceItem,
-                                    ]);
-                                  } else {
-                                    setSelectedComboServices(
-                                      selectedComboServices.filter(
-                                        (s) => s.id !== serviceItem.id
-                                      )
-                                    );
-                                  }
-                                }}
-                              />
-                              <Label
-                                htmlFor={`combo-${serviceItem.id}`}
-                                className="flex-1"
-                              >
-                                <div className="flex justify-between items-center">
-                                  <span className="font-medium">
-                                    {serviceItem.Servicename}
-                                  </span>
-                                  {serviceItem.show_price !== false && (
-                                    <span className="text-sm text-muted-foreground">
-                                      ₹{serviceItem.prize.toLocaleString("en-IN")}
-                                    </span>
-                                  )}
-                                </div>
-                              </Label>
-                            </div>
-                          ))}
-                      </div>
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="combo-name">Combo Name *</Label>
-                      <Input
-                        id="combo-name"
-                        value={service.Servicename}
-                        onChange={(e) =>
-                          setService({
-                            ...service,
-                            Servicename: e.target.value,
-                          })
-                        }
-                        placeholder="Enter combo name"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="combo-offer-price">
-                        Offer Price (₹) *
-                      </Label>
-                      <Input
-                        id="combo-offer-price"
-                        type="number"
-                        value={service.offerprize?.toString() || ""}
-                        onChange={(e) =>
-                          setService({
-                            ...service,
-                            offerprize: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        placeholder="Enter offer price in ₹"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="combo-duration">
-                        Total Duration (minutes) *
-                      </Label>
-                      <Input
-                        id="combo-duration"
-                        type="number"
-                        value={service.timetaken.toString()}
-                        onChange={(e) =>
-                          setService({
-                            ...service,
-                            timetaken: parseInt(e.target.value) || 0,
-                          })
-                        }
-                        placeholder="Enter total duration in minutes"
-                      />
-                    </div>
-
-                    <div className="grid gap-2">
-                      <Label htmlFor="combo-notes">Notes</Label>
-                      <Input
-                        id="combo-notes"
-                        value={service.notes || ""}
-                        onChange={(e) =>
-                          setService({ ...service, notes: e.target.value })
-                        }
-                        placeholder="Enter any additional notes about the combo"
-                      />
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      <Checkbox
-                        id="combo-show-price"
-                        checked={service.show_price ?? true}
-                        onCheckedChange={(checked) =>
-                          setService({
-                            ...service,
-                            show_price: checked === true,
-                          })
-                        }
-                      />
-                      <Label
-                        htmlFor="combo-show-price"
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        Show price to customers
-                      </Label>
-                    </div>
-                  </div>
-                  <div className="flex justify-end gap-2 mt-4">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setShowComboForm(false);
-                        setService(new OrganisationServices());
-                        setSelectedComboServices([]);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      onClick={handleSaveService}
-                      disabled={isCreating}
-                    >
-                      {isCreating ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Creating...
-                        </>
-                      ) : (
-                        <>
-                          <Check className="mr-2 h-4 w-4" />
-                          Create Combo
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Edit Service Form Card */}
-            {showEditForm && (
-              <ServiceFormShell
-                title="Edit service"
-                description="Update name, pricing, duration, and images for this service."
-                icon={Edit}
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setShowEditForm(false);
-                        setEditingService(null);
-                        setService(new OrganisationServices());
-                        setServiceImages([]);
-                      }}
-                      className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={handleSaveService}
-                      disabled={isUpdating}
-                      className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
-                    >
-                      {isUpdating ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Savingâ€¦
-                        </>
-                      ) : (
-                        <>
-                          <Save className="mr-2 h-4 w-4" />
-                          Save changes
-                        </>
-                      )}
-                    </Button>
-                  </>
-                }
-              >
-                <div className="grid gap-5">
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-name" className={serviceFormLabelClass}>
-                      Service name *
-                    </Label>
-                    <Input
-                      id="edit-name"
-                      value={service.Servicename}
-                      onChange={(e) =>
-                        setService({
-                          ...service,
-                          Servicename: e.target.value,
-                        })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Enter service name"
-                    />
-                  </div>
-
-                  {!service.Iscombo && (
-                    <ServicePricingFields
-                      service={service}
-                      idPrefix="edit"
-                      onChange={(patch) => setService({ ...service, ...patch })}
-                    />
-                  )}
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-duration" className={serviceFormLabelClass}>
-                      Duration (minutes) *
-                    </Label>
-                    <Input
-                      id="edit-duration"
-                      type="number"
-                      value={service.timetaken.toString()}
-                      onChange={(e) =>
-                        setService({
-                          ...service,
-                          timetaken: parseInt(e.target.value) || 0,
-                        })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Enter duration in minutes"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-notes" className={serviceFormLabelClass}>
-                      Notes
-                    </Label>
-                    <Input
-                      id="edit-notes"
-                      value={service.notes || ""}
-                      onChange={(e) =>
-                        setService({ ...service, notes: e.target.value })
-                      }
-                      className={serviceFormInputClass}
-                      placeholder="Optional notes about this service"
-                    />
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label htmlFor="edit-service-images" className={serviceFormLabelClass}>
-                      Service images
-                    </Label>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <input
-                        type="file"
-                        id="edit-service-images"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={handleServiceImageUpload}
-                        disabled={isUploadingServiceImage}
-                      />
-                      <label htmlFor="edit-service-images">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          asChild
-                          disabled={isUploadingServiceImage}
-                          className={cn(org.btnOutline, "min-h-10")}
-                        >
-                          <span>
-                            {isUploadingServiceImage ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Uploadingâ€¦
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload image
-                              </>
-                            )}
-                          </span>
-                        </Button>
-                      </label>
-                      <span className="text-xs text-stone-500">JPG, PNG Â· max 5MB</span>
-                    </div>
-
-                    {serviceImages.length > 0 && (
-                      <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-                        {serviceImages.map((imageId) => (
-                          <div
-                            key={imageId}
-                            className="group relative aspect-square overflow-hidden rounded-2xl border border-stone-100 bg-appointza-cream/50"
-                          >
-                            <img
-                              src={filesService.getImageUrl(imageId)}
-                              alt={`Service image ${imageId}`}
-                              className="h-full w-full object-cover"
-                            />
-                            <Button
-                              type="button"
-                              variant="destructive"
-                              size="sm"
-                              className="absolute right-2 top-2 h-7 w-7 p-0 opacity-0 transition-opacity group-hover:opacity-100"
-                              onClick={() => handleRemoveServiceImage(imageId)}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2 rounded-2xl border border-stone-100 bg-appointza-cream/40 px-4 py-3">
-                    <Checkbox
-                      id="edit-show-price"
-                      checked={service.show_price ?? true}
-                      onCheckedChange={(checked) =>
-                        setService({
-                          ...service,
-                          show_price: checked === true,
-                        })
-                      }
-                    />
-                    <Label
-                      htmlFor="edit-show-price"
-                      className="cursor-pointer text-sm font-normal text-stone-700"
-                    >
-                      Show price to customers
-                    </Label>
-                  </div>
-                </div>
-              </ServiceFormShell>
-            )}
           </TabsContent>
 
           <TabsContent value="events" className="mt-0 px-6 md:px-8 py-6 space-y-6 focus-visible:outline-none">
-            {showAddEventForm &&
-              (addEventStep === "details" ? (
-                <ServiceFormShell
-                  title="Add new event"
-                  description="Step 1 of 2 â€” Enter event details, then set up the booking form on this page."
-                  icon={Calendar}
-                  footer={
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={resetEventFlow}
-                        className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={handleSaveEvent}
-                        disabled={isCreatingEvent}
-                        className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
-                      >
-                        {isCreatingEvent ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Creatingâ€¦
-                          </>
-                        ) : (
-                          <>
-                            <Check className="mr-2 h-4 w-4" />
-                            Create & set up booking form
-                          </>
-                        )}
-                      </Button>
-                    </>
-                  }
-                >
-                  <EventDetailsFormFields
-                    event={event}
-                    setEvent={setEvent}
-                    idPrefix="event"
-                    toast={toast}
-                    eventImages={eventImages}
-                    isUploadingEventImage={isUploadingEventImage}
-                    onEventImageUpload={handleEventImageUpload}
-                    onRemoveEventImage={handleRemoveEventImage}
-                    filesService={filesService}
-                  />
-                </ServiceFormShell>
-              ) : (
-                <ServiceFormShell
-                  title={`Booking form â€” ${bookingFormEventName}`}
-                  description="Step 2 of 2 â€” Add questions guests answer when booking this event online."
-                  icon={ClipboardList}
-                  footer={
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={resetEventFlow}
-                        className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-                      >
-                        Done
-                      </Button>
-                      <Button
-                        type="button"
-                        onClick={handleSaveEventBookingForm}
-                        disabled={isSavingBookingForm || isLoadingBookingForm}
-                        className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
-                      >
-                        {isSavingBookingForm ? (
-                          <>
-                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Savingâ€¦
-                          </>
-                        ) : (
-                          <>
-                            <Save className="mr-2 h-4 w-4" />
-                            Save booking form
-                          </>
-                        )}
-                      </Button>
-                    </>
-                  }
-                >
-                  {isLoadingBookingForm ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
-                      <span className="text-sm text-stone-600">Loading booking formâ€¦</span>
-                    </div>
-                  ) : (
-                    <EventFormFieldsEditor
-                      idPrefix="services-create"
-                      fields={eventBookingFormFields}
-                      onChange={setEventBookingFormFields}
-                    />
-                  )}
-                </ServiceFormShell>
-              ))}
-
-
-            {showEventBookingPanel && (
-              <Card>
-                <CardHeader>
-                  <CardTitle>Booking form â€” {bookingFormEventName}</CardTitle>
-                  <CardDescription>
-                    Questions guests answer when booking this event on your public page.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {isLoadingBookingForm ? (
-                    <div className="flex items-center justify-center py-12">
-                      <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
-                      <span className="text-sm text-stone-600">Loading booking formâ€¦</span>
-                    </div>
-                  ) : (
-                    <EventFormFieldsEditor
-                      idPrefix="services-edit"
-                      fields={eventBookingFormFields}
-                      onChange={setEventBookingFormFields}
-                    />
-                  )}
-                  <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                    <Button variant="outline" onClick={resetEventFlow}>
-                      Cancel
-                    </Button>
-                    <Button
-                      onClick={handleSaveEventBookingForm}
-                      disabled={isSavingBookingForm || isLoadingBookingForm}
-                    >
-                      {isSavingBookingForm ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Savingâ€¦
-                        </>
-                      ) : (
-                        <>
-                          <Save className="mr-2 h-4 w-4" />
-                          Save booking form
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Events List - Only show when no form is open */}
-            {!showAddEventForm && !showEditEventForm && !showEventBookingPanel && (
-              <div className="space-y-4">
+            <div className="space-y-4">
                 <div className="flex w-full flex-col lg:flex-row lg:items-center gap-4 flex-wrap">
                   <div className="relative flex-1 min-w-[200px]">
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-stone-400 pointer-events-none" />
@@ -2260,64 +1474,140 @@ const OrganizationServices = () => {
                   </>
                 )}
               </div>
-            )}
-
-            {showEditEventForm && (
-              <ServiceFormShell
-                title="Edit event"
-                description="Make changes to the event details."
-                icon={Ticket}
-                footer={
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        setShowEditEventForm(false);
-                        setEditingEvent(null);
-                        setEvent(new Event());
-                        setEventImages([]);
-                      }}
-                      className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={handleSaveEvent}
-                      disabled={isUpdatingEvent}
-                      className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
-                    >
-                      {isUpdatingEvent ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Saving…
-                        </>
-                      ) : (
-                        <>
-                          <Check className="mr-2 h-4 w-4" />
-                          Save changes
-                        </>
-                      )}
-                    </Button>
-                  </>
-                }
-              >
-                <EventDetailsFormFields
-                  event={event}
-                  setEvent={setEvent}
-                  idPrefix="edit-event"
-                  toast={toast}
-                  eventImages={eventImages}
-                  isUploadingEventImage={isUploadingEventImage}
-                  onEventImageUpload={handleEventImageUpload}
-                  onRemoveEventImage={handleRemoveEventImage}
-                  filesService={filesService}
-                />
-              </ServiceFormShell>
-            )}
           </TabsContent>
         </Tabs>
+
+        <ResponsiveEditSheet
+          open={showAddForm || showEditForm}
+          onOpenChange={() => {}}
+          title={showEditForm ? "Edit service" : "Add new service"}
+          subtitle={
+            showEditForm ?
+              "Update name, pricing, duration, and images for this service."
+            : "Enter the details of the service you want to offer."
+          }
+          isEdit={showEditForm}
+          saving={showEditForm ? isUpdating : isCreating}
+          onCancel={closeServiceForm}
+          onSave={() => void handleSaveService()}
+          saveLabel={showEditForm ? "Save changes" : "Add service"}
+        >
+          <ServiceEditorFields
+            service={service}
+            onChange={setService}
+            idPrefix={showEditForm ? "edit" : undefined}
+            serviceImages={serviceImages}
+            onServiceImagesChange={setServiceImages}
+          />
+        </ResponsiveEditSheet>
+
+        <ResponsiveEditSheet
+          open={showComboForm}
+          onOpenChange={() => {}}
+          title="Create combo package"
+          subtitle="Create a combo package by selecting multiple services."
+          saving={isCreating}
+          onCancel={closeServiceForm}
+          onSave={() => void handleSaveService()}
+          saveLabel="Create combo"
+        >
+          <ComboEditorFields
+            service={service}
+            onChange={setService}
+            services={services}
+            selectedComboServices={selectedComboServices}
+            onSelectedComboServicesChange={setSelectedComboServices}
+          />
+        </ResponsiveEditSheet>
+
+        <ResponsiveEditSheet
+          open={showAddEventForm && addEventStep === "details"}
+          onOpenChange={() => {}}
+          title="Add new event"
+          subtitle="Step 1 of 2 — Enter event details, then set up the booking form."
+          saving={isCreatingEvent}
+          onCancel={resetEventFlow}
+          onSave={() => void handleSaveEvent()}
+          saveLabel="Create & set up booking form"
+        >
+          <EventDetailsFormFields
+            event={event}
+            setEvent={setEvent}
+            idPrefix="event"
+            toast={toast}
+            eventImages={eventImages}
+            onEventImagesChange={setEventImages}
+          />
+        </ResponsiveEditSheet>
+
+        <ResponsiveEditSheet
+          open={showAddEventForm && addEventStep === "booking"}
+          onOpenChange={() => {}}
+          title={`Booking form — ${bookingFormEventName}`}
+          subtitle="Step 2 of 2 — Add questions guests answer when booking this event online."
+          saving={isSavingBookingForm}
+          onCancel={resetEventFlow}
+          onSave={() => void handleSaveEventBookingForm()}
+          saveLabel="Save booking form"
+        >
+          {isLoadingBookingForm ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
+              <span className="text-sm text-stone-600">Loading booking form…</span>
+            </div>
+          ) : (
+            <EventFormFieldsEditor
+              idPrefix="services-create"
+              fields={eventBookingFormFields}
+              onChange={setEventBookingFormFields}
+            />
+          )}
+        </ResponsiveEditSheet>
+
+        <ResponsiveEditSheet
+          open={showEditEventForm}
+          onOpenChange={() => {}}
+          title="Edit event"
+          subtitle="Make changes to the event details."
+          isEdit
+          saving={isUpdatingEvent}
+          onCancel={resetEventFlow}
+          onSave={() => void handleSaveEvent()}
+          saveLabel="Save changes"
+        >
+          <EventDetailsFormFields
+            event={event}
+            setEvent={setEvent}
+            idPrefix="edit-event"
+            toast={toast}
+            eventImages={eventImages}
+            onEventImagesChange={setEventImages}
+          />
+        </ResponsiveEditSheet>
+
+        <ResponsiveEditSheet
+          open={showEventBookingPanel}
+          onOpenChange={() => {}}
+          title={`Booking form — ${bookingFormEventName}`}
+          subtitle="Questions guests answer when booking this event on your public page."
+          saving={isSavingBookingForm}
+          onCancel={resetEventFlow}
+          onSave={() => void handleSaveEventBookingForm()}
+          saveLabel="Save booking form"
+        >
+          {isLoadingBookingForm ? (
+            <div className="flex items-center justify-center py-12">
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
+              <span className="text-sm text-stone-600">Loading booking form…</span>
+            </div>
+          ) : (
+            <EventFormFieldsEditor
+              idPrefix="services-edit"
+              fields={eventBookingFormFields}
+              onChange={setEventBookingFormFields}
+            />
+          )}
+        </ResponsiveEditSheet>
 
         <AlertDialog
           open={deleteConfirm !== null}

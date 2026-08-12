@@ -23,6 +23,7 @@ const getConfig = () => {
         ? `http://localhost:${window.location.port || "8083"}`
         : "https://appointza.com",
     marketingDomain: "appointza.com",
+    domainname: "appointza.com",
     production: false,
     debugMode: true,
     googleMapsApiKey: 'AIzaSyCpgFKWRzhotWFPW5smIfAAXxPGGHQMsHQ',
@@ -72,15 +73,32 @@ const getDomainFromBaseUrl = (baseUrl: string) => {
 };
 
 export function getMarketingDomain(): string {
-  const config = getConfig() as { marketingDomain?: string };
+  const config = getConfig() as { marketingDomain?: string; domainname?: string };
   if (config.marketingDomain) {
     return config.marketingDomain;
+  }
+  if (config.domainname) {
+    return config.domainname;
   }
   const apiDomain = getAppDomain();
   if (apiDomain === "localhost" || apiDomain === "127.0.0.1") {
     return "appointza.com";
   }
   return apiDomain;
+}
+
+/** Org subdomain parent host — `domainname` from config.js, or localhost:port in dev. */
+export function getDomainName(): string {
+  if (typeof window !== "undefined") {
+    const h = window.location.hostname.toLowerCase();
+    if (h === "localhost" || h === "127.0.0.1" || h.endsWith(".localhost")) {
+      const port = window.location.port || "8083";
+      return port ? `localhost:${port}` : "localhost";
+    }
+  }
+
+  const config = getConfig() as { domainname?: string; marketingDomain?: string };
+  return config.domainname || config.marketingDomain || "appointza.com";
 }
 
 /** UI origin for login / Google Sign-In — never an org subdomain or API port. */

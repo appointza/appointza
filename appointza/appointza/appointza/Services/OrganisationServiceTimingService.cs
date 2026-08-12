@@ -554,8 +554,8 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
 
             DateTime maxBookingDate = today.AddDays(openBefore);
 
-            // Check booking window
-            if (appoinment.appoinmentdate.Date > maxBookingDate)
+            // Check booking window (0 = no limit)
+            if (openBefore > 0 && appoinment.appoinmentdate.Date > maxBookingDate)
             {
                 return $"Appointments can only be booked up to {maxBookingDate:dd MMM yyyy}.";
             }

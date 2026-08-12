@@ -1,22 +1,68 @@
 export function normalizeApiBaseUrl(url: string): string {
   const trimmed = url.replace(/\/+$/, "");
+  if (!trimmed || trimmed === "/api") return "/api";
   return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
 }
 
+type StayAppConfig = {
+  baseurl?: string;
+  apiBaseUrl?: string;
+  /** When true, always use same-origin `/api` (Vite preview/dev proxy). */
+  useRelativeApi?: boolean;
+};
+
+function getAppConfig(): StayAppConfig | undefined {
+  return (window as unknown as { APP_CONFIG?: StayAppConfig })?.APP_CONFIG;
+}
+
+function resolveAbsoluteApiOrigin(config: StayAppConfig): string | null {
+  const candidate = (config.apiBaseUrl || config.baseurl || "").trim();
+  if (!candidate || candidate === "/api") return null;
+
+  try {
+    const withScheme = /^https?:\/\//i.test(candidate)
+      ? candidate
+      : `http://${candidate.replace(/^\/\//, "")}`;
+    return new URL(withScheme).origin;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * API base URL resolution order:
+ * 1. VITE_API_URL
+ * 2. Same-origin `/api` when UI runs on a different port than the API (multi-port preview)
+ * 3. window.APP_CONFIG.apiBaseUrl or baseurl
+ * 4. Dev fallback: local API
+ * 5. Prod fallback: same-origin /api
+ */
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_URL as string | undefined;
   if (fromEnv?.trim()) {
     return normalizeApiBaseUrl(fromEnv.trim());
   }
 
-  const runtimeBaseUrl = (window as unknown as { APP_CONFIG?: { baseurl?: string } })
-    ?.APP_CONFIG?.baseurl;
-  if (runtimeBaseUrl?.trim()) {
-    return normalizeApiBaseUrl(runtimeBaseUrl.trim());
+  const config = getAppConfig();
+  if (config?.useRelativeApi) {
+    return "/api";
+  }
+
+  if (typeof window !== "undefined" && config) {
+    const apiOrigin = resolveAbsoluteApiOrigin(config);
+    if (apiOrigin && apiOrigin !== window.location.origin) {
+      // Stay UI on :5001 (or :8088 dev) — proxy /api to API on :5000
+      return "/api";
+    }
+  }
+
+  const runtimeBaseUrl = config?.apiBaseUrl?.trim() || config?.baseurl?.trim();
+  if (runtimeBaseUrl && runtimeBaseUrl !== "/api") {
+    return normalizeApiBaseUrl(runtimeBaseUrl);
   }
 
   if (import.meta.env.DEV) {
-    return "https://localhost:7117/api";
+    return normalizeApiBaseUrl("http://localhost:5000");
   }
 
   return "/api";
@@ -28,6 +74,9 @@ export function getApiOrigin(): string {
   if (/^https?:\/\//i.test(apiBase)) {
     return apiBase.replace(/\/api\/?$/i, "");
   }
+  const config = getAppConfig();
+  const apiOrigin = config ? resolveAbsoluteApiOrigin(config) : null;
+  if (apiOrigin) return apiOrigin;
   return window.location.origin;
 }
 
@@ -72,4 +121,10 @@ export function resolveMediaUrl(url: string | null | undefined): string {
   }
 
   return `${getApiOrigin()}${path}`;
+}
+
+/** Stay UI origin for links (current browser host, e.g. localhost:5001). */
+export function getStayUiOrigin(): string {
+  if (typeof window === "undefined") return "";
+  return window.location.origin;
 }

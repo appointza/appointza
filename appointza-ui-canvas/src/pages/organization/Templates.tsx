@@ -12,11 +12,22 @@ import { ReferenceValueService } from "@/services/referencevalue.service";
 import { OrganisationLocation, OrganisationLocationSelectReq, UpdateLocationTemplateIdReq } from "@/models/organisationlocation.model";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
+import {
+  buildTemplateBuilderPath,
+} from "@/utils/organizationOnboarding.util";
 import { OrganisationService } from "@/services/organisation.service";
 import { Organisation, OrganisationSelectReq } from "@/models/organisation.model";
-import { environment, getAppDomain } from "@/utils/environment";
-import { generateSubdomainUrl } from "@/utils/slug.util";
-import { buildOrganisationPublicSiteUrl } from "@/utils/orgPublicSiteUrl.util";
+import {
+  buildOrganisationTemplateBookingUrl,
+  buildOrganisationCustomUrlHost,
+  buildOrganisationPublicSiteOriginFromHost,
+} from "@/utils/orgPublicSiteUrl.util";
+import { SiteDetailsService } from "@/services/siteDetails.service";
+import { EventService } from "@/services/event.service";
+import { SiteDetailsItem } from "@/models/sitedetail.model";
+import { renderSiteTemplateHtml } from "@/utils/templateRenderer.util";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
@@ -28,6 +39,8 @@ const templatesSectionIconWrap =
 const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
   const { user, isAuthenticated } = useAuth();
+  const { isComplete, hasCustomDomain, hasServices, hasWebsite, hasTiming, nextStep } = useOnboardingStatus();
+  const inOnboarding = !embedded && !isComplete && hasCustomDomain && hasServices;
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
@@ -61,10 +74,12 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   
   // Booking page URL (same location as template assignment)
-  const [encryptedUrl, setEncryptedUrl] = useState<string>('');
+  const [bookingUrl, setBookingUrl] = useState<string>('');
   const [isGeneratingUrl, setIsGeneratingUrl] = useState(false);
   const [organisationDetails, setOrganisationDetails] = useState<Organisation | null>(null);
   const [customUrl, setCustomUrl] = useState<string>('');
+  const [previewSiteData, setPreviewSiteData] = useState<SiteDetailsItem | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   // Get organization ID from user context
   const organizationId = useMemo(() => {
@@ -80,6 +95,21 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   const locationService = useMemo(() => new OrganisationLocationService(), []);
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
   const organisationService = useMemo(() => new OrganisationService(), []);
+  const siteDetailsService = useMemo(() => new SiteDetailsService(), []);
+  const eventService = useMemo(() => new EventService(), []);
+
+  const renderTemplatePreviewHtml = useCallback(
+    (templateContent: string) => {
+      if (!templateContent?.includes("<!DOCTYPE html")) {
+        return templateContent;
+      }
+      if (!previewSiteData) {
+        return templateContent;
+      }
+      return renderSiteTemplateHtml(templateContent, previewSiteData);
+    },
+    [previewSiteData],
+  );
 
   // Fetch templates from ReferenceValue with referencetypeid = 5
   const fetchTemplates = useCallback(async () => {
@@ -325,36 +355,31 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     }
   }, [isAuthenticated, organizationId, organisationService]);
 
-  // Generate custom URL for booking page
+  // Custom URL host from organisationlocation.customurl + domainname in config.js
   const generateCustomUrl = (location: OrganisationLocation) => {
-    if (!organisationDetails || !location) return '';
-    
-    return generateSubdomainUrl(
-      organisationDetails.name || 'organization',
-      location.name || 'area',
-      location.city || 'city',
-      location.state || 'state',
-      getAppDomain()
-    );
+    if (!location) return "";
+    return buildOrganisationCustomUrlHost({ customUrl: location.customurl });
   };
 
-  // Generate encrypted URL for booking page
-  const generateEncryptedUrl = useCallback(async (locationId: number) => {
+  // Generate booking URL for location (/template/{orgloctempid})
+  const generateBookingUrl = useCallback(async (locationId: number) => {
     if (locationId > 0) {
       setIsGeneratingUrl(true);
       try {
-        const location = locations.find((loc) => loc.id === locationId);
-        const url = buildOrganisationPublicSiteUrl({
-          organisationName: organisationDetails?.name || "organization",
-          areaName: location?.name || "area",
-          cityName: location?.city || "city",
-          stateName: location?.state || "state",
-          customUrl: location?.customurl,
-        });
-        setEncryptedUrl(url);
+        const selectedLocation = locations.find((loc) => loc.id === locationId);
+        const url = buildOrganisationTemplateBookingUrl(selectedLocation?.orgloctempid);
+        setBookingUrl(url);
+        if (!url) {
+          toast({
+            title: "Booking link unavailable",
+            description:
+              "This location has no booking GUID yet. Run the orgloctempid backfill on the database, then refresh this page.",
+            variant: "destructive",
+          });
+        }
       } catch (error) {
         console.error('Error generating encrypted URL:', error);
-        setEncryptedUrl('');
+        setBookingUrl('');
         toast({
           title: "Error",
           description: "Failed to generate booking URL",
@@ -364,15 +389,28 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         setIsGeneratingUrl(false);
       }
     } else {
-      setEncryptedUrl('');
+      setBookingUrl('');
     }
-  }, [toast, locations, organisationDetails]);
+  }, [locations, toast]);
+
+  const openTemplateBuilder = (mode: "new" | "edit" = "new") => {
+    if (!selectedLocationId) {
+      navigate(buildTemplateBuilderPath(0));
+      return;
+    }
+    navigate(
+      buildTemplateBuilderPath(
+        selectedLocationId,
+        mode === "edit" && selectedTemplate ? Number(selectedTemplate) : undefined,
+      ),
+    );
+  };
 
   // Copy URL to clipboard
   const copyUrlToClipboard = async () => {
-    if (encryptedUrl) {
+    if (bookingUrl) {
       try {
-        await navigator.clipboard.writeText(encryptedUrl);
+        await navigator.clipboard.writeText(bookingUrl);
         toast({
           title: "URL Copied",
           description: "Booking URL has been copied to clipboard",
@@ -388,11 +426,13 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     }
   };
 
+  const customUrlOrigin = customUrl ? buildOrganisationPublicSiteOriginFromHost(customUrl) : "";
+
   // Copy custom URL to clipboard
   const copyCustomUrlToClipboard = async () => {
-    if (customUrl) {
+    if (customUrlOrigin) {
       try {
-        await navigator.clipboard.writeText(customUrl);
+        await navigator.clipboard.writeText(customUrlOrigin);
         toast({
           title: "Custom URL Copied",
           description: "Custom booking URL has been copied to clipboard",
@@ -410,7 +450,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
   // Share URL
   const shareUrl = async () => {
-    if (encryptedUrl && navigator.share) {
+    if (bookingUrl && navigator.share) {
       try {
         const selectedLocation = locations.find(loc => loc.id === selectedLocationId);
         const locationName = selectedLocation?.city || 'this location';
@@ -418,7 +458,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         await navigator.share({
           title: 'Book Appointment - Appointza',
           text: `Book your appointment at ${locationName}!`,
-          url: encryptedUrl,
+          url: bookingUrl,
         });
       } catch (error) {
         console.error('Error sharing:', error);
@@ -428,6 +468,14 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
       copyUrlToClipboard();
     }
   };
+
+  // During setup, send users without an assigned org template straight to the builder.
+  useEffect(() => {
+    if (embedded || isLoading || locations.length === 0 || !selectedLocationId) return;
+    if (isComplete || hasWebsite) return;
+
+    navigate(buildTemplateBuilderPath(selectedLocationId), { replace: true });
+  }, [embedded, isLoading, isComplete, hasWebsite, locations, selectedLocationId, navigate]);
 
   // Load templates and locations on component mount
   useEffect(() => {
@@ -439,7 +487,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   // Generate booking URL when location changes
   useEffect(() => {
     if (selectedLocationId && selectedLocationId > 0) {
-      generateEncryptedUrl(selectedLocationId);
+      generateBookingUrl(selectedLocationId);
       
       const selectedLocation = locations.find(loc => loc.id === selectedLocationId);
       if (selectedLocation) {
@@ -447,10 +495,10 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         setCustomUrl(customUrlGenerated);
       }
     } else {
-      setEncryptedUrl('');
+      setBookingUrl('');
       setCustomUrl('');
     }
-  }, [selectedLocationId, locations, organisationDetails, generateEncryptedUrl]);
+  }, [selectedLocationId, locations, organisationDetails, generateBookingUrl]);
 
   // Check for existing template when location changes
   useEffect(() => {
@@ -460,6 +508,61 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
       setExistingTemplate(null);
     }
   }, [selectedLocationId, checkLocationTemplate]);
+
+  // Load real location/org/services data for template preview (same renderer as public subdomain).
+  useEffect(() => {
+    if (!selectedLocationId || selectedLocationId <= 0) {
+      setPreviewSiteData(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadPreviewData = async () => {
+      setPreviewLoading(true);
+      try {
+        const siteResponse = await siteDetailsService.select(selectedLocationId);
+        if (cancelled || !siteResponse?.length) {
+          setPreviewSiteData(null);
+          return;
+        }
+
+        const siteData = siteResponse[0];
+        let publicEvents: unknown[] = [];
+        try {
+          const eventsResponse = await eventService.select({
+            id: 0,
+            organisation_id: siteData.organisationdetail?.id || organizationId,
+            organisation_location_id: siteData.locationdetail?.id || selectedLocationId,
+            status: "",
+            is_public: true,
+          });
+          publicEvents = (eventsResponse || []).filter(
+            (event: { is_public?: boolean }) => event?.is_public === true,
+          );
+        } catch {
+          // events are optional for preview
+        }
+
+        if (!cancelled) {
+          setPreviewSiteData({
+            ...(siteData as SiteDetailsItem),
+            events: publicEvents,
+          } as SiteDetailsItem);
+        }
+      } catch (error) {
+        console.error("Failed to load template preview data:", error);
+        if (!cancelled) setPreviewSiteData(null);
+      } finally {
+        if (!cancelled) setPreviewLoading(false);
+      }
+    };
+
+    loadPreviewData();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLocationId, siteDetailsService, eventService, organizationId]);
 
 
   const TemplatePreviews = () => {
@@ -494,16 +597,20 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               setSelectedTemplate(template.id as TemplateType);
             }}
           >
-            <div className="aspect-video bg-stone-100">
+            <div className="aspect-video bg-stone-100 overflow-hidden">
               {template.content && template.content.includes("<!DOCTYPE html>") ? (
-                <div className="h-full w-full overflow-hidden">
+                previewLoading && selectedLocationId ? (
+                  <div className="flex h-full items-center justify-center">
+                    <Loader2 className="h-6 w-6 animate-spin text-appointza-coral" />
+                  </div>
+                ) : (
                   <iframe
                     title={`${template.name} preview`}
-                    srcDoc={template.content}
-                    className="h-[400%] w-[400%] origin-top-left scale-[0.25] border-0 pointer-events-none"
-                    sandbox="allow-scripts allow-same-origin"
+                    srcDoc={renderTemplatePreviewHtml(template.content)}
+                    className="h-full w-full border-0 pointer-events-none bg-white"
+                    sandbox="allow-scripts allow-same-origin allow-forms"
                   />
-                </div>
+                )
               ) : (
                 <img
                   src={template.previewImage}
@@ -537,402 +644,55 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   };
 
 
-  const HtmlTemplateRenderer = ({ templateContent }: { templateContent: string }) => {
-    // Sample data for template rendering
-    const sampleData = {
-      organisationdetail: {
-        name: "City Hospital",
-        tagline: "Your Health, Our Priority"
-      },
-      locationdetail: {
-        addressline1: "123 Health Avenue",
-        addressline2: "Medical District",
-        city: "Chennai",
-        state: "Tamil Nadu",
-        pincode: "600001",
-        images: [1, 2, 3] // Sample image IDs
-      },
-      orgnaisatinservice: [
-        { Servicename: "General Checkup", notes: "Complete health assessment", prize: 500, timetaken: 30 },
-        { Servicename: "Cardiology Consultation", notes: "Heart health evaluation", prize: 1000, timetaken: 45 },
-        { Servicename: "Pediatric Care", notes: "Child health services", prize: 700, timetaken: 40 }
-      ],
-      OrganisationServiceTiming: [
-        { day_of_week: 1, start_time: "9:00 AM", end_time: "5:00 PM" },
-        { day_of_week: 2, start_time: "9:00 AM", end_time: "5:00 PM" },
-        { day_of_week: 3, start_time: "9:00 AM", end_time: "5:00 PM" },
-        { day_of_week: 4, start_time: "9:00 AM", end_time: "5:00 PM" },
-        { day_of_week: 5, start_time: "9:00 AM", end_time: "5:00 PM" },
-        { day_of_week: 6, start_time: "10:00 AM", end_time: "2:00 PM" },
-        { day_of_week: 7, start_time: "Closed", end_time: "Closed" }
-      ],
-      environment: {
-        baseurl: environment.baseurl
-      }
-    };
-
-    // Simple template replacement (in a real app, you'd use a proper template engine)
-    let processedContent = templateContent;
-    
-    // Replace template variables with sample data
-    processedContent = processedContent.replace(/\{\{organisationdetail\.name\}\}/g, sampleData.organisationdetail.name);
-    processedContent = processedContent.replace(/\{\{organisationdetail\.tagline\}\}/g, sampleData.organisationdetail.tagline);
-    processedContent = processedContent.replace(/\{\{locationdetail\.addressline1\}\}/g, sampleData.locationdetail.addressline1);
-    processedContent = processedContent.replace(/\{\{locationdetail\.addressline2\}\}/g, sampleData.locationdetail.addressline2);
-    processedContent = processedContent.replace(/\{\{locationdetail\.city\}\}/g, sampleData.locationdetail.city);
-    processedContent = processedContent.replace(/\{\{locationdetail\.state\}\}/g, sampleData.locationdetail.state);
-    processedContent = processedContent.replace(/\{\{locationdetail\.pincode\}\}/g, sampleData.locationdetail.pincode);
-    processedContent = processedContent.replace(/\{\{environment\.baseurl\}\}/g, sampleData.environment.baseurl);
-
-    // Handle services loop
-    const servicesHtml = sampleData.orgnaisatinservice.map(service => 
-      `<div class="service-card">
-        <div class="row align-items-center">
-          <div class="col-md-8">
-            <h4 class="fw-bold mb-2">${service.Servicename}</h4>
-            <p class="text-muted mb-3">${service.notes}</p>
-          </div>
-          <div class="col-md-4 text-md-end">
-            <div class="price mb-2">₹${service.prize}</div>
-            <span class="badge">${service.timetaken} minutes</span>
-          </div>
-        </div>
-      </div>`
-    ).join('');
-    processedContent = processedContent.replace(/\{\{#orgnaisatinservice\}\}[\s\S]*?\{\{\/orgnaisatinservice\}\}/g, servicesHtml);
-
-    // Handle timing loop
-    const timingHtml = sampleData.OrganisationServiceTiming.map(timing => {
-      const dayNames = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-      return `<div class="col-md-6 col-lg-4 mb-3">
-        <div class="d-flex justify-content-between align-items-center p-3 bg-white rounded">
-          <span class="fw-semibold">${dayNames[timing.day_of_week]}</span>
-          <span class="text-primary fw-semibold">${timing.start_time} - ${timing.end_time}</span>
-        </div>
-      </div>`;
-    }).join('');
-    processedContent = processedContent.replace(/\{\{#OrganisationServiceTiming\}\}[\s\S]*?\{\{\/OrganisationServiceTiming\}\}/g, timingHtml);
-
-    // Handle location images
-    const imagesHtml = sampleData.locationdetail.images.map((imageId, index) => 
-      `<img src="${sampleData.environment.baseurl}/api/Files/Get?id=${imageId}" alt="Location Image" class="gallery-image">`
-    ).join('');
-    processedContent = processedContent.replace(/\{\{#each locationdetail\.images\}\}[\s\S]*?\{\{\/each\}\}/g, imagesHtml);
-
-    return (
-      <div className="w-full h-screen border rounded-lg overflow-hidden">
-        <iframe
-          srcDoc={processedContent}
-          className="w-full h-full border-0"
-          title="Template Preview"
-          sandbox="allow-scripts allow-same-origin"
-        />
-      </div>
-    );
-  };
-
   const TemplatePreview = () => {
-    const selectedTemplateData = availableTemplates.find(t => t.id === selectedTemplate);
-    
+    const selectedTemplateData = availableTemplates.find((t) => t.id === selectedTemplate);
+
     if (!selectedTemplateData) {
       return (
-        <div className="text-center py-8 text-gray-500">
+        <div className="py-8 text-center text-gray-500">
           <p>Please select a template to preview.</p>
         </div>
       );
     }
-    
-    // If it's an HTML template, render it
-    if (selectedTemplateData?.content && selectedTemplateData.content.includes('<!DOCTYPE html>')) {
-      return <HtmlTemplateRenderer templateContent={selectedTemplateData.content} />;
+
+    if (!selectedLocationId) {
+      return (
+        <div className="rounded-2xl border border-dashed border-stone-200 bg-appointza-cream/40 py-10 text-center text-sm text-stone-500">
+          Select a location above to preview with your real business data.
+        </div>
+      );
     }
 
-    // Fallback to original preview for non-HTML templates
-    const orgName = "City Hospital";
-    const services = [
-      { id: "s1", name: "General Checkup", price: 500, duration: 30 },
-      { id: "s2", name: "Cardiology Consultation", price: 1000, duration: 45 },
-      { id: "s3", name: "Pediatric Care", price: 700, duration: 40 }
-    ];
-    const specializations = [
-      { id: "sp1", name: "Cardiology" },
-      { id: "sp2", name: "Neurology" },
-      { id: "sp3", name: "Orthopedics" }
-    ];
-    const hours = {
-      "Monday": "9:00 AM - 5:00 PM",
-      "Tuesday": "9:00 AM - 5:00 PM",
-      "Wednesday": "9:00 AM - 5:00 PM",
-      "Thursday": "9:00 AM - 5:00 PM",
-      "Friday": "9:00 AM - 5:00 PM",
-      "Saturday": "10:00 AM - 2:00 PM",
-      "Sunday": "Closed"
-    };
-    const location = {
-      address: "123 Health Ave, Chennai",
-      coords: { latitude: 13.0827, longitude: 80.2707 }
-    };
+    if (previewLoading) {
+      return (
+        <div className={cn(org.loading, "flex-col gap-2 py-12")}>
+          <Loader2 className="h-8 w-8 animate-spin text-appointza-coral" />
+          <span className="text-sm text-stone-600">Loading preview…</span>
+        </div>
+      );
+    }
 
-    // Classic Template
-    if (selectedTemplate === "classic") {
+    if (
+      selectedTemplateData.content &&
+      selectedTemplateData.content.includes("<!DOCTYPE html>")
+    ) {
       return (
-        <div className="border rounded-lg overflow-hidden">
-          <div 
-            className="p-6 text-white" 
-            style={{ backgroundColor: primaryColor }}
-          >
-            <h2 className="text-3xl font-bold">{orgName}</h2>
-            <p className="opacity-80">Healthcare Services</p>
-          </div>
-          
-          <div className="p-6 space-y-6">
-            {showServices && (
-              <div>
-                <h3 className="text-xl font-semibold mb-4">Our Services</h3>
-                <div className="space-y-3">
-                  {services.map(service => (
-                    <div key={service.id} className="flex justify-between items-center p-3 border rounded-md">
-                      <div>
-                        <h4 className="font-medium">{service.name}</h4>
-                        <span className="text-sm text-gray-500">{service.duration} min</span>
-                      </div>
-                      <div>
-                        <span className="font-semibold">₹{service.price}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {showSpecializations && (
-                <div>
-                  <h3 className="text-xl font-semibold mb-4">Specializations</h3>
-                  <ul className="list-disc pl-5 space-y-2">
-                    {specializations.map(spec => (
-                      <li key={spec.id}>{spec.name}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-              
-              {showHours && (
-                <div>
-                  <h3 className="text-xl font-semibold mb-4">Opening Hours</h3>
-                  <div className="space-y-2">
-                    {Object.entries(hours).map(([day, time]) => (
-                      <div key={day} className="flex justify-between">
-                        <span className="font-medium">{day}</span>
-                        <span>{time}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-            
-            {showLocation && (
-              <div>
-                <h3 className="text-xl font-semibold mb-4">Location</h3>
-                <p className="mb-2">{location.address}</p>
-                <Button className="bg-gray-100 hover:bg-gray-200 text-gray-800">
-                  View on Map
-                </Button>
-              </div>
-            )}
-            
-            <Button 
-              className="w-full mt-6"
-              style={{ 
-                backgroundColor: secondaryColor,
-                color: "white"
-              }}
-            >
-              Book Appointment
-            </Button>
-          </div>
+        <div className="overflow-hidden rounded-2xl border border-stone-200 bg-white">
+          <iframe
+            srcDoc={renderTemplatePreviewHtml(selectedTemplateData.content)}
+            className="h-[min(70vh,720px)] w-full border-0"
+            title="Template Preview"
+            sandbox="allow-scripts allow-same-origin allow-forms"
+          />
         </div>
       );
     }
-    
-    // Modern Template
-    else if (selectedTemplate === "modern") {
-      return (
-        <div className="overflow-hidden rounded-lg border">
-          <div style={{ backgroundColor: primaryColor }} className="h-20 relative">
-            <div className="absolute -bottom-10 left-6 bg-white rounded-full p-3 shadow-md">
-              <svg viewBox="0 0 24 24" className="w-14 h-14" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path 
-                  d="M12 4C7.58172 4 4 7.58172 4 12C4 16.4183 7.58172 20 12 20C16.4183 20 20 16.4183 20 12C20 7.58172 16.4183 4 12 4ZM12 16C9.79086 16 8 14.2091 8 12C8 9.79086 9.79086 8 12 8C14.2091 8 16 9.79086 16 12C16 14.2091 14.2091 16 12 16Z" 
-                  fill={secondaryColor} 
-                />
-              </svg>
-            </div>
-          </div>
-          
-          <div className="pt-12 px-6 pb-6">
-            <h2 className="text-2xl font-bold">{orgName}</h2>
-            <div className="flex gap-2 mt-1 mb-6">
-              {specializations.slice(0, 3).map(spec => (
-                <span 
-                  key={spec.id} 
-                  className="px-2 py-1 text-xs rounded" 
-                  style={{ 
-                    backgroundColor: `${secondaryColor}20`, // Using 20% opacity
-                    color: secondaryColor 
-                  }}
-                >
-                  {spec.name}
-                </span>
-              ))}
-            </div>
-            
-            <div className="space-y-6">
-              {showServices && (
-                <div>
-                  <h3 className="font-medium mb-3 flex items-center gap-2">
-                    <span style={{ color: secondaryColor }}>●</span>
-                    Our Services
-                  </h3>
-                  <div className="grid grid-cols-1 gap-3">
-                    {services.map(service => (
-                      <div key={service.id} className="flex justify-between p-3 bg-gray-50 rounded-md">
-                        <div>
-                          <h4 className="font-medium">{service.name}</h4>
-                          <span className="text-sm text-gray-500">{service.duration} min</span>
-                        </div>
-                        <div className="font-semibold">₹{service.price}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {showHours && (
-                  <div>
-                    <h3 className="font-medium mb-3 flex items-center gap-2">
-                      <span style={{ color: secondaryColor }}>●</span>
-                      Hours
-                    </h3>
-                    <div className="space-y-1">
-                      {Object.entries(hours).map(([day, time], i) => (
-                        <div 
-                          key={day} 
-                          className={`flex justify-between p-2 ${
-                            i % 2 === 0 ? 'bg-gray-50' : ''
-                          }`}
-                        >
-                          <span>{day}</span>
-                          <span className="font-medium">{time}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                {showLocation && (
-                  <div>
-                    <h3 className="font-medium mb-3 flex items-center gap-2">
-                      <span style={{ color: secondaryColor }}>●</span>
-                      Find Us
-                    </h3>
-                    <div className="bg-gray-50 p-3 rounded-md">
-                      <p className="mb-2">{location.address}</p>
-                      <Button 
-                        variant="outline"
-                        className="w-full"
-                      >
-                        Get Directions
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <Button 
-                className="w-full mt-4"
-                style={{ 
-                  backgroundColor: secondaryColor,
-                  color: "white" 
-                }}
-              >
-                Book Now
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    
-    // Minimalist Template
-    else {
-      return (
-        <div className="border rounded-lg overflow-hidden">
-          <div className="p-8 text-center">
-            <h2 className="text-3xl font-bold mb-2" style={{ color: primaryColor }}>{orgName}</h2>
-            {showSpecializations && (
-              <p className="text-gray-500 mb-6">
-                {specializations.map(s => s.name).join(" • ")}
-              </p>
-            )}
-            
-            <div className="max-w-md mx-auto space-y-8">
-              {showServices && (
-                <div>
-                  <div className="space-y-4">
-                    {services.map(service => (
-                      <div 
-                        key={service.id} 
-                        className="flex justify-between border-b pb-3"
-                      >
-                        <div>
-                          <h4 className="font-medium">{service.name}</h4>
-                          <span className="text-sm text-gray-500">{service.duration} min</span>
-                        </div>
-                        <div className="font-medium">₹{service.price}</div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {showHours && (
-                <div>
-                  <h3 className="text-sm uppercase tracking-widest text-gray-500 mb-3">Hours</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    {Object.entries(hours).map(([day, time]) => (
-                      <div key={day}>
-                        <span className="font-medium">{day}: </span>
-                        <span>{time}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-              
-              {showLocation && (
-                <div>
-                  <h3 className="text-sm uppercase tracking-widest text-gray-500 mb-2">Location</h3>
-                  <p>{location.address}</p>
-                </div>
-              )}
-              
-              <Button 
-                className="w-full"
-                style={{ 
-                  backgroundColor: secondaryColor,
-                  color: "white"
-                }}
-              >
-                Schedule Appointment
-              </Button>
-            </div>
-          </div>
-        </div>
-      );
-    }
+
+    return (
+      <div className="py-8 text-center text-gray-500">
+        <p>This template has no HTML content to preview.</p>
+      </div>
+    );
   };
 
   return (
@@ -945,6 +705,22 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         />
       ) : null}
       <div className={cn(embedded ? settingsEmbedded.sectionBody : "space-y-4 sm:space-y-6")}>
+        {inOnboarding && (
+          <div className={cn(!embedded && "org-page-section pb-0 pt-2 sm:pt-4")}>
+            <OnboardingPageGuide
+              compact
+              stepId="website"
+              hasCustomDomain={hasCustomDomain}
+              hasServices={hasServices}
+              hasWebsite={hasWebsite}
+              hasTiming={hasTiming}
+            />
+            <p className="mt-3 text-sm text-stone-600">
+              Save your page to link it to your location. Next you&apos;ll set business hours.
+            </p>
+          </div>
+        )}
+
         {!embedded && (
           <div className="flex justify-between items-center">
             <h1 className="text-xl sm:text-2xl font-bold">Templates & Booking Page</h1>
@@ -971,14 +747,14 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                 <Button
                   variant="outline"
                   className={cn(org.btnOutline, "min-h-10")}
-                  onClick={() => navigate("/organization/template-builder")}
+                  onClick={() => openTemplateBuilder("edit")}
                 >
                 <PencilLine className="mr-2 h-4 w-4 text-[#E85D4C]" />
                 Open AI builder
               </Button>
               <Button
                 className={cn(org.btnPrimary, "min-h-10")}
-                onClick={() => navigate("/organization/template-builder")}
+                onClick={() => openTemplateBuilder("new")}
               >
                 <Wand2 className="mr-2 h-4 w-4" />
                 New AI page
@@ -1095,6 +871,22 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
             <TemplatePreviews />
           </div>
 
+          {selectedTemplate ? (
+            <Card className={cn(org.card, "border-stone-100")}>
+              <CardHeader className="space-y-1.5">
+                <CardTitle className="text-lg text-appointza-navy sm:text-xl">
+                  Live template preview
+                </CardTitle>
+                <CardDescription className="text-stone-500">
+                  Matches the public subdomain page — uses your selected location&apos;s real data.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <TemplatePreview />
+              </CardContent>
+            </Card>
+          ) : null}
+
           {selectedLocationId && selectedLocationId > 0 ? (
             <Card className={cn(org.card, "border-stone-100")}>
               <CardHeader className="space-y-1.5">
@@ -1105,8 +897,10 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   Your booking link
                 </CardTitle>
                 <CardDescription className="text-stone-500">
-                  Share this URL for bookings at{" "}
+                  Share link for bookings at{" "}
                   {locations.find((loc) => loc.id === selectedLocationId)?.city || "your location"}
+                  {" "}
+                  (uses location GUID)
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -1119,7 +913,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                         <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-stone-400" />
                       )}
                       <span className="flex-1 break-all font-mono text-xs text-stone-700 sm:text-sm">
-                        {encryptedUrl || "Generating URL…"}
+                        {bookingUrl || (isGeneratingUrl ? "Generating URL…" : "No booking GUID for this location")}
                       </span>
                     </div>
                   </div>
@@ -1127,7 +921,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                     <Button
                       onClick={copyUrlToClipboard}
-                      disabled={!encryptedUrl || isGeneratingUrl}
+                      disabled={!bookingUrl || isGeneratingUrl}
                       variant="outline"
                       className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
                     >
@@ -1136,7 +930,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                     </Button>
                     <Button
                       onClick={shareUrl}
-                      disabled={!encryptedUrl || isGeneratingUrl}
+                      disabled={!bookingUrl || isGeneratingUrl}
                       variant="outline"
                       className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
                     >
@@ -1144,8 +938,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                       Share
                     </Button>
                     <Button
-                      onClick={() => window.open(encryptedUrl, "_blank")}
-                      disabled={!encryptedUrl || isGeneratingUrl}
+                      onClick={() => window.open(bookingUrl, "_blank")}
+                      disabled={!bookingUrl || isGeneratingUrl}
                       className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
@@ -1173,8 +967,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                           Copy
                         </Button>
                         <Button
-                          onClick={() => window.open(`https://${customUrl}`, "_blank")}
-                          disabled={!customUrl}
+                          onClick={() => customUrlOrigin && window.open(customUrlOrigin, "_blank")}
+                          disabled={!customUrlOrigin}
                           className={cn(org.btnPrimary, "min-h-10 w-full sm:w-auto")}
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />

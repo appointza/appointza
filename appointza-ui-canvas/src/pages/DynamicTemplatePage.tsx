@@ -1,56 +1,21 @@
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { OrganisationSiteTemplateView } from "@/components/template/OrganisationSiteTemplateView";
 import { SiteDetailsService } from "@/services/siteDetails.service";
-import { EncryptionUtil } from "@/utils/encryption.util";
-import { getAppDomain } from "@/utils/environment";
-import {
-  customSiteOriginsMatch,
-  isMainAppHostname,
-  parseCustomSiteOrigin,
-} from "@/utils/slug.util";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
-import { isLegacyTemplatePathOnOrgSubdomain } from "@/utils/orgPublicSiteUrl.util";
-
-function decodeTemplateLocationId(templateId?: string): number {
-  if (!templateId) return 0;
-
-  try {
-    let locationId = EncryptionUtil.decodeLocationId(templateId);
-    if (locationId === 0) {
-      locationId = EncryptionUtil.decodeLocationIdSimple(templateId);
-    }
-    return locationId;
-  } catch {
-    return 0;
-  }
-}
+import { isOrgLocTempId } from "@/utils/orgPublicSiteUrl.util";
 
 const DynamicTemplatePage = () => {
-  const { templateId, id: organizationId } = useParams();
+  const { templateId } = useParams();
   const [locationId, setLocationId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
-  const [canonicalizing, setCanonicalizing] = useState(() => isLegacyTemplatePathOnOrgSubdomain());
-
-  // Org subdomain: `/template/:id` → `/` (single canonical URL).
-  useLayoutEffect(() => {
-    if (!isLegacyTemplatePathOnOrgSubdomain()) return;
-    window.location.replace("/");
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
 
     const resolve = async () => {
-      if (isLegacyTemplatePathOnOrgSubdomain()) {
-        return;
-      }
-
-      const templateIdToUse = templateId || organizationId;
-      const decodedLocationId = decodeTemplateLocationId(templateIdToUse);
-
-      if (decodedLocationId <= 0) {
+      const token = decodeURIComponent(templateId?.trim() || "");
+      if (!isOrgLocTempId(token)) {
         if (!cancelled) {
           setLocationId(0);
           setLoading(false);
@@ -58,40 +23,19 @@ const DynamicTemplatePage = () => {
         return;
       }
 
-      const onOrgSubdomain = !!parseSubdomainLocation(window.location.host, getAppDomain());
-      if (onOrgSubdomain) {
-        window.location.replace("/");
-        return;
-      }
-
-      if (!isMainAppHostname(window.location.hostname)) {
-        if (!cancelled) {
-          setLocationId(decodedLocationId);
-          setLoading(false);
-        }
-        return;
-      }
-
       try {
         const siteService = new SiteDetailsService();
-        const siteResponse = await siteService.select(decodedLocationId);
-        const customUrl = siteResponse?.[0]?.locationdetail?.customurl?.trim();
-
-        if (customUrl) {
-          const customOrigin = parseCustomSiteOrigin(customUrl, window.location.protocol);
-          if (customOrigin && !customSiteOriginsMatch(window.location.href, customOrigin)) {
-            window.location.replace(new URL("/", customOrigin).toString());
-            return;
-          }
+        const siteResponse = await siteService.selectByOrgLocTempId(token);
+        const resolvedId = siteResponse?.[0]?.locationdetail?.id ?? 0;
+        if (!cancelled) {
+          setLocationId(resolvedId);
+          setLoading(false);
         }
-      } catch (error) {
-        console.warn("Could not resolve custom domain for template redirect:", error);
-      }
-
-      if (!cancelled) {
-        setLocationId(decodedLocationId);
-        setLoading(false);
-        setCanonicalizing(false);
+      } catch {
+        if (!cancelled) {
+          setLocationId(0);
+          setLoading(false);
+        }
       }
     };
 
@@ -101,9 +45,9 @@ const DynamicTemplatePage = () => {
     return () => {
       cancelled = true;
     };
-  }, [templateId, organizationId]);
+  }, [templateId]);
 
-  if (canonicalizing || loading) {
+  if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />

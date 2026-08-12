@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,6 +19,7 @@ import {
   MapPin,
   Gift,
   Wallet,
+  Copy,
 } from "lucide-react";
 import { org } from "@/lib/orgTheme";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
@@ -37,6 +38,7 @@ import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { OrganisationService } from "@/services/organisation.service";
 import { Users, UsersSelectReq, Organisationdeletereq } from "@/models/users.model";
+import type { OrganisationReferralInfoRes } from "@/models/organisation.model";
 import { FilesService } from "@/services/files.service";
 import { useLocation } from "@/hooks/useLocation";
 import { useLocationList } from "@/hooks/useLocationList";
@@ -45,21 +47,24 @@ import OrganizationSwitchModal, {
 } from "@/components/organization/OrganizationSwitchModal";
 import IntegrationTokenPanel from "@/components/organization/IntegrationTokenPanel";
 
-/** Pill segment tabs — matches Services / Events toggle on org Services page. */
+/** Horizontal scroll tabs — matches Hospitality settings tabs. */
 const profileTabTriggerClass =
   "shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:text-stone-800 data-[state=active]:bg-gradient-coral data-[state=active]:text-white data-[state=active]:shadow-sm sm:px-4";
+
+const profileTabListClass = cn(
+  org.segmentGroup,
+  "inline-flex h-auto w-full min-w-0 max-w-full gap-1 overflow-x-auto bg-white p-1 shadow-sm [scrollbar-width:thin]",
+);
 
 const profileCardHeaderClass = "space-y-1.5 p-5 md:p-6";
 const profileCardContentClass = "p-5 pt-0 md:p-6 md:pt-0";
 const profileCardTitleClass = "text-lg font-semibold leading-snug text-appointza-navy md:text-xl";
 const profileCardDescClass = "text-sm text-stone-500";
 
-/** Matches OrganizationLayout main padding; required because Tabs uses opposing negative horizontal margins. */
-const profileTabsPanelInsetClass = "px-4 sm:px-6 lg:px-8 xl:px-10";
-
 const profileTabPanelClass = cn(
-  "m-0 py-6 focus-visible:outline-none md:py-8",
-  profileTabsPanelInsetClass
+  "m-0 focus-visible:outline-none",
+  org.pageSection,
+  "py-6 md:py-8",
 );
 
 const profileFieldInputClass = cn(org.input, "mt-1.5 h-11 min-h-11 md:h-10 md:min-h-10");
@@ -144,6 +149,7 @@ const OrganizationProfile = () => {
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set("tab", value);
+        next.delete("section");
         return next;
       },
       { replace: true },
@@ -193,6 +199,7 @@ const OrganizationProfile = () => {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [showOrgSwitchModal, setShowOrgSwitchModal] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState("");
+  const [referralInfo, setReferralInfo] = useState<OrganisationReferralInfoRes | null>(null);
   const [referralAlreadyApplied, setReferralAlreadyApplied] = useState(false);
   const [canApplyReferralCode, setCanApplyReferralCode] = useState(true);
   const [isLoadingReferralStatus, setIsLoadingReferralStatus] = useState(false);
@@ -322,16 +329,52 @@ const OrganizationProfile = () => {
     setIsLoadingReferralStatus(true);
     try {
       const info = await organisationService.getReferral(organizationId);
+      setReferralInfo(info ?? null);
       setReferralAlreadyApplied(info?.referral_already_applied ?? false);
       setCanApplyReferralCode(
         info?.can_apply_referral_code ?? !info?.referral_already_applied,
       );
     } catch {
+      setReferralInfo(null);
       setCanApplyReferralCode(true);
     } finally {
       setIsLoadingReferralStatus(false);
     }
   }, [isAuthenticated, isStaff, organizationId, organisationService]);
+
+  const referralSignupUrl = useMemo(() => {
+    if (!referralInfo?.referral_code) return "";
+    const params = new URLSearchParams({ ref: referralInfo.referral_code });
+    return `${window.location.origin}/register?${params.toString()}`;
+  }, [referralInfo?.referral_code]);
+
+  const copyReferralCode = async () => {
+    if (!referralInfo?.referral_code) return;
+    try {
+      await navigator.clipboard.writeText(referralInfo.referral_code);
+      toast({ title: "Copied", description: "Your referral code was copied." });
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: "Please copy the code manually.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const copyReferralLink = async () => {
+    if (!referralSignupUrl) return;
+    try {
+      await navigator.clipboard.writeText(referralSignupUrl);
+      toast({ title: "Copied", description: "Referral signup link copied." });
+    } catch {
+      toast({
+        title: "Could not copy",
+        description: "Please copy the link manually.",
+        variant: "destructive",
+      });
+    }
+  };
 
   const handleApplyReferralCode = async () => {
     const code = referralCodeInput.trim();
@@ -354,6 +397,7 @@ const OrganizationProfile = () => {
         setReferralCodeInput("");
         setReferralAlreadyApplied(true);
         setCanApplyReferralCode(false);
+        void loadReferralStatus();
       } else {
         toast({
           title: "Could not apply",
@@ -633,6 +677,16 @@ const OrganizationProfile = () => {
   const showProfileImage =
     profile.profileimage > 0 && (profileImageBlobUrl || isProfileImageLoading);
 
+  const legacyOrganisationTab = searchParams.get("tab");
+  if (legacyOrganisationTab === "organisation") {
+    const section = searchParams.get("section");
+    const to =
+      section ?
+        `/organization/hospitality?section=${encodeURIComponent(section)}`
+      : "/organization/hospitality";
+    return <Navigate to={to} replace />;
+  }
+
   if (isLoading) {
     return (
       <div className={cn(org.loading, "flex-col gap-3")}>
@@ -648,7 +702,7 @@ const OrganizationProfile = () => {
       onValueChange={setActiveTab}
       className={cn(org.page, "flex min-h-0 flex-col")}
     >
-        <header className={cn(org.pageHeader, "border-b border-stone-100/80 pb-4")}>
+        {/* <header className={cn(org.pageHeader, "border-b border-stone-100/80 pb-4")}>
           <div className="flex items-center gap-3">
             <Button
               type="button"
@@ -665,15 +719,10 @@ const OrganizationProfile = () => {
               <p className={org.description}>Manage your organization profile and preferences</p>
             </div>
           </div>
-        </header>
+        </header> */}
 
-        <div className="px-4 pb-4 sm:px-6 lg:px-8 xl:px-10">
-          <TabsList
-            className={cn(
-              org.segmentGroup,
-              "inline-flex h-auto w-full min-w-0 max-w-full gap-1 overflow-x-auto bg-white p-1 shadow-sm [scrollbar-width:thin]",
-            )}
-          >
+        <div className={cn(org.pageSection, "pb-4 pt-0")}>
+          <TabsList className={profileTabListClass}>
             <TabsTrigger value="profile" className={profileTabTriggerClass}>
               Profile
             </TabsTrigger>
@@ -838,17 +887,72 @@ const OrganizationProfile = () => {
                     <span>Referral code</span>
                   </CardTitle>
                   <CardDescription className={profileCardDescClass}>
-                    Have a code from another business? Enter it once here. They receive 1 extra
-                    month of free subscription when you apply a valid code.
+                    Share your code with other businesses. When they sign up with it, you get{" "}
+                    {referralInfo?.bonus_credits_per_referral ?? 50} free booking credits per
+                    successful referral.
                   </CardDescription>
                 </div>
-                <div className={`${profileCardContentClass} space-y-3 pb-6 md:pb-8`}>
+                <div className={`${profileCardContentClass} space-y-6 pb-6 md:pb-8`}>
                   {isLoadingReferralStatus ? (
                     <div className="flex items-center gap-2 text-sm text-stone-500">
                       <Loader2 className="h-4 w-4 animate-spin text-[#E85D4C]" />
-                      Checking referral status…
+                      Loading referral code…
                     </div>
-                  ) : referralAlreadyApplied || !canApplyReferralCode ? (
+                  ) : referralInfo?.referral_code ? (
+                    <div className="space-y-4">
+                      <div>
+                        <Label className={org.label}>Your referral code</Label>
+                        <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
+                          <Input
+                            readOnly
+                            value={referralInfo.referral_code}
+                            className={cn(profileFieldInputClass, "font-mono")}
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void copyReferralCode()}
+                            className="min-h-11 shrink-0 touch-manipulation"
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy code
+                          </Button>
+                        </div>
+                      </div>
+                      <div>
+                        <Label className={org.label}>Signup link</Label>
+                        <div className="mt-1.5 flex flex-col gap-2 sm:flex-row">
+                          <Input readOnly value={referralSignupUrl} className={profileFieldInputClass} />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => void copyReferralLink()}
+                            className="min-h-11 shrink-0 touch-manipulation"
+                          >
+                            <Copy className="mr-2 h-4 w-4" />
+                            Copy link
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-sm text-stone-500">
+                        Successful referrals:{" "}
+                        <span className="font-semibold text-appointza-navy">
+                          {referralInfo.successful_referrals}
+                        </span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-stone-500">
+                      Your referral code is not available yet. Save your profile or contact support if
+                      this persists.
+                    </p>
+                  )}
+
+                  <div className="border-t border-stone-100 pt-5">
+                    <p className="mb-3 text-sm font-medium text-appointza-navy">
+                      Have a code from another business?
+                    </p>
+                  {referralAlreadyApplied || !canApplyReferralCode ? (
                     <div className="rounded-2xl border border-emerald-200 bg-emerald-50/80 px-4 py-3 text-sm text-emerald-900">
                       Referral code already applied for this organization.
                     </div>
@@ -884,6 +988,7 @@ const OrganizationProfile = () => {
                       </Button>
                     </div>
                   )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1125,10 +1230,10 @@ const OrganizationProfile = () => {
                   <SettingsEmbeddedHeader
                     icon={Wallet}
                     title="Credit Wallet"
-                    description="Prepaid booking credits, free monthly allowance, and Razorpay recharge packs."
+                    description="50 free booking credits on sign-in, plus Razorpay recharge packs."
                   />
                   <div className={settingsEmbedded.sectionBody}>
-                    <CreditWalletBillingPanel organisationId={organizationId} creditWalletOnly />
+                    <CreditWalletBillingPanel organisationId={organizationId} />
                   </div>
                 </OrganizationPageShell>
               ) : null}

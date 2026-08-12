@@ -46,7 +46,7 @@ export const PlanCards: React.FC<PlanCardsProps> = ({
           const isPopular = !!pres.popular;
           const isCurrent = normalizedCurrent !== "" && code === normalizedCurrent;
           const bookings = Number(plan.free_bookings_per_month ?? 0);
-          const bookingsLabel = bookings > 0 ? `${bookings.toLocaleString("en-IN")} bookings/mo` : "Unlimited bookings";
+          const bookingsLabel = bookings > 0 ? `${bookings.toLocaleString("en-IN")} free bookings` : "Unlimited bookings";
           const after = simplifiedAfterNote(plan);
 
           return (
@@ -85,7 +85,6 @@ export const PlanCards: React.FC<PlanCardsProps> = ({
                 <span className={cn("text-4xl font-black tracking-tight", isPopular ? "text-white" : "text-zinc-950")}>
                   {pres.monthlyPriceLabel}
                 </span>
-                <span className={cn("pb-1 text-sm", isPopular ? "text-white/80" : "text-zinc-500")}>/mo</span>
               </div>
 
               <div className="mt-4 space-y-1">
@@ -114,7 +113,7 @@ export const PlanCards: React.FC<PlanCardsProps> = ({
 
       {showFootnote ? (
         <p className="text-center text-xs text-zinc-500">
-          Booking fee applies after your free monthly quota — whichever is higher.
+          Booking fee applies after your free booking quota — whichever is higher.
         </p>
       ) : null}
     </div>

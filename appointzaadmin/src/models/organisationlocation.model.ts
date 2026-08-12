@@ -13,6 +13,7 @@ longitude: number = 0
 googlelocation: string = ""
 pincode: string = ""
 customurl: string = ""
+orgloctempid: string = ""
 version: number = 0
 createdby: number = 0
 createdon: Date = new Date()

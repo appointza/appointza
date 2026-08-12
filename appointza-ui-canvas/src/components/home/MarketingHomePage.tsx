@@ -988,7 +988,7 @@ const MarketingHomePage = () => {
             <p className="text-xs font-bold tracking-widest text-orange-500 uppercase mb-3">Pricing</p>
             <h2 className="text-3xl md:text-4xl font-bold text-zinc-900 mb-4">Manage Bookings, Payments &amp; Customers</h2>
             <p className="text-zinc-600 max-w-2xl mx-auto">
-              Simple pricing for our online booking system — one monthly fee plus fair booking-linked charges.
+              Simple pricing for our online booking system — plan fees plus fair booking-linked charges.
               Larger plans include more free bookings and lower per-booking fees.
             </p>
           </div>
@@ -998,7 +998,7 @@ const MarketingHomePage = () => {
             <p className="font-bold text-orange-900 text-sm">🎁 50 free bookings to get started</p>
             <p className="mt-1 text-sm text-orange-800">
               Start on the <strong>Free plan</strong> with a <strong>free website</strong> and{" "}
-              <strong>50 free bookings every month</strong> — no subscription required.
+              <strong>50 free bookings</strong> — no subscription required.
             </p>
             <p className="mt-1 text-xs text-orange-700">Upgrade anytime for more free bookings and lower per-booking fees.</p>
           </div>
@@ -1065,7 +1065,7 @@ const MarketingHomePage = () => {
                 "Staff, calendars & multi-location",
                 "Customer notifications (email / SMS / WhatsApp where enabled)",
                 "Payments & booking-fee ledger",
-                "Business insights & monthly reports",
+                "Business insights & reports",
                 "Standard support",
               ].map((f) => (
                 <div key={f} className="flex items-start gap-2 rounded-2xl border border-zinc-200 bg-zinc-50 px-4 py-3">

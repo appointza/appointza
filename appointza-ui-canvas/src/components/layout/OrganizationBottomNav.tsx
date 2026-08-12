@@ -104,17 +104,13 @@ const OrganizationBottomNav = () => {
   ];
 
   const visibleNavItems = navItems.filter((item) => item.hasAccess);
-  const colCount = Math.min(visibleNavItems.length, 6);
 
   return (
     <nav
       className="fixed bottom-0 left-0 right-0 z-50 border-t border-blue-50 bg-white/95 shadow-[0_-8px_30px_-18px_rgba(36,76,170,0.28)] backdrop-blur-xl safe-area-sides lg:hidden"
       aria-label="Organization navigation"
     >
-      <div
-        className="grid min-h-[3.75rem] w-full max-w-full items-stretch pb-[env(safe-area-inset-bottom,0px)] pt-1"
-        style={{ gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))` }}
-      >
+      <div className="flex min-h-[3.75rem] w-full overflow-x-auto pb-[env(safe-area-inset-bottom,0px)] pt-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {visibleNavItems.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -128,7 +124,7 @@ const OrganizationBottomNav = () => {
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}
               className={cn(
-                'flex min-w-0 flex-col items-center justify-center gap-0.5 px-0.5 py-1.5 touch-manipulation transition-colors',
+                'flex w-[4.5rem] shrink-0 flex-col items-center justify-center gap-0.5 px-1 py-1.5 touch-manipulation transition-colors sm:w-[5.25rem]',
                 isActive ? 'text-blue-600' : 'text-slate-400 active:text-slate-700'
               )}
             >

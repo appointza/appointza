@@ -1046,8 +1046,8 @@ const Register = () => {
                         className={registerFieldInputClass}
                       />
                       <p className="text-xs text-stone-500">
-                        Have a code from another business? Enter it here — they get 1 extra month
-                        free when you sign up.
+                        Have a code from another business? Enter it here — they get 50 free booking
+                        credits when you sign up.
                       </p>
                     </div>
                   </div>

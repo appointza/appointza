@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "react-router-dom";
-import { RefreshCw, Users, AlertCircle, Search, Phone, User, FileText, Eye, Download, MapPin, Plus, Smartphone } from "lucide-react";
+import { RefreshCw, Users, AlertCircle, Search, Phone, User, FileText, Eye, Download, MapPin, Plus, Smartphone, Copy, ExternalLink, Globe, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
@@ -29,18 +29,20 @@ import { UserTypeUtil } from "@/utils/userType.util";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { AppoinmentService } from "@/services/appoinment.service";
 import { FilesService } from "@/services/files.service";
-import { OrgLocationReq, AppointmentPaymentsummary, OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
-import { BookedAppoinmentRes, AppoinmentSelectReq, SearchAppointmentByMobileReq, FileItem } from "@/models/appoinment.model";
+import { OrgLocationReq, OrganisationDashboardStats, OrganisationLocation } from "@/models/organisationlocation.model";
+import { BookedAppoinmentRes, SearchAppointmentByMobileReq, FileItem } from "@/models/appoinment.model";
 import UserAppointmentDetails from "@/components/organization/UserAppointmentDetails";
 import FileViewer from "@/components/common/FileViewer";
 // import DashboardRightRail from "@/components/organization/DashboardRightRail";
 import { org } from "@/lib/orgTheme";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import {
+  buildOrganisationCustomUrlHost,
+  buildOrganisationPublicSiteOriginFromHost,
+} from "@/utils/orgPublicSiteUrl.util";
+import { normalizeCustomUrlSlug } from "@/utils/slug.util";
 
-function appointmentServicesTotal(a: BookedAppoinmentRes): number {
-  const list = a.attributes?.servicelist;
-  if (!Array.isArray(list)) return 0;
-  return list.reduce((sum, svc) => sum + (Number(svc.serviceprice) || 0), 0);
-}
+const EMPTY_DASHBOARD_STATS = new OrganisationDashboardStats();
 
 const STATUS_PIE_COLORS: Record<string, string> = {
   Completed: "#10B981",
@@ -109,24 +111,20 @@ const OrganizationDashboard = () => {
   const { toast } = useToast();
   const organizationId = user?.organisationid || 0;
 
-  // API services
   const organisationLocationService = useMemo(() => new OrganisationLocationService(), []);
   const appointmentService = useMemo(() => new AppoinmentService(), []);
   const filesService = useMemo(() => new FilesService(), []);
 
-  // State - initialize loading based on user type
-  const [isLoading, setIsLoading] = useState(() => {
-    // If no user yet, show loading
-    if (!user) return true;
-    // Both staff and organization users will load data now, so show loading
-    return true;
-  });
-  const [paymentSummary, setPaymentSummary] = useState<AppointmentPaymentsummary>(new AppointmentPaymentsummary());
-  
-  // Location state
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
+  const { data: locations = [], isLoading: isLoadingLocations, isSuccess: locationsLoaded } =
+    useOrganisationLocations({
+      organisationId: user?.organisationid || 0,
+      staffLocationId: user?.locationid || 0,
+      enabled: isAuthenticated,
+    });
+
+  const [isLoading, setIsLoading] = useState(true);
+  const [dashboardStats, setDashboardStats] = useState<OrganisationDashboardStats>(EMPTY_DASHBOARD_STATS);
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
-  const [isLoadingLocations, setIsLoadingLocations] = useState(false);
   
   // Search functionality
   const [searchPhone, setSearchPhone] = useState('');
@@ -141,84 +139,68 @@ const OrganizationDashboard = () => {
   // File viewer dialog
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
+  const [copiedUrlField, setCopiedUrlField] = useState<"slug" | "full" | null>(null);
 
-  /** Appointments for this location — used to drive trend / status / revenue charts */
-  const [chartAppointments, setChartAppointments] = useState<BookedAppoinmentRes[]>([]);
-  const [isLoadingCharts, setIsLoadingCharts] = useState(false);
+  const globalLocationIdRef = useRef(globalLocationId);
+  globalLocationIdRef.current = globalLocationId;
+  const locationInitDoneRef = useRef(false);
+  const lastFetchedLocationRef = useRef(0);
+  const prevLocationIdRef = useRef<number>(0);
+  const isInitialLoadRef = useRef<boolean>(true);
 
-  // Load locations
-  const loadLocations = useCallback(async () => {
-    if (!isAuthenticated) return;
-    
-    setIsLoadingLocations(true);
+  const resolveInitialLocationId = useCallback((locationList: OrganisationLocation[]): number => {
+    const pick = (id: number) =>
+      id > 0 && locationList.some((loc) => loc.id === id) ? id : 0;
+
+    const fromGlobal = pick(Number(globalLocationIdRef.current) || 0);
+    if (fromGlobal) return fromGlobal;
+
+    const fromStorage = pick(Number(localStorage.getItem("organizationlocationid") || 0));
+    if (fromStorage) return fromStorage;
+
     try {
-      const req = new OrganisationLocationSelectReq();
-      
-      // If user has organisationid, use it; otherwise use locationid (for staff users)
-      if (user?.organisationid && user.organisationid > 0) {
-        req.organisationid = user.organisationid;
-        console.log('🔍 Loading locations for organization:', user.organisationid);
-      } else if (user?.locationid && user.locationid > 0) {
-        req.organisationlocationid = user.locationid;
-        console.log('🔍 Loading locations for staff location:', user.locationid);
-      } else {
-        console.log('⚠️ No organization or location ID found for user');
-        setLocations([]);
-        return;
+      const userContextStr = localStorage.getItem("user_context");
+      if (userContextStr) {
+        const fromContext = pick(JSON.parse(userContextStr).organisationlocationid || 0);
+        if (fromContext) return fromContext;
       }
-      
-      const response = await organisationLocationService.select(req);
-      console.log('✅ Locations API response:', response);
-      
-      if (response && response.length > 0) {
-        setLocations(response);
-        // Set default selected location - prioritize stored location from GlobalIdContext
-        if (selectedLocationId === 0) {
-          // First check if there's a stored location ID in GlobalIdContext
-          const storedLocationId = globalLocationId ? Number(globalLocationId) : 0;
-          // Find the stored location in the list, or use first location
-          const locationToSelect = storedLocationId > 0 
-            ? response.find(loc => loc.id === storedLocationId) || response[0]
-            : response[0];
-          setSelectedLocationId(locationToSelect.id);
-          // Store in GlobalIdContext if not already stored
-          if (!globalLocationId) {
-            setGlobalLocationId(locationToSelect.id);
-          }
-        }
-      } else {
-        setLocations([]);
-      }
-    } catch (error) {
-      console.error('❌ Error loading locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoadingLocations(false);
+    } catch {
+      // ignore malformed user_context
     }
-  }, [isAuthenticated, user, organisationLocationService, toast, selectedLocationId, globalLocationId, setGlobalLocationId]);
 
-  // Load dashboard data
-  const loadDashboardData = useCallback(async () => {
+    return locationList[0]?.id ?? 0;
+  }, []);
+
+  // Resolve initial location once when shared locations cache loads
+  useEffect(() => {
+    if (!locationsLoaded || locations.length === 0 || locationInitDoneRef.current) return;
+
+    const initialId = resolveInitialLocationId(locations);
+    if (initialId <= 0) return;
+
+    locationInitDoneRef.current = true;
+    setSelectedLocationId(initialId);
+    prevLocationIdRef.current = initialId;
+    if (!globalLocationIdRef.current || Number(globalLocationIdRef.current) !== initialId) {
+      setGlobalLocationId(initialId);
+    }
+    window.setTimeout(() => {
+      isInitialLoadRef.current = false;
+    }, 100);
+  }, [locationsLoaded, locations, resolveInitialLocationId, setGlobalLocationId]);
+
+  const loadDashboardStats = useCallback(async () => {
     if (!isAuthenticated || !selectedLocationId) return;
-    
+
     setIsLoading(true);
     try {
-      console.log('🔍 Loading dashboard data for location:', selectedLocationId);
       const req = new OrgLocationReq();
       req.orglocid = selectedLocationId;
-      
-      const response = await organisationLocationService.SelectAppointmentPaymentsummary(req);
-      console.log('✅ Dashboard API response:', response);
-      
-      if (response) {
-        setPaymentSummary(response);
-      }
+      const response = await organisationLocationService.selectOrganisationDashboardStats(req);
+      setDashboardStats(response ?? EMPTY_DASHBOARD_STATS);
     } catch (error) {
-      console.error('❌ Error loading dashboard data:', error);
+      console.error('❌ Error loading dashboard stats:', error);
+      setDashboardStats(EMPTY_DASHBOARD_STATS);
       toast({
         title: "Error",
         description: "Failed to load dashboard data",
@@ -228,29 +210,6 @@ const OrganizationDashboard = () => {
       setIsLoading(false);
     }
   }, [isAuthenticated, selectedLocationId, organisationLocationService, toast]);
-
-  const loadChartAppointments = useCallback(async () => {
-    if (!isAuthenticated || !selectedLocationId || !organizationId) return;
-    setIsLoadingCharts(true);
-    try {
-      const req = new AppoinmentSelectReq();
-      req.organisationid = organizationId;
-      req.organisationlocationid = selectedLocationId;
-      const res = await appointmentService.SelectBookedAppoinment(req);
-      setChartAppointments(res || []);
-    } catch (e) {
-      console.error("❌ Error loading chart appointments:", e);
-      setChartAppointments([]);
-    } finally {
-      setIsLoadingCharts(false);
-    }
-  }, [isAuthenticated, selectedLocationId, organizationId, appointmentService]);
-
-  useEffect(() => {
-    if (selectedLocationId > 0) {
-      loadChartAppointments();
-    }
-  }, [selectedLocationId, loadChartAppointments]);
 
   // Update loading state when user becomes available
   useEffect(() => {
@@ -263,16 +222,7 @@ const OrganizationDashboard = () => {
     }
   }, [user]);
 
-  // Load locations on component mount
-  useEffect(() => {
-    loadLocations();
-  }, [loadLocations]);
-
-  // Track previous location to detect user-initiated changes
-  const prevLocationIdRef = useRef<number>(0);
-  const isInitialLoadRef = useRef<boolean>(true);
-
-  // Update user_context in localStorage when location changes
+  // Sync when location changes elsewhere after initial load
   const updateUserContextLocation = useCallback((locationId: number) => {
     try {
       const userContextStr = localStorage.getItem('user_context');
@@ -353,84 +303,31 @@ const OrganizationDashboard = () => {
     prevLocationIdRef.current = newLocationId;
   }, [updateUserContextLocation, setGlobalLocationId]);
 
-  // Set initial location from GlobalIdContext on first load
+  // Sync when location changes elsewhere (sidebar / other pages) after initial load
   useEffect(() => {
-    if (locations.length > 0 && selectedLocationId === 0 && isInitialLoadRef.current) {
-      let defaultLocationId = 0;
-      
-      // First priority: Get from GlobalIdContext (stored location)
-      if (globalLocationId) {
-        defaultLocationId = Number(globalLocationId);
-        console.log('📥 Initial load - found location ID in GlobalIdContext:', defaultLocationId);
-      } else {
-        // Fallback: Try to get from localStorage
-      const storedLocationId = localStorage.getItem('organizationlocationid');
-      if (storedLocationId) {
-        defaultLocationId = Number(storedLocationId);
-        console.log('📥 Initial load - found organizationlocationid in localStorage:', defaultLocationId);
-      } else {
-          // Last fallback: user_context
-        const userContextStr = localStorage.getItem('user_context');
-        if (userContextStr) {
-          try {
-            const userContext = JSON.parse(userContextStr);
-            defaultLocationId = userContext.organisationlocationid || 0;
-            console.log('📥 Initial load - found organisationlocationid in user_context:', defaultLocationId);
-          } catch (e) {
-            console.error('Error parsing user_context on initial load:', e);
-            }
-          }
-        }
-      }
-      
-      // Find location in the list or use first one
-      const locationToSelect = defaultLocationId > 0 
-        ? locations.find(loc => loc.id === defaultLocationId) || locations[0]
-        : locations[0];
-      const finalLocationId = locationToSelect.id;
-      
-      console.log('📥 Setting initial location:', finalLocationId);
-      setSelectedLocationId(finalLocationId);
-      prevLocationIdRef.current = finalLocationId;
-      
-      // Store location ID in global context (accessible by all components)
-      if (!globalLocationId || Number(globalLocationId) !== finalLocationId) {
-        setGlobalLocationId(finalLocationId);
-        console.log('✅ Stored initial location ID in GlobalIdContext:', finalLocationId);
-      }
-      
-      // Mark initial load as complete after state is set
-      setTimeout(() => {
-        isInitialLoadRef.current = false;
-        console.log('✅ Initial load complete, future changes will update user_context');
-      }, 100);
-    }
-  }, [locations, selectedLocationId, globalLocationId, setGlobalLocationId]);
-
-  // Sync selectedLocationId with GlobalIdContext when it changes externally
-  useEffect(() => {
-    if (globalLocationId && locations.length > 0) {
-      const storedLocationId = Number(globalLocationId);
-      // Only update if the stored location ID is different and exists in locations
-      const locationExists = locations.find(loc => loc.id === storedLocationId);
-      if (locationExists && selectedLocationId !== storedLocationId) {
-        console.log('🔄 Syncing dashboard with stored location ID from GlobalIdContext:', storedLocationId);
-        setSelectedLocationId(storedLocationId);
-        prevLocationIdRef.current = storedLocationId;
-      }
+    if (!locationInitDoneRef.current || !globalLocationId || locations.length === 0) return;
+    const storedLocationId = Number(globalLocationId);
+    const locationExists = locations.some((loc) => loc.id === storedLocationId);
+    if (locationExists && selectedLocationId !== storedLocationId) {
+      setSelectedLocationId(storedLocationId);
+      prevLocationIdRef.current = storedLocationId;
     }
   }, [globalLocationId, locations, selectedLocationId]);
 
-  // Load dashboard data when location changes
+  // One stats fetch per location
   useEffect(() => {
-    if (selectedLocationId > 0) {
-      loadDashboardData();
-    }
-  }, [selectedLocationId, loadDashboardData]);
+    if (selectedLocationId <= 0) return;
+    if (lastFetchedLocationRef.current === selectedLocationId) return;
+    lastFetchedLocationRef.current = selectedLocationId;
+    void loadDashboardStats();
+  }, [selectedLocationId, loadDashboardStats]);
 
-  // Handle refresh
   const handleRefresh = async () => {
-    await Promise.all([loadDashboardData(), loadChartAppointments()]);
+    lastFetchedLocationRef.current = 0;
+    await loadDashboardStats();
+    if (selectedLocationId > 0) {
+      lastFetchedLocationRef.current = selectedLocationId;
+    }
   };
 
   // Search appointments by phone number
@@ -500,83 +397,27 @@ const OrganizationDashboard = () => {
     setIsFileViewerOpen(true);
   };
 
-  // Calculate total revenue
-  const totalRevenue = paymentSummary.paymentsummary?.reduce(
-    (sum, item) => sum + (item.totalamount || 0),
-    0
-  ) || 0;
+  const totalRevenue = dashboardStats.totalrevenue ?? 0;
 
-  const trendChartData = useMemo(() => {
-    const days: { label: string; key: string }[] = [];
-    for (let i = 6; i >= 0; i--) {
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      d.setDate(d.getDate() - i);
-      days.push({ label: format(d, "EEE"), key: format(d, "yyyy-MM-dd") });
-    }
-    return days.map(({ label, key }) => {
-      const count = chartAppointments.filter((a) => {
-        try {
-          return format(new Date(a.appoinmentdate), "yyyy-MM-dd") === key;
-        } catch {
-          return false;
-        }
-      }).length;
-      return { name: label, appointments: count };
-    });
-  }, [chartAppointments]);
+  const trendChartData = useMemo(
+    () =>
+      (dashboardStats.trend_last_7_days ?? []).map((point) => ({
+        name: point.name,
+        appointments: point.appointments,
+      })),
+    [dashboardStats.trend_last_7_days],
+  );
 
-  const statusChartData = useMemo(() => {
-    if (!chartAppointments.length) {
-      const total = paymentSummary.totalappointments || 0;
-      const confirmed = paymentSummary.confirmedcount || 0;
-      const completed = paymentSummary.completedcount || 0;
-      const pending = Math.max(0, total - confirmed - completed);
-      return [
-        { name: "Completed", value: completed },
-        { name: "Confirmed", value: confirmed },
-        { name: "Pending", value: pending },
-        { name: "Cancelled", value: 0 },
-      ];
-    }
-    let completed = 0;
-    let confirmed = 0;
-    let pending = 0;
-    let cancelled = 0;
-    chartAppointments.forEach((a) => {
-      const s = String(a.statuscode || "PENDING").toUpperCase();
-      if (s === "COMPLETED") completed += 1;
-      else if (s === "CONFIRMED") confirmed += 1;
-      else if (s === "CANCELLED") cancelled += 1;
-      else pending += 1;
-    });
-    return [
-      { name: "Completed", value: completed },
-      { name: "Confirmed", value: confirmed },
-      { name: "Pending", value: pending },
-      { name: "Cancelled", value: cancelled },
-    ];
-  }, [chartAppointments, paymentSummary]);
+  const statusChartData = dashboardStats.status_breakdown ?? [];
 
-  const revenueMonthBars = useMemo(() => {
-    const now = new Date();
-    const y = now.getFullYear();
-    const m = now.getMonth();
-    const buckets = [0, 0, 0, 0];
-    chartAppointments.forEach((a) => {
-      const d = new Date(a.appoinmentdate);
-      if (d.getFullYear() !== y || d.getMonth() !== m) return;
-      const day = d.getDate();
-      const idx = day <= 7 ? 0 : day <= 14 ? 1 : day <= 21 ? 2 : 3;
-      buckets[idx] += appointmentServicesTotal(a);
-    });
-    return [
-      { name: "Week 1", revenue: buckets[0] },
-      { name: "Week 2", revenue: buckets[1] },
-      { name: "Week 3", revenue: buckets[2] },
-      { name: "Week 4", revenue: buckets[3] },
-    ];
-  }, [chartAppointments]);
+  const revenueMonthBars = useMemo(
+    () =>
+      (dashboardStats.revenue_by_week_this_month ?? []).map((point) => ({
+        name: point.name,
+        revenue: point.revenue,
+      })),
+    [dashboardStats.revenue_by_week_this_month],
+  );
 
   const appointmentSpark = useMemo(
     () => trendChartData.map((d) => d.appointments),
@@ -602,6 +443,61 @@ const OrganizationDashboard = () => {
     user?.username?.trim().split(/\s+/)[0] ||
     user?.name?.trim().split(/\s+/)[0] ||
     "there";
+
+  const selectedLocation = useMemo(
+    () => locations.find((loc) => loc.id === selectedLocationId) ?? null,
+    [locations, selectedLocationId],
+  );
+
+  const publicUrlSlug = useMemo(
+    () => normalizeCustomUrlSlug(selectedLocation?.customurl),
+    [selectedLocation],
+  );
+
+  const publicUrlHost = useMemo(
+    () => (publicUrlSlug ? buildOrganisationCustomUrlHost({ customUrl: publicUrlSlug }) : ""),
+    [publicUrlSlug],
+  );
+
+  const publicSiteUrl = useMemo(
+    () => (publicUrlHost ? buildOrganisationPublicSiteOriginFromHost(publicUrlHost) : ""),
+    [publicUrlHost],
+  );
+
+  const copyPublicBookingUrl = useCallback(
+    async (field: "slug" | "full") => {
+      const value = field === "slug" ? publicUrlSlug : publicSiteUrl;
+      if (!value) {
+        toast({
+          title: "No URL yet",
+          description: "Set your booking page address in Custom domain first.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      try {
+        await navigator.clipboard.writeText(value);
+        setCopiedUrlField(field);
+        window.setTimeout(() => setCopiedUrlField(null), 2000);
+        toast({
+          title: "Copied",
+          description:
+            field === "slug"
+              ? "Booking page name copied to clipboard."
+              : "Full booking URL copied to clipboard.",
+        });
+      } catch (error) {
+        console.error("Error copying booking URL:", error);
+        toast({
+          title: "Copy failed",
+          description: "Could not copy to clipboard. Try selecting the text manually.",
+          variant: "destructive",
+        });
+      }
+    },
+    [publicSiteUrl, publicUrlSlug, toast],
+  );
 
   return (
     <div className={org.page}>
@@ -644,18 +540,18 @@ const OrganizationDashboard = () => {
                 variant="ghost"
                 size="icon"
                 onClick={handleRefresh}
-                disabled={isLoading || isLoadingCharts}
+                disabled={isLoading}
                 className="h-10 w-10 rounded-full text-stone-500 hover:bg-white/80 hover:text-appointza-navy"
                 aria-label="Refresh dashboard"
               >
-                <RefreshCw className={cn("h-4 w-4", (isLoading || isLoadingCharts) && "animate-spin")} />
+                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
               </Button>
             </div>
           </div>
         </div>
 
         {locations.length > 0 ?
-          <div className="px-4 pb-4 sm:px-6 lg:px-8">
+          <div className="space-y-3 px-4 pb-4 sm:px-6 lg:px-8">
             <div className="flex w-full flex-col items-start gap-3 rounded-2xl border border-stone-100 bg-white p-4 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.06)] sm:flex-row sm:items-center sm:gap-4">
               <span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-stone-600">
                 <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFF0EB] text-appointza-coral">
@@ -688,6 +584,74 @@ const OrganizationDashboard = () => {
               {isLoadingLocations ?
                 <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-appointza-coral" aria-hidden />
               : null}
+            </div>
+
+            <div className="flex w-full flex-col gap-3 rounded-2xl border border-stone-100 bg-white p-4 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.06)] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="flex min-w-0 flex-1 items-start gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                  <Globe className="h-4 w-4" aria-hidden />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-stone-600">Your booking URL</p>
+                  {publicUrlHost ? (
+                    <>
+                      <p className="mt-1 break-all font-mono text-sm font-semibold text-appointza-navy">
+                        {publicUrlHost}
+                      </p>
+                      {publicUrlSlug ? (
+                        <p className="mt-0.5 text-xs text-stone-500">
+                          Page name: <span className="font-medium text-stone-700">{publicUrlSlug}</span>
+                        </p>
+                      ) : null}
+                    </>
+                  ) : (
+                    <p className="mt-1 text-sm text-stone-500">
+                      No custom URL yet.{" "}
+                      <Link to="/organization/custom-domain" className="font-medium text-appointza-coral hover:underline">
+                        Set your booking page address
+                      </Link>
+                    </p>
+                  )}
+                </div>
+              </div>
+              {publicUrlHost ? (
+                <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 sm:flex-none")}
+                    onClick={() => copyPublicBookingUrl("slug")}
+                  >
+                    {copiedUrlField === "slug" ? (
+                      <Check className="mr-2 h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    Copy name
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 sm:flex-none")}
+                    onClick={() => copyPublicBookingUrl("full")}
+                  >
+                    {copiedUrlField === "full" ? (
+                      <Check className="mr-2 h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="mr-2 h-4 w-4" />
+                    )}
+                    Copy URL
+                  </Button>
+                  <Button
+                    type="button"
+                    className={cn(org.btnPrimary, "h-10 min-w-0 flex-1 sm:flex-none")}
+                    onClick={() => publicSiteUrl && window.open(publicSiteUrl, "_blank", "noopener,noreferrer")}
+                  >
+                    <ExternalLink className="mr-2 h-4 w-4" />
+                    Open
+                  </Button>
+                </div>
+              ) : null}
             </div>
           </div>
         : null}
@@ -724,7 +688,7 @@ const OrganizationDashboard = () => {
                 variant="coral"
                 sparkValues={appointmentSpark}
               >
-                {paymentSummary.totalappointments ?? 0}
+                {dashboardStats.totalappointments ?? 0}
               </DashboardStatCard>
               <DashboardStatCard
                 label="Revenue"
@@ -738,23 +702,18 @@ const OrganizationDashboard = () => {
                 variant="blue"
                 sparkValues={statusSpark.length ? statusSpark : appointmentSpark}
               >
-                {paymentSummary.confirmedcount ?? 0}
+                {dashboardStats.confirmedcount ?? 0}
               </DashboardStatCard>
               <DashboardStatCard
                 label="Completed"
                 variant="blue"
                 sparkValues={appointmentSpark}
               >
-                {paymentSummary.completedcount ?? 0}
+                {dashboardStats.completedcount ?? 0}
               </DashboardStatCard>
             </div>
 
-            {isLoadingCharts ?
-              <div className="rounded-2xl border border-dashed border-stone-200 bg-white p-10 text-center text-sm text-stone-500">
-                <RefreshCw className="mx-auto mb-3 h-6 w-6 animate-spin text-appointza-coral" />
-                Updating charts…
-              </div>
-            : <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
                 <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)] sm:p-6">
                   <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">Trend</h3>
                   <p className="mb-4 text-base font-semibold text-appointza-navy">Appointments · last 7 days</p>
@@ -838,7 +797,6 @@ const OrganizationDashboard = () => {
                   </div>
                 </div>
               </div>
-            }
             </div>
             {/* Top customers + WhatsApp rail — hidden for now
             <DashboardRightRail className="xl:sticky xl:top-24 xl:self-start" />

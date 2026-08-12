@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -25,7 +26,13 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { OrgTemplateAssetsProvider, useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
+import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import {
+  organizationTemplatesRoute,
+  onboardingStepRoute,
+} from "@/utils/organizationOnboarding.util";
+import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
+import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 import { ReferenceValueService } from "@/services/referencevalue.service";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
 import { SiteDetailsService } from "@/services/siteDetails.service";
@@ -35,6 +42,7 @@ import { SiteDetailsItem } from "@/models/sitedetail.model";
 import {
   OrganisationLocation,
   OrganisationLocationSelectReq,
+  UpdateLocationTemplateIdReq,
 } from "@/models/organisationlocation.model";
 import TemplateVariablesCopyDialog from "@/components/templateBuilder/TemplateVariablesCopyDialog";
 import LocationTemplateMediaDialog from "@/components/templateBuilder/LocationTemplateMediaDialog";
@@ -76,7 +84,18 @@ function notesHasBlocksProject(notes: string | null | undefined): boolean {
 function TemplateBuilderInner() {
   const { toast } = useToast();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const {
+    isComplete,
+    hasCustomDomain,
+    hasServices,
+    hasWebsite,
+    hasTiming,
+    nextStep,
+  } = useOnboardingStatus();
   const navigate = useNavigate();
+  const templatesBackRoute = organizationTemplatesRoute(isComplete);
+  const inOnboarding = !isComplete && hasCustomDomain && hasServices;
   const [searchParams] = useSearchParams();
   const { registerFileIds } = useOrgTemplateAssets();
 
@@ -290,6 +309,13 @@ function TemplateBuilderInner() {
   );
 
   useEffect(() => {
+    const locId = Number(searchParams.get("locationId") || 0);
+    if (locId > 0 && locations.some((loc) => loc.id === locId)) {
+      setPreviewLocationId(locId);
+    }
+  }, [searchParams, locations]);
+
+  useEffect(() => {
     const qp = Number(searchParams.get("templateId") || 0);
     if (qp > 0 && savedTemplates.length && !templateId) {
       loadTemplate(String(qp));
@@ -399,6 +425,7 @@ function TemplateBuilderInner() {
       return;
     }
 
+    const wasUpdate = templateId > 0;
     setIsSaving(true);
     try {
       const namedProject: TemplateBuilderProject = {
@@ -422,7 +449,8 @@ function TemplateBuilderInner() {
       payload.organizationid = organisationId;
 
       const saved = await refService.save(payload);
-      if (saved?.id) setTemplateId(saved.id);
+      const savedTemplateId = saved?.id ?? templateId;
+      if (savedTemplateId) setTemplateId(savedTemplateId);
 
       if (persistBlocks) {
         await registerFileIds(collectImageIdsFromProject(namedProject));
@@ -430,11 +458,50 @@ function TemplateBuilderInner() {
       }
       setHtml(effectiveHtml);
 
+      let assignedLocationName: string | null = null;
+      if (previewLocationId > 0 && savedTemplateId > 0) {
+        try {
+          const assignReq = new UpdateLocationTemplateIdReq();
+          assignReq.organisationlocationid = previewLocationId;
+          assignReq.templateid = savedTemplateId;
+          const assigned = await locationService.updateLocationTemplateId(assignReq);
+          if (assigned) {
+            assignedLocationName =
+              locations.find((loc) => loc.id === previewLocationId)?.name ||
+              locations.find((loc) => loc.id === previewLocationId)?.city ||
+              null;
+            setLocations((current) =>
+              current.map((location) =>
+                location.id === previewLocationId
+                  ? { ...location, templateid: savedTemplateId }
+                  : location,
+              ),
+            );
+          }
+        } catch (assignError) {
+          console.error("Failed to assign template to location:", assignError);
+        }
+      }
+
       toast({
-        title: templateId ? "Page updated" : "Page saved",
-        description: "Assign it to a location under Templates in your profile.",
+        title: wasUpdate ? "Page updated" : "Page saved",
+        description:
+          assignedLocationName ?
+            `Assigned to ${assignedLocationName}. Your booking page is live for that location.`
+          : previewLocationId > 0 ?
+            "Page saved, but could not assign it to the selected location. Assign it from Templates in your profile."
+          : "Page saved. Select a location in preview, then save again to assign it.",
       });
       await fetchSavedTemplates();
+
+      if (!isComplete && assignedLocationName && previewLocationId > 0) {
+        await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+        toast({
+          title: "Website ready!",
+          description: "Next step: set your business hours so customers can book.",
+        });
+        window.setTimeout(() => navigate(onboardingStepRoute("timing")), 700);
+      }
     } catch (e) {
       toast({
         title: "Save failed",
@@ -532,15 +599,35 @@ function TemplateBuilderInner() {
     </section>
   );
 
+  const handleBackFromBuilder = () => {
+    if (!isComplete && nextStep === "website") {
+      navigate(onboardingStepRoute("services"));
+      return;
+    }
+    navigate(templatesBackRoute);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[hsl(var(--app-surface))]">
+      {inOnboarding && (
+        <div className="shrink-0 border-b border-stone-100 bg-appointza-cream px-3 py-2 sm:px-4">
+          <OnboardingPageGuide
+            compact
+            stepId="website"
+            hasCustomDomain={hasCustomDomain}
+            hasServices={hasServices}
+            hasWebsite={hasWebsite}
+            hasTiming={hasTiming}
+          />
+        </div>
+      )}
       <header className="z-30 shrink-0 border-b border-stone-200 bg-white px-3 py-2 sm:px-4">
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
             className="h-8 w-8 shrink-0"
-            onClick={() => navigate("/organization/profile?tab=templates")}
+            onClick={handleBackFromBuilder}
             aria-label="Back to templates"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -660,6 +747,15 @@ function TemplateBuilderInner() {
             <Switch id="active" checked={isActive} onCheckedChange={setIsActive} />
           </div>
         </div>
+        {selectedLocation ? (
+          <p className="mt-2 text-xs text-stone-500">
+            Saving assigns this page to{" "}
+            <span className="font-medium text-appointza-navy">
+              {selectedLocation.name || selectedLocation.city || `location #${selectedLocation.id}`}
+            </span>
+            .
+          </p>
+        ) : null}
       </header>
 
       {builderMode === "html" ? (
@@ -843,10 +939,4 @@ function TemplateBuilderInner() {
   );
 }
 
-const TemplateBuilder = () => (
-  <OrgTemplateAssetsProvider>
-    <TemplateBuilderInner />
-  </OrgTemplateAssetsProvider>
-);
-
-export default TemplateBuilder;
+export default TemplateBuilderInner;

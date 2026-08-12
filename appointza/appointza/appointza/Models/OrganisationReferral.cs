@@ -4,7 +4,7 @@ namespace appointza.Models
     {
         public string referral_code { get; set; } = "";
         public int successful_referrals { get; set; }
-        public int bonus_months_per_referral { get; set; } = 1;
+        public int bonus_credits_per_referral { get; set; } = CreditWalletCatalog.ReferralBonusCredits;
         public bool referral_already_applied { get; set; }
         public bool can_apply_referral_code { get; set; }
     }

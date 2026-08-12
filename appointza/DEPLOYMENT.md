@@ -112,11 +112,17 @@ sudo systemctl status appointza
 
 ### 5. Configure Reverse Proxy (Recommended)
 
-**Nginx Example:**
+Production is often behind **nginx**. If nginx serves `wwwroot` with a root-level
+`try_files ... /index.html`, then `/stay/` and `/webzys/` incorrectly load the
+Appointza SPA (and show Appointza’s 404). Local `http://localhost:5000/stay/` works
+because it hits Kestrel directly.
+
+**Preferred: proxy everything to the .NET app** (same behavior as local):
+
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name appointza.com www.appointza.com;
 
     location / {
         proxy_pass http://localhost:5000;
@@ -129,6 +135,57 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
+```
+
+**If nginx must serve static files**, do **not** fall back to root `/index.html` for
+product URLs. Use one location per SPA:
+
+```nginx
+# Adjust root to your deploy folder's wwwroot
+root /var/www/appointza/wwwroot;
+
+location /api/ {
+    proxy_pass http://localhost:5000;
+    proxy_http_version 1.1;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+
+location /uploads/ {
+    proxy_pass http://localhost:5000;
+    proxy_set_header Host $host;
+}
+
+location /stay/ {
+    try_files $uri $uri/ /stay/index.html;
+}
+location /webzys/ {
+    try_files $uri $uri/ /webzys/index.html;
+}
+location /campusza/ {
+    try_files $uri $uri/ /campusza/index.html;
+}
+location /appointza/ {
+    try_files $uri $uri/ /appointza/index.html;
+}
+
+# Optional: root → Appointza
+location = / {
+    return 302 /appointza/;
+}
+
+# Do NOT use: try_files $uri /index.html;  for the whole site
+```
+
+Then reload nginx:
+```bash
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Also restart the app after copying a new `appointza.exe`:
+```bash
+sudo systemctl restart appointza
 ```
 
 ## Important Files to Review

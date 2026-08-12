@@ -22,12 +22,6 @@ namespace appointza.Services
 
         public async Task<List<SubscriptionPlan>> SelectAllTransaction(IDb db, string? projectName = null)
         {
-            // Lazy-migrate + lazy-seed: keep the API working even if the latest
-            // subscription_tables.sql hasn't been applied to this database yet.
-            await EnsureSchemaTransaction(db);
-            await EnsureSeededTransaction(db);
-            await EnsurePlanCatalogSyncedTransaction(db);
-
             var result = new List<SubscriptionPlan>();
             var query = @"
                 SELECT id, plan_code, project_name, display_name, monthly_price_inr, booking_fee_inr,
@@ -60,10 +54,6 @@ namespace appointza.Services
 
         public async Task<SubscriptionPlan?> GetByCodeTransaction(IDb db, string planCode)
         {
-            await EnsureSchemaTransaction(db);
-            await EnsureSeededTransaction(db);
-            await EnsurePlanCatalogSyncedTransaction(db);
-
             const string query = @"
                 SELECT id, plan_code, project_name, display_name, monthly_price_inr, booking_fee_inr,
                        booking_fee_percent, trial_days,
@@ -84,199 +74,60 @@ namespace appointza.Services
         }
 
         /// <summary>
-        /// Idempotently applies the column additions from
-        /// Database/subscription_tables.sql so that the API keeps working even when
-        /// the table predates a recent migration (e.g. before
-        /// <c>free_bookings_per_month</c> was added). Uses
-        /// <c>ADD COLUMN IF NOT EXISTS</c> so it's safe to call on every request.
+        /// Recharge packs shown on the billing tab — sourced from subscription_plans (paid tiers only).
         /// </summary>
-        public async Task EnsureSchemaTransaction(IDb db)
+        public async Task<List<CreditWalletPack>> SelectCreditWalletPacksTransaction(
+            IDb db,
+            string? projectName = "appointza")
         {
-            // PostgreSQL: ADD COLUMN IF NOT EXISTS is a no-op when the column
-            // already exists, so this is cheap to run on every read path.
-            string[] alterStatements =
-            {
-                "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS project_name VARCHAR(64) NOT NULL DEFAULT 'appointza'",
-                "ALTER TABLE subscription_plans ADD COLUMN IF NOT EXISTS free_bookings_per_month INTEGER NOT NULL DEFAULT 0",
-            };
+            var plans = await SelectAllTransaction(db, projectName);
+            var paidPlans = plans
+                .Where(p => p.monthly_price_inr > 0)
+                .OrderBy(p => p.sort_order)
+                .ThenBy(p => p.id)
+                .ToList();
 
-            foreach (var sql in alterStatements)
+            if (paidPlans.Count == 0)
             {
-                try
-                {
-                    DbCommand cmd = db.GetCommand(sql);
-                    await db.ExecuteNonQuery(cmd);
-                }
-                catch
-                {
-                    // The table may not exist yet on a brand-new install; the
-                    // CREATE TABLE in subscription_tables.sql is authoritative.
-                    // Swallow so we don't break unrelated requests.
-                }
+                return new List<CreditWalletPack>();
             }
 
-            // Backfill canonical free-booking quotas for known plan codes that
-            // were inserted before the column existed (their value is 0).
-            (string code, int quota)[] backfill =
-            {
-                ("free", 50),
-                ("starter", 50),
-                ("growth", 200),
-                ("business", 500),
-                ("enterprise", 1400),
-                ("premium", 4000),
-            };
-
-            foreach (var b in backfill)
-            {
-                try
-                {
-                    const string update = @"
-                        UPDATE subscription_plans
-                        SET free_bookings_per_month = @quota
-                        WHERE LOWER(TRIM(plan_code)) = LOWER(TRIM(@plan_code))
-                          AND COALESCE(free_bookings_per_month, 0) = 0";
-                    DbCommand cmd = db.GetCommand(update);
-                    db.AddParameter(cmd, "quota", DbTypes.Types.Integer).Value = b.quota;
-                    db.AddParameter(cmd, "plan_code", DbTypes.Types.String).Value = b.code;
-                    await db.ExecuteNonQuery(cmd);
-                }
-                catch
-                {
-                    // ignore — table missing on first install, handled by seed step
-                }
-            }
+            var topSortOrder = paidPlans.Max(p => p.sort_order);
+            return paidPlans
+                .Select(p => MapSubscriptionPlanToCreditPack(p, p.sort_order == topSortOrder))
+                .ToList();
         }
 
-        /// <summary>
-        /// Lazy-seeds the canonical 5 Appointza plans into subscription_plans when the
-        /// table is empty. The schema migration in Database/subscription_tables.sql is
-        /// still authoritative; this just keeps the API responsive on a fresh database.
-        /// </summary>
-        public async Task EnsureSeededTransaction(IDb db)
+        public async Task<CreditWalletPack?> GetCreditWalletPackByCodeTransaction(IDb db, string packId)
         {
-            const string countQuery = "SELECT COUNT(*) AS cnt FROM subscription_plans";
-            DbCommand countCmd = db.GetCommand(countQuery);
-            int existing = 0;
-            using (DbDataReader reader = await db.Execute(countCmd))
+            var plan = await GetByCodeTransaction(db, packId);
+            if (plan == null || plan.monthly_price_inr <= 0)
             {
-                if (await reader.ReadAsync())
-                {
-                    existing = reader["cnt"] == DBNull.Value ? 0 : Convert.ToInt32(reader["cnt"]);
-                }
+                return null;
             }
 
-            if (existing > 0) return;
-
-            const string insert = @"
-                INSERT INTO subscription_plans (
-                    plan_code, project_name, display_name, monthly_price_inr,
-                    booking_fee_inr, booking_fee_percent, trial_days,
-                    free_bookings_per_month, sort_order, isactive
-                )
-                VALUES (
-                    @plan_code, 'appointza', @display_name, @monthly_price_inr,
-                    @booking_fee_inr, @booking_fee_percent, @trial_days,
-                    @free_bookings_per_month, @sort_order, TRUE
-                )
-                ON CONFLICT (plan_code) DO NOTHING";
-
-            (string code, string name, decimal price, decimal feeInr, decimal feePct, int trial, int freeQuota, int order)[] seed =
-            {
-                ("free",       "Free",        0m,     10m, 3.000m, 0,   50,   0),
-                ("starter",    "Starter",    1000m,   20m, 2.000m, 0,   50,   1),
-                ("growth",     "Growth",     3000m,   15m, 1.500m, 0,  200,   2),
-                ("business",   "Business",   5000m,   10m, 1.000m, 0,  500,   3),
-                ("enterprise", "Enterprise", 10000m,   7m, 0.700m, 0, 1400,   4),
-                ("premium",    "Premium",    20000m,   5m, 0.500m, 0, 4000,   5),
-            };
-
-            foreach (var s in seed)
-            {
-                DbCommand cmd = db.GetCommand(insert);
-                db.AddParameter(cmd, "plan_code", DbTypes.Types.String).Value = s.code;
-                db.AddParameter(cmd, "display_name", DbTypes.Types.String).Value = s.name;
-                db.AddParameter(cmd, "monthly_price_inr", DbTypes.Types.Decimal).Value = s.price;
-                db.AddParameter(cmd, "booking_fee_inr", DbTypes.Types.Decimal).Value = s.feeInr;
-                db.AddParameter(cmd, "booking_fee_percent", DbTypes.Types.Decimal).Value = s.feePct;
-                db.AddParameter(cmd, "trial_days", DbTypes.Types.Integer).Value = s.trial;
-                db.AddParameter(cmd, "free_bookings_per_month", DbTypes.Types.Integer).Value = s.freeQuota;
-                db.AddParameter(cmd, "sort_order", DbTypes.Types.Integer).Value = s.order;
-                await db.ExecuteNonQuery(cmd);
-            }
+            var allPaid = (await SelectAllTransaction(db, plan.project_name))
+                .Where(p => p.monthly_price_inr > 0)
+                .ToList();
+            var topSortOrder = allPaid.Count > 0 ? allPaid.Max(p => p.sort_order) : plan.sort_order;
+            return MapSubscriptionPlanToCreditPack(plan, plan.sort_order == topSortOrder);
         }
 
-        /// <summary>
-        /// Keeps canonical Appointza plan pricing in sync with Database/subscription_tables.sql.
-        /// </summary>
-        public async Task EnsurePlanCatalogSyncedTransaction(IDb db)
+        static CreditWalletPack MapSubscriptionPlanToCreditPack(SubscriptionPlan plan, bool highlighted)
         {
-            (string code, string name, decimal price, decimal feeInr, decimal feePct, int trial, int freeQuota, int order)[] catalog =
+            var credits = Math.Max(0, plan.free_bookings_per_month);
+            var price = plan.monthly_price_inr;
+            return new CreditWalletPack
             {
-                ("free",       "Free",        0m,     10m, 3.000m, 0,   50,   0),
-                ("starter",    "Starter",    1000m,   20m, 2.000m, 0,   50,   1),
-                ("growth",     "Growth",     3000m,   15m, 1.500m, 0,  200,   2),
-                ("business",   "Business",   5000m,   10m, 1.000m, 0,  500,   3),
-                ("enterprise", "Enterprise", 10000m,   7m, 0.700m, 0, 1400,   4),
-                ("premium",    "Premium",    20000m,   5m, 0.500m, 0, 4000,   5),
+                id = plan.plan_code,
+                name = plan.display_name,
+                description = credits > 0
+                    ? $"₹{price:N0} recharge → {credits} booking credits"
+                    : $"₹{price:N0} recharge pack",
+                price_inr = price,
+                credits = credits,
+                highlighted = highlighted,
             };
-
-            const string upsert = @"
-                INSERT INTO subscription_plans (
-                    plan_code, project_name, display_name, monthly_price_inr,
-                    booking_fee_inr, booking_fee_percent, trial_days,
-                    free_bookings_per_month, sort_order, isactive
-                )
-                VALUES (
-                    @plan_code, 'appointza', @display_name, @monthly_price_inr,
-                    @booking_fee_inr, @booking_fee_percent, @trial_days,
-                    @free_bookings_per_month, @sort_order, TRUE
-                )
-                ON CONFLICT (plan_code) DO UPDATE SET
-                    project_name = EXCLUDED.project_name,
-                    display_name = EXCLUDED.display_name,
-                    monthly_price_inr = EXCLUDED.monthly_price_inr,
-                    booking_fee_inr = EXCLUDED.booking_fee_inr,
-                    booking_fee_percent = EXCLUDED.booking_fee_percent,
-                    trial_days = EXCLUDED.trial_days,
-                    free_bookings_per_month = EXCLUDED.free_bookings_per_month,
-                    sort_order = EXCLUDED.sort_order,
-                    isactive = TRUE";
-
-            foreach (var s in catalog)
-            {
-                try
-                {
-                    DbCommand cmd = db.GetCommand(upsert);
-                    db.AddParameter(cmd, "plan_code", DbTypes.Types.String).Value = s.code;
-                    db.AddParameter(cmd, "display_name", DbTypes.Types.String).Value = s.name;
-                    db.AddParameter(cmd, "monthly_price_inr", DbTypes.Types.Decimal).Value = s.price;
-                    db.AddParameter(cmd, "booking_fee_inr", DbTypes.Types.Decimal).Value = s.feeInr;
-                    db.AddParameter(cmd, "booking_fee_percent", DbTypes.Types.Decimal).Value = s.feePct;
-                    db.AddParameter(cmd, "trial_days", DbTypes.Types.Integer).Value = s.trial;
-                    db.AddParameter(cmd, "free_bookings_per_month", DbTypes.Types.Integer).Value = s.freeQuota;
-                    db.AddParameter(cmd, "sort_order", DbTypes.Types.Integer).Value = s.order;
-                    await db.ExecuteNonQuery(cmd);
-                }
-                catch
-                {
-                    // Table may not exist yet on first install.
-                }
-            }
-
-            try
-            {
-                const string deactivateLegacy = @"
-                    UPDATE subscription_plans
-                    SET isactive = FALSE
-                    WHERE LOWER(TRIM(plan_code)) IN ('basic', 'pro')";
-                DbCommand deactivateCmd = db.GetCommand(deactivateLegacy);
-                await db.ExecuteNonQuery(deactivateCmd);
-            }
-            catch
-            {
-                // ignore
-            }
         }
 
         static SubscriptionPlan MapPlan(DbDataReader reader)

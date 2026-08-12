@@ -12,15 +12,18 @@ namespace appointza.Services
     {
         readonly IDbProvider dbprovider;
         readonly CreditWalletService creditWalletService;
+        readonly SubscriptionPlanService subscriptionPlanService;
         readonly RazorpayService razorpayService;
 
         public CreditWalletRechargeService(
             IDbProvider dbprovider,
             CreditWalletService creditWalletService,
+            SubscriptionPlanService subscriptionPlanService,
             RazorpayService razorpayService)
         {
             this.dbprovider = dbprovider;
             this.creditWalletService = creditWalletService;
+            this.subscriptionPlanService = subscriptionPlanService;
             this.razorpayService = razorpayService;
         }
 
@@ -31,10 +34,11 @@ namespace appointza.Services
                 throw new ArgumentException("organisation_id is required", nameof(organisationId));
             }
 
-            var pack = CreditWalletCatalog.GetPack(packId);
-
             using IDb db = await dbprovider.GetDb();
             await db.Connect();
+            var pack = await subscriptionPlanService.GetCreditWalletPackByCodeTransaction(db, packId)
+                ?? throw new ArgumentException("Unknown credit pack.");
+
             await creditWalletService.EnsureSchemaTransaction(db);
             await EnsureRechargePaymentsTableTransaction(db);
             await creditWalletService.GetOrCreateTransaction(db, organisationId);

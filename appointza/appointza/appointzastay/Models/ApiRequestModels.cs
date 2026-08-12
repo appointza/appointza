@@ -71,6 +71,10 @@ public class OrganisationContactSaveReq
 
 public class OrganisationPoliciesSaveReq
 {
+    /// <summary>overnight | hourly — stored on organisations.booking_type</summary>
+    public string? bookingType { get; set; }
+    /// <summary>Minimum slot length when booking_type is hourly.</summary>
+    public int? minimumHours { get; set; }
     public string? checkInTime { get; set; }
     public string? checkOutTime { get; set; }
     /// <summary>fixed | dynamic — overnight guest time behaviour</summary>

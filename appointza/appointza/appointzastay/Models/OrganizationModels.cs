@@ -36,7 +36,7 @@ public class OrganizationProfile
     public string Name { get; set; } = AppBranding.Name;
     public string Tagline { get; set; } = AppBranding.Tagline;
     public string WebsiteUrl { get; set; } = "";
-    /// <summary>User-chosen subdomain, e.g. "example" for example.appointzastay.com</summary>
+    /// <summary>User-chosen subdomain, e.g. "ootyroomstay" for ootyroomstay.stay.appointza.com</summary>
     public string Subdomain { get; set; } = "";
     public string? LogoAssetId { get; set; }
     public List<OrganizationAsset> Assets { get; set; } = [];
@@ -51,10 +51,17 @@ public class OrganizationProfile
 
 public static class OrganizationDomain
 {
+    private static readonly string[] DomainSuffixes =
+    [
+        AppBranding.CustomDomainSuffix, // stay.appointza.com
+        "appointzastay.com",            // legacy
+    ];
+
     private static readonly HashSet<string> ReservedSubdomains =
         new(StringComparer.OrdinalIgnoreCase)
         {
             "www", "app", "api", "admin", "mail", "ftp", "cdn", "static", "assets", "help", "support", "status",
+            "stay", // apex product host stay.appointza.com
         };
 
     public static string SlugFromName(string? name)
@@ -72,10 +79,16 @@ public static class OrganizationDomain
             return "";
 
         var value = input.Trim().ToLowerInvariant();
-        var suffix = AppBranding.CustomDomainSuffix;
 
-        if (value.EndsWith('.' + suffix, StringComparison.Ordinal))
-            value = value[..^(suffix.Length + 1)];
+        foreach (var suffix in DomainSuffixes)
+        {
+            var s = suffix.ToLowerInvariant();
+            if (value.EndsWith('.' + s, StringComparison.Ordinal))
+            {
+                value = value[..^(s.Length + 1)];
+                break;
+            }
+        }
 
         if (value.Contains('.'))
             throw new ArgumentException($"Use only the subdomain part (e.g. myhotel), not the full domain.");
@@ -92,7 +105,7 @@ public static class OrganizationDomain
         return value;
     }
 
-  public static bool TryParseSubdomainFromHost(string? host, out string subdomain)
+    public static bool TryParseSubdomainFromHost(string? host, out string subdomain)
     {
         subdomain = "";
         if (string.IsNullOrWhiteSpace(host))
@@ -102,18 +115,26 @@ public static class OrganizationDomain
         if (hostOnly is "localhost" or "127.0.0.1")
             return false;
 
+        // Local: ootyroomstay.localhost:8088
         if (hostOnly.EndsWith(".localhost", StringComparison.Ordinal))
         {
             subdomain = hostOnly[..^".localhost".Length];
             return subdomain.Length >= 3 && !ReservedSubdomains.Contains(subdomain);
         }
 
-        var suffix = AppBranding.CustomDomainSuffix.ToLowerInvariant();
-        var dottedSuffix = "." + suffix;
-        if (hostOnly.EndsWith(dottedSuffix, StringComparison.Ordinal))
+        // Production: ootyroomstay.stay.appointza.com (and legacy *.appointzastay.com)
+        foreach (var suffixRaw in DomainSuffixes)
         {
+            var suffix = suffixRaw.ToLowerInvariant();
+            var dottedSuffix = "." + suffix;
+            if (!hostOnly.EndsWith(dottedSuffix, StringComparison.Ordinal))
+                continue;
+
             subdomain = hostOnly[..^dottedSuffix.Length];
             if (subdomain is "" or "www")
+                return false;
+            // Reject multi-label leftovers like "a.b" under the suffix
+            if (subdomain.Contains('.'))
                 return false;
             return subdomain.Length >= 3 && !ReservedSubdomains.Contains(subdomain);
         }
@@ -121,11 +142,15 @@ public static class OrganizationDomain
         return false;
     }
 
+    /// <summary>
+    /// Public property URL. Local: https://ootyroomstay.localhost:8088/
+    /// Production: https://ootyroomstay.stay.appointza.com/
+    /// </summary>
     public static string BuildPublicWebsiteUrl(
         string? subdomain,
         string? requestHost = null,
         string? requestScheme = "https",
-        string appPath = "/appointzastay")
+        string appPath = "/")
     {
         if (string.IsNullOrWhiteSpace(subdomain))
             return "";
@@ -143,15 +168,16 @@ public static class OrganizationDomain
                 hostOnly.Equals("localhost", StringComparison.OrdinalIgnoreCase))
             {
                 var port = requestHost.Contains(':') ? ":" + requestHost.Split(':')[^1] : "";
-                return $"{scheme}://{sub}.localhost{port}{path}";
+                // Tenant sites run on the Stay Vite port at domain root (not /stay/)
+                return $"{scheme}://{sub}.localhost{port}/";
             }
 
             if (TryParseSubdomainFromHost(requestHost, out var parsed) &&
                 string.Equals(parsed, sub, StringComparison.OrdinalIgnoreCase))
-                return $"{scheme}://{requestHost.Trim()}{path}";
+                return $"{scheme}://{requestHost.Split('/')[0].Trim()}/";
         }
 
-        return $"{scheme}://{sub}.{AppBranding.CustomDomainSuffix}{path}";
+        return $"{scheme}://{sub}.{AppBranding.CustomDomainSuffix}/";
     }
 }
 

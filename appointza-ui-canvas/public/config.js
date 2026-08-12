@@ -7,10 +7,11 @@
       location.hostname.endsWith(".localhost"));
   window.APP_CONFIG = {
   // Local Vite dev → local appointza API (dotnet run, port 5117). Production → appointza.com.
-  baseurl: isLocal ? "http://localhost:5117" : "https://appointza.com",
-  templateBaseUrl: isLocal ? "http://localhost:5117/template" : "https://appointza.com/template",
+  baseurl: isLocal ? "https://appointza.com" : "https://appointza.com",
+  templateBaseUrl: isLocal ? "https://appointza.com/template" : "https://appointza.com/template",
   uiBaseUrl: isLocal ? "http://localhost:8083" : "https://appointza.com",
   marketingDomain: 'appointza.com',
+  domainname: isLocal ? 'localhost:8083' : 'appointza.com',
   
   // Environment
   production: true,

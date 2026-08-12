@@ -2,8 +2,8 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Loader2, AlertCircle, ShieldAlert } from "lucide-react";
 import { OrganisationSiteTemplateView } from "@/components/template/OrganisationSiteTemplateView";
-import { getAppDomain, environment } from "@/utils/environment";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
+import { environment } from "@/utils/environment";
+import { extractOrganisationCustomSubdomain } from "@/utils/orgPublicSiteUrl.util";
 
 const CustomDomainRedirect = () => {
   const navigate = useNavigate();
@@ -17,19 +17,11 @@ const CustomDomainRedirect = () => {
       try {
         setIsLoading(true);
 
-        const hostname = window.location.host;
-        const parsedLocation = parseSubdomainLocation(hostname, getAppDomain());
-        if (!parsedLocation) {
+        const customUrlSlug = extractOrganisationCustomSubdomain(window.location.host);
+        if (!customUrlSlug) {
           setError("main-page");
           return;
         }
-
-        const normalizePart = (value: string) =>
-          (value || "")
-            .trim()
-            .toLowerCase()
-            .replace(/\s+/g, "")
-            .replace(/-/g, "");
 
         const postJson = async (path: string, body: unknown) => {
           const options: RequestInit = {
@@ -54,26 +46,14 @@ const CustomDomainRedirect = () => {
           return fallbackResponse.json();
         };
 
-        const resolveSubdomain = async (area: string, city: string) => {
-          const payload = await postJson("/api/OrganisationSite/ResolveTemplateBySubdomain", {
-            item: {
-              organizationName: normalizePart(parsedLocation.organization),
-              area: normalizePart(area),
-              city: normalizePart(city),
-              state: normalizePart(parsedLocation.state),
-            },
-          });
-          return payload?.item || payload;
-        };
-
-        let resolved = await resolveSubdomain(parsedLocation.area, parsedLocation.city);
-        if (!resolved?.organisationlocationid) {
-          resolved = await resolveSubdomain(parsedLocation.city, parsedLocation.area);
-        }
+        const payload = await postJson("/api/OrganisationSite/ResolveTemplateBySubdomain", {
+          item: { customUrl: customUrlSlug },
+        });
+        const resolved = payload?.item || payload;
 
         const resolvedLocationId = resolved?.organisationlocationid || 0;
         if (!resolvedLocationId) {
-          throw new Error("Location not found for this subdomain");
+          throw new Error("Location not found for this custom URL");
         }
 
         setLocationId(resolvedLocationId);

@@ -1,31 +1,39 @@
 import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Loader2, Save, ArrowLeft, FileText, Upload, X, Image as ImageIcon, Eye } from "lucide-react";
+import { Loader2, Save, ArrowLeft, FileText, Upload, X, Image as ImageIcon, Eye, Plus } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import OrganizationLayout from "@/components/layout/OrganizationLayout";
 import { useAuth } from "@/contexts/AuthContext";
+import CreateAppointmentTaskValueDialog from "@/components/organization/CreateAppointmentTaskValueDialog";
+import type { ReferenceValue } from "@/models/referencevalue.model";
 import { AppointmentRecord, AppointmentRecordSelectReq } from "@/models/appointmentrecord.model";
 import { AppointmentRecordService } from "@/services/appointmentrecord.service";
 import { ReferenceValueService } from "@/services/referencevalue.service";
-import { ReferenceValueSelectReq } from "@/models/referencevalue.model";
-import { sortReferenceValuesByDisplayOrder } from "@/utils/referencevalue.util";
 import { AppoinmentService } from "@/services/appoinment.service";
 import { AppoinmentSelectReq } from "@/models/appoinment.model";
 import { FilesService } from "@/services/files.service";
 import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+import { org } from "@/lib/orgTheme";
+import { loadAppointmentTaskValues, parseDataTypeFromNotes } from "@/utils/appointmentTaskValues.util";
+import { ReferenceTypeService } from "@/services/referencetype.service";
+
+const compactCardHeader = "space-y-0.5 p-4 pb-2";
+const compactCardContent = "space-y-3 p-4 pt-0";
+const compactCardTitle = "text-base font-semibold text-appointza-navy";
+const compactTextarea = "min-h-[72px] resize-y";
 
 const AppointmentRecordPage = () => {
   const { id } = useParams<{ id: string }>();
@@ -35,13 +43,14 @@ const AppointmentRecordPage = () => {
   const organizationId = user?.organisationid || 1;
 
   const [appointmentRecord, setAppointmentRecord] = useState<AppointmentRecord | null>(null);
-  const [tasks, setTasks] = useState<any[]>([]);
+  const [tasks, setTasks] = useState<ReferenceValue[]>([]);
   const [taskValues, setTaskValues] = useState<{ [key: number]: any }>({});
   const [report, setReport] = useState("");
   const [notes, setNotes] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isAddValueOpen, setIsAddValueOpen] = useState(false);
   const [appointment, setAppointment] = useState<any>(null);
   const [uploadedFiles, setUploadedFiles] = useState<AppointmentRecord.FileIdItem[]>([]);
   const [imageUrls, setImageUrls] = useState<{ [key: number]: string }>({});
@@ -49,6 +58,7 @@ const AppointmentRecordPage = () => {
 
   const appointmentRecordService = useMemo(() => new AppointmentRecordService(), []);
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
+  const referenceTypeService = useMemo(() => new ReferenceTypeService(), []);
   const appointmentService = useMemo(() => new AppoinmentService(), []);
   const filesService = useMemo(() => new FilesService(), []);
 
@@ -57,6 +67,26 @@ const AppointmentRecordPage = () => {
       loadData();
     }
   }, [id, organizationId]);
+
+  const reloadTasks = async () => {
+    const taskList = await loadAppointmentTaskValues(
+      referenceTypeService,
+      referenceValueService,
+      organizationId,
+    );
+    setTasks(taskList);
+    return taskList;
+  };
+
+  const handleAppointmentValueCreated = async (created: ReferenceValue) => {
+    await reloadTasks();
+    if (created.id) {
+      setTaskValues((prev) => ({
+        ...prev,
+        [created.id]: prev[created.id] ?? "",
+      }));
+    }
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -75,12 +105,8 @@ const AppointmentRecordPage = () => {
         }
       }
 
-      // Load tasks from referencevalue where referencetypeid = 4
-      const taskReq = new ReferenceValueSelectReq();
-      taskReq.referencetypeid = 4; // APPOINTMENTTASK
-      taskReq.organisationid = organizationId;
-      const taskList = await referenceValueService.select(taskReq);
-      setTasks(sortReferenceValuesByDisplayOrder(taskList || []));
+      // Load appointment task fields configured in Profile → Appointment values
+      await reloadTasks();
 
       // Load existing appointment record if exists
       if (appointmentData) {
@@ -140,34 +166,10 @@ const AppointmentRecordPage = () => {
     }));
   };
 
-  const renderTaskInput = (task: any) => {
+  const renderTaskInput = (task: ReferenceValue) => {
     const currentValue = taskValues[task.id] !== undefined ? taskValues[task.id] : "";
-    
-    // Parse datatype from notes - check for "Data Type:" prefix first
-    let datatype = "string";
-    const notesLower = task.notes?.toLowerCase() || "";
-    
-    if (task.notes?.includes("Data Type:")) {
-      // Extract datatype from "Data Type: {datatype}" format
-      const lines = task.notes.split('\n');
-      const dataTypeLine = lines.find((line: string) => line.toLowerCase().startsWith('data type:'));
-      if (dataTypeLine) {
-        datatype = dataTypeLine.split(':')[1]?.trim().toLowerCase() || "string";
-      }
-    } else {
-      // Fallback: try to infer from notes content
-      if (notesLower.includes("number") || notesLower.includes("integer") || notesLower.includes("decimal") || notesLower.includes("float")) {
-        datatype = "number";
-      } else if (notesLower.includes("boolean")) {
-        datatype = "boolean";
-      } else if (notesLower.includes("datetime") || notesLower.includes("date time")) {
-        datatype = "datetime";
-      } else if (notesLower.includes("date")) {
-        datatype = "date";
-      } else if (notesLower.includes("time")) {
-        datatype = "time";
-      }
-    }
+    const { datatype: rawType } = parseDataTypeFromNotes(task.notes || "");
+    const datatype = rawType.toLowerCase();
 
     switch (datatype) {
       case "number":
@@ -175,10 +177,10 @@ const AppointmentRecordPage = () => {
       case "decimal":
       case "float":
         return (
-          <Input
-            type="number"
-            value={currentValue || 0}
-            onChange={(e) => handleTaskValueChange(task.id, parseFloat(e.target.value) || 0)}
+          <NumberInput
+            float
+            value={typeof currentValue === "number" ? currentValue : 0}
+            onValueChange={(value) => handleTaskValueChange(task.id, value)}
             placeholder="Enter number"
           />
         );
@@ -406,201 +408,240 @@ const AppointmentRecordPage = () => {
 
   if (isLoading) {
     return (
-      <OrganizationLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
-        </div>
-      </OrganizationLayout>
+      <div className="flex h-48 items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-appointza-coral" />
+      </div>
     );
   }
 
   return (
-    <OrganizationLayout>
-      <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
+    <>
+      <div className={cn(org.pageSection, "w-full min-w-0 space-y-4 pb-4 pt-0")}>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-2">
             <Button
               variant="ghost"
               size="sm"
+              className="shrink-0"
               onClick={() => navigate("/organization/appointments")}
             >
-              <ArrowLeft className="h-4 w-4 mr-2" />
+              <ArrowLeft className="mr-1.5 h-4 w-4" />
               Back
             </Button>
-            <div>
-              <h2 className="text-3xl font-bold tracking-tight">Appointment Record</h2>
-              <p className="text-muted-foreground">
-                Manage appointment records and task values
-              </p>
+            <div className="min-w-0">
+              <h1 className="truncate text-xl font-semibold text-appointza-navy">Appointment Record</h1>
+              {appointment ? (
+                <p className="truncate text-sm text-stone-500">
+                  {appointment.username || "Client"} ·{" "}
+                  {format(new Date(appointment.appoinmentdate), "MMM d, yyyy")} at{" "}
+                  {appointment.fromtime?.toString().substring(0, 5) || "—"}
+                </p>
+              ) : (
+                <p className="text-sm text-stone-500">Manage report, notes, and appointment values</p>
+              )}
             </div>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/organization/appointments")}>
+              Cancel
+            </Button>
+            <Button size="sm" className={org.btnPrimary} onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Save className="mr-2 h-4 w-4" />
+              )}
+              Save Record
+            </Button>
           </div>
         </div>
 
-        {appointment && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Appointment Information</CardTitle>
+        {appointment ? (
+          <div className={cn(org.card, "grid grid-cols-2 gap-x-4 gap-y-2 p-4 text-sm md:grid-cols-4")}>
+            <div>
+              <p className="text-xs text-stone-500">Client</p>
+              <p className="font-medium text-appointza-navy">{appointment.username || "N/A"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-500">Date & time</p>
+              <p className="font-medium text-appointza-navy">
+                {format(new Date(appointment.appoinmentdate), "MMM d, yyyy")} ·{" "}
+                {appointment.fromtime?.toString().substring(0, 5) || "N/A"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-500">Services</p>
+              <p className="truncate font-medium text-appointza-navy">
+                {appointment.attributes?.servicelist?.map((s: any) => s.servicename).join(", ") || "N/A"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-stone-500">Status</p>
+              <Badge className="mt-0.5">{appointment.statuscode || "N/A"}</Badge>
+            </div>
+          </div>
+        ) : null}
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card className={cn(org.card, "shadow-none")}>
+            <CardHeader className={compactCardHeader}>
+              <CardTitle className={compactCardTitle}>Report & notes</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm text-muted-foreground">Client</Label>
-                  <p className="font-medium">{appointment.username || "N/A"}</p>
-                </div>
-                <div>
-                  <Label className="text-sm text-muted-foreground">Date & Time</Label>
-                  <p className="font-medium">
-                    {format(new Date(appointment.appoinmentdate), "PPP")} at{" "}
-                    {appointment.fromtime?.toString().substring(0, 5) || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-sm text-muted-foreground">Services</Label>
-                  <p className="font-medium">
-                    {appointment.attributes?.servicelist
-                      ?.map((s: any) => s.servicename)
-                      .join(", ") || "N/A"}
-                  </p>
-                </div>
-                <div>
-                  <Label className="text-sm text-muted-foreground">Status</Label>
-                  <Badge>{appointment.statuscode || "N/A"}</Badge>
-                </div>
+            <CardContent className={compactCardContent}>
+              <div className="space-y-1.5">
+                <Label htmlFor="report" className="text-xs text-stone-500">
+                  Report
+                </Label>
+                <Textarea
+                  id="report"
+                  value={report}
+                  onChange={(e) => setReport(e.target.value)}
+                  placeholder="Enter appointment report..."
+                  rows={3}
+                  className={compactTextarea}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="notes" className="text-xs text-stone-500">
+                  Notes
+                </Label>
+                <Textarea
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Enter additional notes..."
+                  rows={3}
+                  className={compactTextarea}
+                />
               </div>
             </CardContent>
           </Card>
-        )}
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Report & Notes</CardTitle>
-            <CardDescription>
-              Add detailed report and notes for this appointment
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="report">Report</Label>
-              <Textarea
-                id="report"
-                value={report}
-                onChange={(e) => setReport(e.target.value)}
-                placeholder="Enter appointment report..."
-                rows={6}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Enter additional notes..."
-                rows={4}
-              />
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Images & Files</CardTitle>
-            <CardDescription>
-              Upload and manage images and files for this appointment record
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="file-upload">Upload Files</Label>
-              <div>
-                <input
-                  type="file"
-                  id="file-upload"
-                  className="hidden"
-                  multiple
-                  accept="image/*,.pdf,.doc,.docx"
-                  onChange={handleFileUpload}
-                  disabled={isUploading}
-                />
-                <label htmlFor="file-upload">
+          <Card className={cn(org.card, "shadow-none")}>
+            <CardHeader className={cn(compactCardHeader, "flex-row items-center justify-between space-y-0")}>
+              <CardTitle className={compactCardTitle}>Appointment values</CardTitle>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setIsAddValueOpen(true)}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Add value
+              </Button>
+            </CardHeader>
+            <CardContent className={compactCardContent}>
+              {tasks.length > 0 ? (
+                tasks.map((task) => (
+                  <div key={task.id} className="space-y-1.5 rounded-lg border border-stone-100 p-3">
+                    <Label className="text-sm font-medium text-appointza-navy">
+                      {task.displaytext || task.identifier}
+                    </Label>
+                    {task.description ? (
+                      <p className="text-xs text-stone-500">{task.description}</p>
+                    ) : null}
+                    {renderTaskInput(task)}
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-lg border border-dashed border-stone-200 py-6 text-center text-sm text-stone-500">
+                  <p>No appointment values yet.</p>
                   <Button
-                    variant="outline"
-                    disabled={isUploading}
-                    asChild
                     type="button"
+                    variant="link"
+                    className="mt-1 h-auto p-0 text-appointza-coral"
+                    onClick={() => setIsAddValueOpen(true)}
                   >
-                    <span>
-                      {isUploading ? (
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      ) : (
-                        <Upload className="mr-2 h-4 w-4" />
-                      )}
-                      Upload Files
-                    </span>
+                    Add your first value
                   </Button>
-                </label>
-              </div>
-            </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
+        <Card className={cn(org.card, "shadow-none")}>
+          <CardHeader className={cn(compactCardHeader, "flex-row items-center justify-between space-y-0")}>
+            <CardTitle className={compactCardTitle}>Images & files</CardTitle>
+            <div>
+              <input
+                type="file"
+                id="file-upload"
+                className="hidden"
+                multiple
+                accept="image/*,.pdf,.doc,.docx"
+                onChange={handleFileUpload}
+                disabled={isUploading}
+              />
+              <label htmlFor="file-upload">
+                <Button variant="outline" size="sm" disabled={isUploading} asChild type="button">
+                  <span>
+                    {isUploading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Upload className="mr-2 h-4 w-4" />
+                    )}
+                    Upload
+                  </span>
+                </Button>
+              </label>
+            </div>
+          </CardHeader>
+          <CardContent className={compactCardContent}>
             {uploadedFiles.length > 0 ? (
-              <div className="space-y-4">
-                {/* Image grid for image files */}
+              <div className="space-y-3">
                 {uploadedFiles.filter((f) => f.filetype?.startsWith("image/")).length > 0 && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">Images</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                    <Label className="mb-2 block text-xs text-stone-500">Images</Label>
+                    <div className="grid grid-cols-3 gap-3 md:grid-cols-4 lg:grid-cols-5">
                       {uploadedFiles
                         .filter((file) => file.filetype?.startsWith("image/"))
                         .map((file) => (
                           <div
                             key={file.id}
-                            className="relative group border rounded-lg overflow-hidden bg-gray-100"
+                            className="group relative overflow-hidden rounded-lg border bg-gray-100"
                           >
-                            <div className="aspect-square relative">
+                            <div className="relative aspect-square">
                               {imageUrls[file.id] ? (
                                 <img
                                   src={imageUrls[file.id]}
                                   alt={file.filename}
-                                  className="w-full h-full object-cover cursor-pointer"
+                                  className="h-full w-full cursor-pointer object-cover"
                                   onClick={() => handleViewImage(file)}
                                   onError={(e) => {
-                                    // Fallback to service URL if blob fails
                                     const target = e.target as HTMLImageElement;
                                     target.src = filesService.getImageUrl(file.id);
                                   }}
                                 />
                               ) : (
-                                <div className="w-full h-full flex items-center justify-center">
-                                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                                <div className="flex h-full w-full items-center justify-center">
+                                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                                 </div>
                               )}
-                              <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 transition-opacity flex items-center justify-center">
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/0 transition-opacity group-hover:bg-black/40">
                                 <Button
                                   variant="ghost"
                                   size="sm"
-                                  className="opacity-0 group-hover:opacity-100 text-white hover:text-white hover:bg-white/20"
+                                  className="text-white opacity-0 hover:bg-white/20 hover:text-white group-hover:opacity-100"
                                   onClick={() => handleViewImage(file)}
                                 >
-                                  <Eye className="h-4 w-4 mr-1" />
+                                  <Eye className="mr-1 h-4 w-4" />
                                   View
                                 </Button>
                               </div>
                               <Button
                                 variant="destructive"
                                 size="sm"
-                                className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 h-6 w-6 p-0"
+                                className="absolute right-1.5 top-1.5 h-6 w-6 p-0 opacity-0 group-hover:opacity-100"
                                 onClick={() => handleRemoveFile(file.id)}
                                 title="Remove image"
                               >
                                 <X className="h-3 w-3" />
                               </Button>
                             </div>
-                            <div className="p-2">
-                              <p className="text-xs font-medium truncate" title={file.filename}>
+                            <div className="p-1.5">
+                              <p className="truncate text-[11px] font-medium" title={file.filename}>
                                 {file.filename}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {(file.filesize / 1024).toFixed(2)} KB
                               </p>
                             </div>
                           </div>
@@ -609,30 +650,24 @@ const AppointmentRecordPage = () => {
                   </div>
                 )}
 
-                {/* List for non-image files */}
                 {uploadedFiles.filter((f) => !f.filetype?.startsWith("image/")).length > 0 && (
                   <div>
-                    <Label className="text-sm font-medium mb-2 block">Documents</Label>
+                    <Label className="mb-2 block text-xs text-stone-500">Documents</Label>
                     <div className="space-y-2">
                       {uploadedFiles
                         .filter((file) => !file.filetype?.startsWith("image/"))
                         .map((file) => (
                           <div
                             key={file.id}
-                            className="flex items-center justify-between p-3 border rounded-lg"
+                            className="flex items-center justify-between rounded-lg border p-2.5"
                           >
-                            <div className="flex items-center space-x-3">
-                              <FileText className="h-5 w-5 text-muted-foreground" />
-                              <div>
-                                <p className="font-medium">{file.filename}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {file.filetype} • {(file.filesize / 1024).toFixed(2)} KB
+                            <div className="flex min-w-0 items-center gap-2">
+                              <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium">{file.filename}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {file.filetype} · {(file.filesize / 1024).toFixed(1)} KB
                                 </p>
-                                {file.uploadedon && (
-                                  <p className="text-xs text-muted-foreground">
-                                    Uploaded: {format(new Date(file.uploadedon), "PPp")}
-                                  </p>
-                                )}
                               </div>
                             </div>
                             <Button
@@ -650,65 +685,18 @@ const AppointmentRecordPage = () => {
                 )}
               </div>
             ) : (
-              <div className="text-center py-8 text-muted-foreground">
-                <ImageIcon className="mx-auto h-12 w-12 opacity-50 mb-2" />
+              <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
+                <ImageIcon className="mx-auto mb-2 h-8 w-8 opacity-40" />
                 <p>No files uploaded yet</p>
               </div>
             )}
           </CardContent>
         </Card>
-
-        {tasks.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle>Task Values</CardTitle>
-              <CardDescription>
-                Manage task values from appointment reference values
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {tasks.map((task) => (
-                <div key={task.id} className="space-y-2 p-4 border rounded-lg">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label className="text-base font-medium">
-                        {task.displaytext || task.identifier}
-                      </Label>
-                      {task.notes && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {task.notes}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                  {renderTaskInput(task)}
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        )}
-
-        <div className="flex justify-end gap-2">
-          <Button
-            variant="outline"
-            onClick={() => navigate("/organization/appointments")}
-          >
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
-            {isSaving ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Save className="mr-2 h-4 w-4" />
-            )}
-            Save Record
-          </Button>
-        </div>
       </div>
 
       {/* Image Viewer Dialog */}
       <Dialog open={selectedImage !== null} onOpenChange={() => setSelectedImage(null)}>
-        <DialogContent className="max-w-4xl max-h-[90vh]">
+        <DialogContent className="max-h-[90vh] max-w-4xl">
           <DialogHeader>
             <DialogTitle>{selectedImage?.filename}</DialogTitle>
           </DialogHeader>
@@ -717,7 +705,7 @@ const AppointmentRecordPage = () => {
               <img
                 src={selectedImage.url}
                 alt={selectedImage.filename}
-                className="max-w-full max-h-[70vh] object-contain rounded-lg"
+                className="max-h-[70vh] max-w-full rounded-lg object-contain"
                 onError={(e) => {
                   const target = e.target as HTMLImageElement;
                   target.src = filesService.getImageUrl(selectedImage.id);
@@ -727,7 +715,15 @@ const AppointmentRecordPage = () => {
           </div>
         </DialogContent>
       </Dialog>
-    </OrganizationLayout>
+
+      <CreateAppointmentTaskValueDialog
+        open={isAddValueOpen}
+        onOpenChange={setIsAddValueOpen}
+        organizationId={organizationId}
+        existingTasks={tasks}
+        onCreated={handleAppointmentValueCreated}
+      />
+    </>
   );
 };
 

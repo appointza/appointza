@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -385,10 +386,10 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
       case 'decimal':
       case 'float':
         return (
-          <Input
-            type="number"
-            value={currentValue || 0}
-            onChange={(e) => handleValueChange(parseFloat(e.target.value) || 0)}
+          <NumberInput
+            float
+            value={typeof currentValue === "number" ? currentValue : 0}
+            onValueChange={handleValueChange}
             placeholder="Enter number value"
             className="w-full"
           />

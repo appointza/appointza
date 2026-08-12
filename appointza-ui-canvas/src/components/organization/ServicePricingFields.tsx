@@ -1,5 +1,5 @@
 import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { OrganisationServices } from "@/models/organisationservices.model";
 import { org } from "@/lib/orgTheme";
@@ -38,12 +38,11 @@ export function ServicePricingFields({
         <Label htmlFor={pid("price")} className={org.label}>
           {samePriceAllDays ? "Price (₹) *" : "Regular price (Mon–Fri) (₹) *"}
         </Label>
-        <Input
+        <NumberInput
           id={pid("price")}
-          type="number"
           min={0}
-          value={service.prize.toString()}
-          onChange={(e) => applyWeekdayPrice(parseInt(e.target.value, 10) || 0)}
+          value={service.prize}
+          onValueChange={applyWeekdayPrice}
           className={cn(org.input, "h-11 min-h-11")}
           placeholder="Enter price in ₹"
         />
@@ -81,14 +80,11 @@ export function ServicePricingFields({
       {!samePriceAllDays && (
         <div className="grid gap-2">
           <Label htmlFor={pid("weekend-price")} className={org.label}>Weekend price (Sat–Sun) (₹) *</Label>
-          <Input
+          <NumberInput
             id={pid("weekend-price")}
-            type="number"
             min={0}
-            value={service.weekend_price?.toString() || service.prize.toString() || "0"}
-            onChange={(e) =>
-              onChange({ weekend_price: parseInt(e.target.value, 10) || 0 })
-            }
+            value={service.weekend_price || service.prize || 0}
+            onValueChange={(weekend_price) => onChange({ weekend_price })}
             className={cn(org.input, "h-11 min-h-11")}
             placeholder="Enter weekend price in ₹"
           />
@@ -101,14 +97,11 @@ export function ServicePricingFields({
       {samePriceAllDays && (
         <div className="grid gap-2">
           <Label htmlFor={pid("offer-price")} className={org.label}>Offer price (₹) (optional)</Label>
-          <Input
+          <NumberInput
             id={pid("offer-price")}
-            type="number"
             min={0}
-            value={service.offerprize?.toString() || ""}
-            onChange={(e) =>
-              onChange({ offerprize: parseInt(e.target.value, 10) || 0 })
-            }
+            value={service.offerprize || 0}
+            onValueChange={(offerprize) => onChange({ offerprize })}
             className={cn(org.input, "h-11 min-h-11")}
             placeholder="Leave empty if no offer"
           />

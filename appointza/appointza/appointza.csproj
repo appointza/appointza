@@ -32,6 +32,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Remove="Database\Tools\**\*.cs" />
+    <EmbeddedResource Remove="Database\Tools\**\*" />
+    <None Remove="Database\Tools\**\*.cs" />
+    <Content Remove="Database\Tools\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Folder Include="wwwroot\browser\index.html" />
     <Folder Include="Views\Home\Components\" />
     <Folder Include="wwwroot\images\" />

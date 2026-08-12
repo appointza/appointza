@@ -111,12 +111,12 @@ app.UseSwagger();
 app.UseSwaggerUI();
 
 // Configure static files to serve from appointzabuild/production/wwwroot
+// Prefer the wwwroot next to the published exe (production host); only then fall back to monorepo path.
 var staticPathCandidates = new[]
 {
-    // Running from appointza project folder
-    Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "appointzabuild", "production", "wwwroot")),
-    // Running from compiled server output inside appointzabuild/production
     Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "wwwroot")),
+    Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "wwwroot")),
+    Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "..", "..", "appointzabuild", "production", "wwwroot")),
 };
 
 var appointzaBuildPath = staticPathCandidates.FirstOrDefault(Directory.Exists);
@@ -131,7 +131,15 @@ if (!Directory.Exists(wwwrootPath))
 
 var wwwrootProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(wwwrootPath);
 
-// Shared wwwroot (config.js, legacy root assets)
+// Rewrite /stay/ → /stay/index.html (and same for other SPA folders) before static files.
+// Without this, bare /stay/ falls through to the root Appointza SPA and shows its 404 page.
+app.UseDefaultFiles(new DefaultFilesOptions
+{
+    FileProvider = wwwrootProvider,
+    RequestPath = ""
+});
+
+// Shared wwwroot (config.js, legacy root assets, SPA folders under wwwroot/{segment}/)
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = wwwrootProvider,
@@ -159,8 +167,10 @@ var uploadSyncCount = StayStaticFiles.SyncUploadsToPrimary(app.Environment);
 if (uploadSyncCount > 0)
     Console.WriteLine($"✅ Synced {uploadSyncCount} upload(s) into {StayStaticFiles.UploadOrgDirectory(app.Environment)}");
 
-// Product UIs: /appointza, /campusza, /webzys
-foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "appointzastay" })
+// Product UIs: /appointza, /campusza, /webzys, /stay
+// DefaultFiles so /webzys/ (trailing slash, no file) serves that SPA's index.html
+// instead of falling through to the root Appointza SPA.
+foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "stay" })
 {
     var spaPhysicalPath = Path.Combine(wwwrootPath, spaSegment);
     if (!Directory.Exists(spaPhysicalPath))
@@ -169,6 +179,11 @@ foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "appointza
     }
 
     var spaProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(spaPhysicalPath);
+    app.UseDefaultFiles(new DefaultFilesOptions
+    {
+        FileProvider = spaProvider,
+        RequestPath = $"/{spaSegment}"
+    });
     app.UseStaticFiles(new StaticFileOptions
     {
         FileProvider = spaProvider,
@@ -199,21 +214,44 @@ app.MapControllers();
 // HEALTH
 app.MapHealthChecks("/health");
 
-// Root → default product UI when using combined ACW deploy
-app.MapGet("/", () => Results.Redirect("/appointza/"));
+var rootIndexHtml = Path.Combine(wwwrootPath, "index.html");
+var multiPortRootSpa = File.Exists(rootIndexHtml);
 
-// SPA fallbacks (subpath deploy from buildallacw.ps1)
-app.MapFallbackToFile("/appointza/{**slug}", "appointza/index.html");
-app.MapFallbackToFile("/campusza/{**slug}", "campusza/index.html");
-app.MapFallbackToFile("/webzys/{**slug}", "webzys/index.html");
-
-app.MapFallbackToFile("/appointzastay/{**slug}", "appointzastay/index.html");
-
-// Legacy: root-level Appointza SPA if index.html exists at wwwroot root
-if (File.Exists(Path.Combine(wwwrootPath, "index.html")))
+if (multiPortRootSpa)
 {
-    app.MapFallbackToFile("index.html");
+    // Multi-port deploy: Appointza UI at wwwroot root (e.g. http://localhost:5000/)
+    app.MapFallbackToFile("/{**slug}", "index.html");
+    Console.WriteLine("✅ Multi-port SPA: Appointza UI at / (wwwroot/index.html)");
 }
+else
+{
+    // Combined path deploy: /appointza, /campusza, /webzys, /stay under one host
+    app.MapGet("/", () => Results.Redirect("/appointza/"));
+
+    foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "stay" })
+    {
+        var indexPhysical = Path.Combine(wwwrootPath, spaSegment, "index.html");
+        if (!File.Exists(indexPhysical))
+            continue;
+
+        var indexRelative = $"{spaSegment}/index.html";
+        var segment = spaSegment;
+
+        app.MapGet($"/{segment}", () => Results.Redirect($"/{segment}/"));
+        app.MapGet($"/{segment}/", async (HttpContext ctx) =>
+        {
+            ctx.Response.ContentType = "text/html; charset=utf-8";
+            await ctx.Response.SendFileAsync(indexPhysical);
+        });
+        app.MapFallbackToFile($"/{segment}/{{**slug}}", indexRelative);
+    }
+
+    app.MapGet("/appointzastay", () => Results.Redirect("/stay/", permanent: false));
+    app.MapGet("/appointzastay/{**slug}", (string? slug) =>
+        Results.Redirect(string.IsNullOrEmpty(slug) ? "/stay/" : $"/stay/{slug}", permanent: false));
+}
+
+// Do NOT MapFallbackToFile("index.html") at wwwroot root in combined mode — steals /stay/, /webzys/, etc.
 
 // ERROR HANDLING
 app.UseMiddleware<ErrorHandlerMiddleware>();

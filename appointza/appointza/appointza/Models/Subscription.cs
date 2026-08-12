@@ -73,9 +73,6 @@ namespace appointza.Models
         /// <summary>subscription | credit_wallet — alternative prepaid billing.</summary>
         public string billing_mode { get; set; } = BillingModeCodes.Subscription;
         public int wallet_credit_balance { get; set; }
-        public int wallet_free_bookings_used_this_month { get; set; }
-        public int wallet_free_bookings_remaining { get; set; }
-        public int wallet_free_bookings_per_month { get; set; } = CreditWalletCatalog.FreeBookingsPerMonth;
         public int credits_per_booking { get; set; } = 1;
     }
 

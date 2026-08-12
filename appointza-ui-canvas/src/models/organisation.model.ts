@@ -1,7 +1,9 @@
+export type OrganisationType = "service" | "hospitality" | "both";
+
 export class OrganisationReferralInfoRes {
   referral_code: string = "";
   successful_referrals: number = 0;
-  bonus_months_per_referral: number = 1;
+  bonus_credits_per_referral: number = 50;
   referral_already_applied: boolean = false;
   can_apply_referral_code: boolean = true;
 }
@@ -42,6 +44,7 @@ export class Organisation {
   isfactory: boolean = false
   notes: string = ""
   organisationlogo: number = 0
+  organisation_type: OrganisationType = "service"
   booking_amount: number = 5.10
   isserviceamount: boolean = false
 }
@@ -88,4 +91,5 @@ export class OrganisationDetail {
   organisationlocationlongitude: number = 0
   organisationlocationgooglelocation: string = ""
   organisationlocationpincode: string = ""
+  organisationlocationcustomurl: string = ""
 }

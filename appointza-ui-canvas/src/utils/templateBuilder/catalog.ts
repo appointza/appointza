@@ -19,6 +19,16 @@ export const TEMPLATE_BUILDER_CATEGORIES: TemplateBuilderCategory[] = [
     ],
   },
   {
+    name: "Hospitality / Stay",
+    blocks: [
+      { type: "appointza-rooms", name: "Rooms", description: "Bookable rooms for this location", mode: "appointza" },
+      { type: "appointza-hospitality-policies", name: "Policies", description: "Cancellation & payment policies", mode: "appointza" },
+      { type: "appointza-hospitality-packages", name: "Packages", description: "Stay packages from hospitality profile", mode: "appointza" },
+      { type: "appointza-food-menu", name: "Food menu", description: "Meals & dining options", mode: "appointza" },
+      { type: "appointza-nearby-places", name: "Nearby places", description: "Local attractions around your property", mode: "appointza" },
+    ],
+  },
+  {
     name: "Hero / Banner",
     blocks: [
       { type: "hero", name: "Hero Centered", description: "Centered hero with headline & CTA", mode: "static" },

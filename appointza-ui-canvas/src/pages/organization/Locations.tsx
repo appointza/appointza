@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -43,17 +44,35 @@ import {
   ArrowLeft
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
-import { getAppBaseUrl } from "@/utils/environment";
+import { normalizeCustomUrlSlug } from "@/utils/slug.util";
+import {
+  buildOrganisationCustomUrlHost,
+  buildOrganisationPublicSiteOriginFromHost,
+} from "@/utils/orgPublicSiteUrl.util";
 import { OrganisationLocation, OrganisationLocationSelectReq, OrganisationLocationDeleteReq } from "@/models/organisationlocation.model";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { OrganisationService } from "@/services/organisation.service";
-import { Organisation, OrganisationSelectReq } from "@/models/organisation.model";
+import { Organisation, OrganisationSelectReq, OrganisationType } from "@/models/organisation.model";
 import { FilesService } from "@/services/files.service";
+import {
+  OrganisationTypeSelector,
+  organisationTypeLabel,
+} from "@/components/organization/OrganisationTypeSelector";
 import { ReferenceValueService } from "@/services/referencevalue.service";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
 import { LocationPicker } from "@/components/organization/LocationPicker";
 import { GeocodingService } from "@/services/geocoding.service";
-import { Capacitor } from "@capacitor/core";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
+import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
+import { HospitalityProfileSettingsReq } from "@/models/hospitality.model";
+import { hospitalityService } from "@/services/hospitality.service";
 
 // Component for handling authenticated image loading
 const AuthenticatedImage = ({ imageId, alt, className, onError }: { 
@@ -146,7 +165,9 @@ const AuthenticatedImage = ({ imageId, alt, className, onError }: {
 const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
   const { user, isAuthenticated, userType } = useAuth();
+  const [searchParams, setSearchParams] = useSearchParams();
   const organizationId = user?.organisationid || 1;
+  const locationSubtab = searchParams.get("subtab") === "organization" ? "organization" : "locations";
 
   // State management
   const [isLoading, setIsLoading] = useState(false);
@@ -160,15 +181,16 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
   // Organization state
   const [organization, setOrganization] = useState<Organisation | null>(null);
   const [showOrgEditDialog, setShowOrgEditDialog] = useState(false);
-  const [isUploadingOrgLogo, setIsUploadingOrgLogo] = useState(false);
+  const [hospitalitySettings, setHospitalitySettings] = useState<HospitalityProfileSettingsReq | null>(
+    null,
+  );
+  const [savingOrganization, setSavingOrganization] = useState(false);
   
   // Form state
   const [location, setLocation] = useState<OrganisationLocation>(new OrganisationLocation());
   const [isFromMap, setIsFromMap] = useState(false);
-  const [customUrlInput, setCustomUrlInput] = useState(() => getAppBaseUrl());
-  const [isDefaultUrl, setIsDefaultUrl] = useState(true);
+  const [customUrlInput, setCustomUrlInput] = useState("");
   const [images, setImages] = useState<number[]>([]);
-  const [isUploadingImage, setIsUploadingImage] = useState(false);
   
   // Pincode lookup state
   const [isLookingUpPincode, setIsLookingUpPincode] = useState(false);
@@ -248,6 +270,88 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     }
   }, [organizationId, organisationService, toast]);
 
+  const loadHospitalitySettings = useCallback(async (orgType?: OrganisationType) => {
+    if (organizationId <= 0) return;
+    try {
+      const profile = await hospitalityService.getProfile(organizationId);
+      const settings = new HospitalityProfileSettingsReq();
+      settings.organisation_id = organizationId;
+      settings.organisation_type = (orgType ?? profile.organisation_type ?? "service") as OrganisationType;
+      settings.property_type = profile.property_type || "hotel";
+      settings.booking_type = profile.booking_type || "overnight";
+      settings.minimum_hours = profile.minimum_hours || 2;
+      settings.checkin_time = profile.checkin_time || "14:00";
+      settings.checkout_time = profile.checkout_time || "11:00";
+      settings.overnight_time_mode = profile.overnight_time_mode || "fixed";
+      settings.cancellation_policy = profile.cancellation_policy || "";
+      settings.payment_policy = profile.payment_policy || "";
+      setHospitalitySettings(settings);
+    } catch {
+      setHospitalitySettings(null);
+    }
+  }, [organizationId]);
+
+  const isHospitalityOrganisation =
+    organization?.organisation_type === "hospitality" || organization?.organisation_type === "both";
+
+  const syncLocationSubtab = (subtab: "locations" | "organization") => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (subtab === "organization") next.set("subtab", "organization");
+        else next.delete("subtab");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  const openOrganizationEdit = () => {
+    syncLocationSubtab("organization");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("subtab", "organization");
+        next.set("edit", "organization");
+        return next;
+      },
+      { replace: true },
+    );
+    setShowOrgEditDialog(true);
+    if (isHospitalityOrganisation) {
+      void loadHospitalitySettings(organization?.organisation_type);
+    }
+  };
+
+  const closeOrganizationEdit = () => {
+    setShowOrgEditDialog(false);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("edit");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    if (searchParams.get("edit") === "organization" && organization) {
+      setShowOrgEditDialog(true);
+    }
+  }, [organization, searchParams]);
+
+  useEffect(() => {
+    if (
+      organization &&
+      (organization.organisation_type === "hospitality" || organization.organisation_type === "both")
+    ) {
+      void loadHospitalitySettings(organization.organisation_type);
+    } else {
+      setHospitalitySettings(null);
+    }
+  }, [organization, loadHospitalitySettings]);
+
   // Initialize on mount
   useEffect(() => {
     fetchLocations();
@@ -303,23 +407,9 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
   // Handle custom URL change
   const handleCustomUrlChange = (text: string) => {
-    setCustomUrlInput(text);
-    
-    if (isDefaultUrl && text !== getAppBaseUrl()) {
-      setIsDefaultUrl(false);
-      const userInput = text.replace(getAppBaseUrl(), "");
-      setCustomUrlInput(getAppBaseUrl() + userInput);
-    }
-    
-    setLocation(prev => ({ ...prev, customurl: text }));
-  };
-
-  // Handle custom URL focus
-  const handleCustomUrlFocus = () => {
-    if (isDefaultUrl) {
-      setIsDefaultUrl(false);
-      setCustomUrlInput(getAppBaseUrl());
-    }
+    const slug = normalizeCustomUrlSlug(text);
+    setCustomUrlInput(slug);
+    setLocation(prev => ({ ...prev, customurl: slug }));
   };
 
   // Pincode lookup functions
@@ -443,7 +533,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
         state: location.state?.trim() || '',
         country: location.country?.trim() || 'India',
         pincode: location.pincode?.trim() || '',
-        customurl: location.customurl?.trim() || '',
+        customurl: normalizeCustomUrlSlug(location.customurl) || '',
         latitude: latitude,
         longitude: longitude,
         googlelocation: location.googlelocation?.trim() || '',
@@ -540,8 +630,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     setLocation(new OrganisationLocation());
     setImages([]);
     setIsFromMap(false);
-    setCustomUrlInput(getAppBaseUrl());
-    setIsDefaultUrl(true);
+    setCustomUrlInput("");
     setSelectedReferenceValueIds([]);
   };
 
@@ -640,71 +729,6 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     autoGetCurrentLocation();
   };
 
-  // Handle file upload
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-    
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      toast({
-        title: "Invalid File",
-        description: "Please select an image file",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: "File Too Large",
-        description: "Please select an image smaller than 5MB",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Check if we already have 5 images
-    if (images.length >= 5) {
-      toast({
-        title: "Maximum Images",
-        description: "You can only upload up to 5 images",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsUploadingImage(true);
-
-    try {
-      const response = await filesService.upload([file]);
-      
-      if (response && response.length > 0) {
-        setImages(prev => [...prev, response[0]]);
-        toast({
-          title: "Success",
-          description: "Image uploaded successfully",
-        });
-      } else {
-        throw new Error('Upload failed');
-      }
-    } catch (error) {
-      console.error('Upload error:', error);
-      toast({
-        title: "Upload Failed",
-        description: "Failed to upload image. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsUploadingImage(false);
-      // Reset the input
-      event.target.value = '';
-    }
-  };
-
   // Open edit dialog
   const openEditDialog = (locationItem: OrganisationLocation) => {
     // Generate geolocation_url if lat/lon exist but URL is missing
@@ -731,8 +755,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     setLocation(locationToEdit);
     setImages(locationToEdit.images || []);
     setIsFromMap(!!locationToEdit.googlelocation);
-    setCustomUrlInput(locationToEdit.customurl || getAppBaseUrl());
-    setIsDefaultUrl(!locationToEdit.customurl);
+    setCustomUrlInput(normalizeCustomUrlSlug(locationToEdit.customurl) || "");
     
     // Load selected ReferenceValue IDs from facility_list
     const facilityList = locationToEdit.facility_list || [];
@@ -748,102 +771,63 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     setShowDeleteDialog(true);
   };
 
-  // Organization logo upload
-  const handleOrgLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (!files || files.length === 0) return;
-
-    const file = files[0];
-    
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      toast({
-        title: "Invalid File",
-        description: "Please select an image file",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      toast({
-        title: "File Too Large",
-        description: "Please select an image smaller than 5MB",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    setIsUploadingOrgLogo(true);
-
-    try {
-      const response = await filesService.upload([file]);
-      
-      if (response && response.length > 0) {
-        if (organization) {
-          setOrganization(prev => prev ? { ...prev, organisationlogo: response[0] } : null);
-        }
-        toast({
-          title: "Success",
-          description: "Organization logo uploaded successfully",
-        });
-      } else {
-        throw new Error('Upload failed');
-      }
-    } catch (error) {
-      console.error('Upload error:', error);
-      toast({
-        title: "Upload Failed",
-        description: "Failed to upload logo. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsUploadingOrgLogo(false);
-      // Reset the input
-      event.target.value = '';
-    }
-  };
-
   // Save organization details
   const handleSaveOrganization = async () => {
     if (!organization) return;
-    
-    // Trim all string values before saving
+
     const updatedOrganization = {
       ...organization,
-      // Trim all string fields
-      name: organization?.name?.trim() || '',
-      gstnumber: organization?.gstnumber?.trim() || '',
-      primarytypecode: organization?.primarytypecode?.trim() || '',
-      secondarytypecode: organization?.secondarytypecode?.trim() || '',
-      notes: organization?.notes?.trim() || '',
-      // Ensure booking amount is at least 5.10 only if it's below that value
-      booking_amount: organization?.booking_amount < 5.10 ? 5.10 : (organization?.booking_amount || 5.10),
-      // Ensure attributes_json is properly set as a JSON string
+      name: organization?.name?.trim() || "",
+      gstnumber: organization?.gstnumber?.trim() || "",
+      primarytypecode: organization?.primarytypecode?.trim() || "",
+      secondarytypecode: organization?.secondarytypecode?.trim() || "",
+      notes: organization?.notes?.trim() || "",
+      organisation_type: organization?.organisation_type ?? "service",
+      booking_amount: organization?.booking_amount ?? 0,
       attributes_json: organization?.attributes_json || "{}",
-      // Also ensure attributes is set for backend compatibility
-      attributes: organization?.attributes || new Organisation.AttributesData()
+      attributes: organization?.attributes || new Organisation.AttributesData(),
     };
-    
+
+    const savingHospitality =
+      (updatedOrganization.organisation_type === "hospitality" ||
+        updatedOrganization.organisation_type === "both") &&
+      hospitalitySettings;
+
+    setSavingOrganization(true);
     setIsLoading(true);
     try {
       await organisationService.update(updatedOrganization);
+
+      if (savingHospitality && hospitalitySettings) {
+        const hospitalityPayload = {
+          ...hospitalitySettings,
+          organisation_id: organizationId,
+          organisation_type: updatedOrganization.organisation_type,
+        };
+        if (hospitalityPayload.booking_type !== "hourly") {
+          hospitalityPayload.minimum_hours = 0;
+        }
+        await hospitalityService.saveSettings(hospitalityPayload);
+      }
+
       toast({
         title: "Success",
         description: "Organization details updated successfully",
       });
-      setShowOrgEditDialog(false);
-      fetchOrganization(); // Refresh organization data
-    } catch (error: any) {
-      console.error('❌ Error updating organization:', error);
-      const errorMessage = error?.response?.data?.message || error?.message || "Failed to update organization details";
+      closeOrganizationEdit();
+      fetchOrganization();
+    } catch (error: unknown) {
+      console.error("❌ Error updating organization:", error);
+      const err = error as { response?: { data?: { message?: string } }; message?: string };
+      const errorMessage =
+        err?.response?.data?.message || err?.message || "Failed to update organization details";
       toast({
         title: "Error",
         description: errorMessage,
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
+      setSavingOrganization(false);
       setIsLoading(false);
     }
   };
@@ -907,7 +891,11 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
         </div>
         )}
 
-        <Tabs defaultValue="locations" className="w-full">
+        <Tabs
+          value={locationSubtab}
+          onValueChange={(value) => syncLocationSubtab(value as "locations" | "organization")}
+          className="w-full"
+        >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="locations" className="flex items-center gap-2">
               <MapPin className="h-4 w-4" />
@@ -962,14 +950,18 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                       </div>
 
                       <div>
-                        <Label htmlFor="customurl">Custom URL</Label>
+                        <Label htmlFor="customurl">Custom URL slug</Label>
                         <Input
                           id="customurl"
                           value={customUrlInput}
                           onChange={(e) => handleCustomUrlChange(e.target.value.trim())}
-                          onFocus={handleCustomUrlFocus}
-                          placeholder="Enter custom URL (optional)"
+                          placeholder="e.g. awonderonesurprise"
                         />
+                        {customUrlInput ? (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Full URL: {buildOrganisationCustomUrlHost({ customUrl: customUrlInput })}
+                          </p>
+                        ) : null}
                       </div>
                     </div>
 
@@ -1141,72 +1133,14 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                       </div>
                     )}
 
-                    {/* Image Display and Upload */}
-                    <div>
-                      <Label>Photos (max 5)</Label>
-                      
-                      {/* Existing Images */}
-                      {images.length > 0 && (
-                        <div className="mb-4">
-                          <p className="text-sm text-gray-600 mb-2">Current photos:</p>
-                          <div className="flex flex-wrap gap-2">
-                            {images.map((imageId, index) => (
-                              <div key={imageId} className="relative">
-                                <AuthenticatedImage
-                                  imageId={imageId}
-                                  alt={`Location image ${index + 1}`}
-                                  className="w-20 h-20 object-cover rounded-lg border"
-                                />
-                                <button
-                                  onClick={() => setImages(prev => prev.filter((_, i) => i !== index))}
-                                  className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs hover:bg-red-600"
-                                >
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Upload Button */}
-                      <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                        <Camera className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                        <p className="text-sm text-gray-500 mb-2">
-                          {images.length >= 5 ? 'Maximum 5 photos reached' : `Add photos (${images.length}/5)`}
-                        </p>
-                        {images.length < 5 && (
-                          <div>
-                            <input
-                              type="file"
-                              accept="image/*"
-                              onChange={handleFileUpload}
-                              className="hidden"
-                              id="image-upload"
-                              disabled={isUploadingImage}
-                            />
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => document.getElementById('image-upload')?.click()}
-                              disabled={isUploadingImage}
-                            >
-                              {isUploadingImage ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Uploading...
-                                </>
-                              ) : (
-                                <>
-                                  <Camera className="mr-2 h-4 w-4" />
-                                  Add Photos
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <OrgImageAssetField
+                      label="Photos"
+                      description="Upload or pick from organisation assets."
+                      imageIds={images}
+                      onChange={setImages}
+                      maxImages={5}
+                      idPrefix="location-photos"
+                    />
                   </div>
                 </CardContent>
                 <CardFooter className="flex justify-end gap-2">
@@ -1302,8 +1236,14 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                       </p>
                       {locationItem.customurl && (
                         <p className="text-sm text-blue-600 mt-1">
-                          <a href={locationItem.customurl} target="_blank" rel="noopener noreferrer">
-                            {locationItem.customurl}
+                          <a
+                            href={buildOrganisationPublicSiteOriginFromHost(
+                              buildOrganisationCustomUrlHost({ customUrl: locationItem.customurl }),
+                            )}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            {buildOrganisationCustomUrlHost({ customUrl: locationItem.customurl })}
                           </a>
                         </p>
                       )}
@@ -1373,7 +1313,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   Manage your organization information and branding.
                 </p>
               </div>
-              <Button onClick={() => setShowOrgEditDialog(true)}>
+              <Button onClick={openOrganizationEdit}>
                 <Edit className="mr-2 h-4 w-4" />
                 Edit Organization
               </Button>
@@ -1407,9 +1347,21 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                       <p className="text-sm text-gray-600">{organization?.secondarytypecode || 'Not set'}</p>
                     </div>
                     <div>
-                      <Label className="text-sm font-medium">Booking Amount</Label>
-                      <p className="text-sm text-gray-600">₹{organization?.booking_amount || 0}</p>
+                      <Label className="text-sm font-medium">Organisation type</Label>
+                      <p className="text-sm text-gray-600">
+                        {organisationTypeLabel(organization?.organisation_type)}
+                      </p>
                     </div>
+                    {isHospitalityOrganisation && hospitalitySettings ?
+                      <div>
+                        <Label className="text-sm font-medium">Booking type</Label>
+                        <p className="text-sm text-gray-600">
+                          {hospitalitySettings.booking_type === "hourly" ?
+                            `Hourly (min ${hospitalitySettings.minimum_hours}h)`
+                          : "Overnight (per night)"}
+                        </p>
+                      </div>
+                    : null}
                   </div>
                   
                   {organization?.notes && (
@@ -1419,245 +1371,195 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                     </div>
                   )}
 
-                  {/* Organization Logo */}
-                  <div>
-                    <Label className="text-sm font-medium">Organization Logo</Label>
-                    <div className="mt-2">
-                      {organization?.organisationlogo ? (
-                        <div className="flex items-center gap-4">
-                          <AuthenticatedImage
-                            imageId={organization?.organisationlogo || 0}
-                            alt="Organization Logo"
-                            className="w-20 h-20 rounded-lg object-cover border"
-                          />
-                       
-                        </div>
-                      ) : (
-                        <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                          <Building2 className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                          <p className="text-sm text-gray-500 mb-2">No logo uploaded</p>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => document.getElementById('org-logo-upload')?.click()}
-                            disabled={isUploadingOrgLogo}
-                          >
-                            {isUploadingOrgLogo ? (
-                              <>
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                Uploading...
-                              </>
-                            ) : (
-                              <>
-                                <Upload className="mr-2 h-4 w-4" />
-                                Upload Logo
-                              </>
-                            )}
-                          </Button>
-                        </div>
-                      )}
-                      <input
-                        type="file"
-                        accept="image/*"
-                        onChange={handleOrgLogoUpload}
-                        className="hidden"
-                        id="org-logo-upload"
-                        disabled={isUploadingOrgLogo}
-                      />
-                    </div>
-                  </div>
+                  <OrgImageAssetField
+                    label="Organization Logo"
+                    description="Upload or pick from organisation assets."
+                    imageIds={organization?.organisationlogo ? [organization.organisationlogo] : []}
+                    onChange={(ids) =>
+                      setOrganization((prev) =>
+                        prev ? { ...prev, organisationlogo: ids[0] ?? 0 } : null,
+                      )
+                    }
+                    multiple={false}
+                    maxImages={1}
+                    idPrefix="org-logo-view"
+                  />
                 </CardContent>
               </Card>
             )}
 
-            {/* Organization Edit Dialog */}
-            <Dialog open={showOrgEditDialog} onOpenChange={setShowOrgEditDialog}>
-              <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[90vh] flex flex-col">
-                <DialogHeader>
-                  <DialogTitle className="text-lg sm:text-xl">Edit Organization Details</DialogTitle>
-                  <DialogDescription className="text-xs sm:text-sm">
-                    Update your organization information and branding.
-                  </DialogDescription>
-                </DialogHeader>
-                
-                {organization && (
-                  <div className="space-y-4 overflow-y-auto flex-1 pr-2 -mr-2">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="org-name" className="text-sm sm:text-base">Organization Name</Label>
-                        <Input
-                          id="org-name"
-                          value={organization?.name || ''}
-                          onChange={(e) => setOrganization(prev => prev ? { ...prev, name: e.target.value.trim() } : null)}
-                          placeholder="Enter organization name"
-                          className="h-10 sm:h-11"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="org-gst" className="text-sm sm:text-base">GST Number</Label>
-                        <Input
-                          id="org-gst"
-                          value={organization?.gstnumber || ''}
-                          onChange={(e) => setOrganization(prev => prev ? { ...prev, gstnumber: e.target.value.trim() } : null)}
-                          placeholder="Enter GST number"
-                          className="h-10 sm:h-11"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="org-primary-type" className="text-sm sm:text-base">Primary Type Code</Label>
-                        <Input
-                          id="org-primary-type"
-                          value={organization?.primarytypecode || ''}
-                          onChange={(e) => setOrganization(prev => prev ? { ...prev, primarytypecode: e.target.value.trim() } : null)}
-                          placeholder="Enter primary type code"
-                          className="h-10 sm:h-11"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="org-secondary-type" className="text-sm sm:text-base">Secondary Type Code</Label>
-                        <Input
-                          id="org-secondary-type"
-                          value={organization?.secondarytypecode || ''}
-                          onChange={(e) => setOrganization(prev => prev ? { ...prev, secondarytypecode: e.target.value.trim() } : null)}
-                          placeholder="Enter secondary type code"
-                          className="h-10 sm:h-11"
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="org-booking-amount" className="text-sm sm:text-base">Booking Amount (Minimum: ₹5.10)</Label>
-                        <Input
-                          id="org-booking-amount"
-                          type="number"
-                          step="0.01"
-                          min="5.10"
-                          value={organization?.booking_amount || 0}
-                          onChange={(e) => {
-                            const value = parseFloat(e.target.value.trim()) || 0;
-                            // Allow any value to be typed, validation happens on save
-                            setOrganization(prev => prev ? { ...prev, booking_amount: value } : null);
-                          }}
-                          placeholder="Enter booking amount (minimum ₹5.10)"
-                          className={`h-10 sm:h-11 ${organization && organization.booking_amount < 5.10 && organization.booking_amount > 0 ? "border-red-500" : ""}`}
-                        />
-                        {organization && organization.booking_amount < 5.10 && organization.booking_amount > 0 && (
-                          <p className="text-xs sm:text-sm text-red-500 mt-1">
-                            Amount must be at least ₹5.10
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                    
-                    <div className="grid gap-2">
-                      <Label htmlFor="org-notes" className="text-sm sm:text-base">Notes</Label>
-                      <Textarea
-                        id="org-notes"
-                        value={organization?.notes || ''}
-                        onChange={(e) => setOrganization(prev => prev ? { ...prev, notes: e.target.value.trim() } : null)}
-                        placeholder="Enter organization notes or description (paragraph)"
-                        rows={4}
-                        className="resize-y text-sm sm:text-base"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Add a paragraph or description about your organization. This will be stored in the organization notes field.
-                      </p>
-                    </div>
+            {/* Organization Edit Panel */}
+            <ResponsiveEditSheet
+              open={showOrgEditDialog}
+              onOpenChange={(open) => {
+                if (open) setShowOrgEditDialog(true);
+              }}
+              title="Edit Organization Details"
+              subtitle="Update your organization information, type, and booking settings."
+              isEdit
+              saving={savingOrganization}
+              onCancel={closeOrganizationEdit}
+              onSave={() => void handleSaveOrganization()}
+              saveLabel="Save Changes"
+            >
+              {organization ?
+                <div className="space-y-4">
+                  <OrganisationTypeSelector
+                    value={(organization.organisation_type ?? "service") as OrganisationType}
+                    onChange={(value) => {
+                      setOrganization((prev) => (prev ? { ...prev, organisation_type: value } : null));
+                      if (value === "hospitality" || value === "both") {
+                        void loadHospitalitySettings(value);
+                      } else {
+                        setHospitalitySettings(null);
+                      }
+                    }}
+                  />
 
-                    {/* Organization Logo Upload in Edit Dialog */}
-                    <div>
-                      <Label className="text-sm sm:text-base font-medium">Organization Logo</Label>
-                      <div className="mt-2">
-                        {organization?.organisationlogo ? (
-                          <div className="flex items-center gap-4">
-                            <AuthenticatedImage
-                              imageId={organization?.organisationlogo || 0}
-                              alt="Organization Logo"
-                              className="w-20 h-20 rounded-lg object-cover border"
-                            />
-                            <div>
-                              <p className="text-sm text-gray-600">Logo ID: {organization?.organisationlogo}</p>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => document.getElementById('org-logo-upload-edit')?.click()}
-                                disabled={isUploadingOrgLogo}
-                                className="mt-2"
-                              >
-                                {isUploadingOrgLogo ? (
-                                  <>
-                                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                    Uploading...
-                                  </>
-                                ) : (
-                                  <>
-                                    <Upload className="mr-2 h-4 w-4" />
-                                    Change Logo
-                                  </>
-                                )}
-                              </Button>
-                            </div>
-                          </div>
-                        ) : (
-                          <div className="border-2 border-dashed border-gray-300 rounded-lg p-8 text-center">
-                            <Building2 className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                            <p className="text-sm text-gray-500 mb-2">No logo uploaded</p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => document.getElementById('org-logo-upload-edit')?.click()}
-                              disabled={isUploadingOrgLogo}
-                            >
-                              {isUploadingOrgLogo ? (
-                                <>
-                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                  Uploading...
-                                </>
-                              ) : (
-                                <>
-                                  <Upload className="mr-2 h-4 w-4" />
-                                  Upload Logo
-                                </>
-                              )}
-                            </Button>
-                          </div>
-                        )}
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={handleOrgLogoUpload}
-                          className="hidden"
-                          id="org-logo-upload-edit"
-                          disabled={isUploadingOrgLogo}
-                        />
+                  {(organization.organisation_type === "hospitality" ||
+                    organization.organisation_type === "both") &&
+                  hospitalitySettings ?
+                    <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4 space-y-4">
+                      <div>
+                        <p className="text-sm font-semibold text-stone-900">Stay booking settings</p>
+                        <p className="text-xs text-stone-500">
+                          Stored on your organisation profile. Full policies are in{" "}
+                          <Link
+                            to="/organization/hospitality?section=policies"
+                            className="font-medium text-orange-600 hover:underline"
+                          >
+                            Hospitality → Policies
+                          </Link>
+                          .
+                        </p>
                       </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1 sm:col-span-2">
+                          <Label>Booking type</Label>
+                          <Select
+                            value={hospitalitySettings.booking_type}
+                            onValueChange={(value) =>
+                              setHospitalitySettings({
+                                ...hospitalitySettings,
+                                booking_type: value,
+                                minimum_hours: value === "hourly" ? hospitalitySettings.minimum_hours || 2 : 0,
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="overnight">Overnight (per night)</SelectItem>
+                              <SelectItem value="hourly">Hourly (per hour / slots)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {hospitalitySettings.booking_type === "hourly" ?
+                          <div className="space-y-1">
+                            <Label>Minimum hours</Label>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={hospitalitySettings.minimum_hours || ""}
+                              onChange={(e) =>
+                                setHospitalitySettings({
+                                  ...hospitalitySettings,
+                                  minimum_hours: Number(e.target.value) || 2,
+                                })
+                              }
+                            />
+                          </div>
+                        : null}
+                      </div>
+                    </div>
+                  : null}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label htmlFor="org-name" className="text-sm sm:text-base">Organization Name</Label>
+                      <Input
+                        id="org-name"
+                        value={organization?.name || ""}
+                        onChange={(e) =>
+                          setOrganization((prev) => (prev ? { ...prev, name: e.target.value } : null))
+                        }
+                        placeholder="Enter organization name"
+                        className="h-10 sm:h-11"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="org-gst" className="text-sm sm:text-base">GST Number</Label>
+                      <Input
+                        id="org-gst"
+                        value={organization?.gstnumber || ""}
+                        onChange={(e) =>
+                          setOrganization((prev) => (prev ? { ...prev, gstnumber: e.target.value } : null))
+                        }
+                        placeholder="Enter GST number"
+                        className="h-10 sm:h-11"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="org-primary-type" className="text-sm sm:text-base">Primary Type Code</Label>
+                      <Input
+                        id="org-primary-type"
+                        value={organization?.primarytypecode || ""}
+                        onChange={(e) =>
+                          setOrganization((prev) =>
+                            prev ? { ...prev, primarytypecode: e.target.value } : null,
+                          )
+                        }
+                        placeholder="Enter primary type code"
+                        className="h-10 sm:h-11"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="org-secondary-type" className="text-sm sm:text-base">Secondary Type Code</Label>
+                      <Input
+                        id="org-secondary-type"
+                        value={organization?.secondarytypecode || ""}
+                        onChange={(e) =>
+                          setOrganization((prev) =>
+                            prev ? { ...prev, secondarytypecode: e.target.value } : null,
+                          )
+                        }
+                        placeholder="Enter secondary type code"
+                        className="h-10 sm:h-11"
+                      />
                     </div>
                   </div>
-                )}
 
-                <DialogFooter className="flex-col sm:flex-row gap-2 mt-4">
-                  <Button 
-                    variant="outline" 
-                    onClick={() => setShowOrgEditDialog(false)}
-                    className="w-full sm:w-auto h-10 sm:h-11"
-                  >
-                    Cancel
-                  </Button>
-                  <Button 
-                    onClick={handleSaveOrganization} 
-                    disabled={isLoading || (organization && organization.booking_amount < 5.10 && organization.booking_amount > 0)}
-                    className="w-full sm:w-auto h-10 sm:h-11"
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      "Save Changes"
-                    )}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                  <div className="grid gap-2">
+                    <Label htmlFor="org-notes" className="text-sm sm:text-base">Notes</Label>
+                    <Textarea
+                      id="org-notes"
+                      value={organization?.notes || ""}
+                      onChange={(e) =>
+                        setOrganization((prev) => (prev ? { ...prev, notes: e.target.value } : null))
+                      }
+                      placeholder="Enter organization notes or description (paragraph)"
+                      rows={4}
+                      className="resize-y text-sm sm:text-base"
+                    />
+                  </div>
+
+                  <OrgImageAssetField
+                    label="Organization Logo"
+                    description="Upload or pick from organisation assets."
+                    imageIds={organization?.organisationlogo ? [organization.organisationlogo] : []}
+                    onChange={(ids) =>
+                      setOrganization((prev) =>
+                        prev ? { ...prev, organisationlogo: ids[0] ?? 0 } : null,
+                      )
+                    }
+                    multiple={false}
+                    maxImages={1}
+                    idPrefix="org-logo-edit"
+                  />
+                </div>
+              : null}
+            </ResponsiveEditSheet>
           </TabsContent>
         </Tabs>
 

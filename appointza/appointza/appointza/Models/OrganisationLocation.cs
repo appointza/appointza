@@ -18,6 +18,7 @@ public string googlelocation { get; set; }
 public string geolocation_url { get; set; } = "";
 public string pincode { get; set; }
 public string customurl { get; set; } = "";
+public string orgloctempid { get; set; } = "";
 public long templateid { get; set; }
 public int version { get; set; }
 public long createdby { get; set; }
@@ -88,6 +89,7 @@ public string whatsapp_mobile { get; set; } = "";
         public long id { get; set; }
         public long organisationid { get; set; }
         public long organisationlocationid { get; set; }
+        public string orgloctempid { get; set; } = "";
     }
     public class OrganisationLocationDeleteReq
     {
@@ -183,6 +185,38 @@ public string whatsapp_mobile { get; set; } = "";
         public string paymentmodetype { get; set; }
         public decimal totalamount { get; set; }
     }
+
+    public class OrganisationDashboardTrendPoint
+    {
+        public string name { get; set; }
+        public string date { get; set; }
+        public int appointments { get; set; }
+    }
+
+    public class OrganisationDashboardStatusPoint
+    {
+        public string name { get; set; }
+        public int value { get; set; }
+    }
+
+    public class OrganisationDashboardRevenueWeekPoint
+    {
+        public string name { get; set; }
+        public decimal revenue { get; set; }
+    }
+
+    public class OrganisationDashboardStatsRes
+    {
+        public int totalappointments { get; set; }
+        public int confirmedcount { get; set; }
+        public int completedcount { get; set; }
+        public int pendingcount { get; set; }
+        public int cancelledcount { get; set; }
+        public decimal totalrevenue { get; set; }
+        public List<OrganisationDashboardTrendPoint> trend_last_7_days { get; set; } = new List<OrganisationDashboardTrendPoint>();
+        public List<OrganisationDashboardStatusPoint> status_breakdown { get; set; } = new List<OrganisationDashboardStatusPoint>();
+        public List<OrganisationDashboardRevenueWeekPoint> revenue_by_week_this_month { get; set; } = new List<OrganisationDashboardRevenueWeekPoint>();
+    }
     public class UsersGenerateQRCodeReq
     {
         public long organisationid { get; set; }
@@ -209,6 +243,20 @@ public string whatsapp_mobile { get; set; } = "";
         public string pincode { get; set; }
         public string customurl { get; set; }
         public List<long> images { get; set; } = new List<long>();
+    }
+
+    public class CustomUrlAvailabilityReq
+    {
+        public string customurl { get; set; } = "";
+        /// <summary>When updating, exclude this location id from the duplicate check.</summary>
+        public long organisationlocationid { get; set; }
+    }
+
+    public class CustomUrlAvailabilityRes
+    {
+        public bool available { get; set; }
+        public string normalized_slug { get; set; } = "";
+        public string message { get; set; } = "";
     }
 
 

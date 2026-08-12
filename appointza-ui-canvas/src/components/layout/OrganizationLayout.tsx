@@ -1,5 +1,10 @@
 
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  ORG_SIDEBAR_OFFSET_CLASS,
+  readOrgSidebarCollapsed,
+  writeOrgSidebarCollapsed,
+} from "@/utils/orgSidebar.util";
 import { useNavigate, useLocation } from "react-router-dom";
 import OrganizationSidebar from "./OrganizationSidebar";
 import DashboardSwitcher from "./DashboardSwitcher";
@@ -9,6 +14,7 @@ import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { UserTypeUtil } from "@/utils/userType.util";
 import { PrivilegeUtil } from "@/utils/privilege.util";
 import { cn } from "@/lib/utils";
+import { org } from "@/lib/orgTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldX } from "lucide-react";
@@ -16,6 +22,8 @@ import BillingOverdueScreen from "@/components/organization/BillingOverdueScreen
 import { OrganisationSubscriptionStatusRes } from "@/models/subscription.model";
 import { SubscriptionService } from "@/services/subscription.service";
 import { OnboardingSetupScreen } from "@/components/onboarding/OrganizationOnboarding";
+import { isOrganizationOnboardingRoute } from "@/utils/organizationOnboarding.util";
+import { OrgTemplateAssetsProvider } from "@/contexts/OrgTemplateAssetsContext";
 
 interface OrganizationLayoutProps {
   children: ReactNode;
@@ -26,8 +34,16 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const navigate = useNavigate();
   const location = useLocation();
   const isMobile = useIsMobile();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
-  const { hasServices, hasTiming, isComplete, isLoading: isLoadingOnboarding, nextStep } = useOnboardingStatus();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readOrgSidebarCollapsed);
+  const {
+    hasCustomDomain,
+    hasServices,
+    hasWebsite,
+    hasTiming,
+    isComplete,
+    isLoading: isLoadingOnboarding,
+    nextStep,
+  } = useOnboardingStatus();
   
   // Get user context from localStorage
   const getUserContext = () => {
@@ -46,15 +62,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   // Use isStaff from user_context if available, otherwise use from user object
   const isStaff = userContext?.isStaff === true || user?.isStaff === true;
   
-  // Routes that are allowed even during onboarding
-  const onboardingRoutes = [
-    '/organization/services',
-    '/organization/timing',
-  ];
-  
-  const isOnboardingRoute = onboardingRoutes.some(route => 
-    location.pathname.startsWith(route)
-  );
+  const isOnboardingRoute = isOrganizationOnboardingRoute(location.pathname);
 
   // Check if staff user has access to current route based on new permission structure
   const checkRouteAccess = (route: string): boolean => {
@@ -106,11 +114,14 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const subscriptionService = useMemo(() => new SubscriptionService(), []);
   const orgIdForBilling = user?.organisationid ?? 0;
   const shouldEnforceBilling = userType === 'organization' && !isStaff && orgIdForBilling > 0;
+  const isDashboardRoute =
+    location.pathname === '/organization/dashboard' ||
+    location.pathname.startsWith('/organization/dashboard/');
   const [billingStatus, setBillingStatus] = useState<OrganisationSubscriptionStatusRes | null>(null);
-  const [billingChecked, setBillingChecked] = useState(false);
+  const [billingChecked, setBillingChecked] = useState(() => isDashboardRoute);
 
   const refreshBillingStatus = useCallback(async () => {
-    if (!shouldEnforceBilling) {
+    if (!shouldEnforceBilling || isDashboardRoute) {
       setBillingStatus(null);
       setBillingChecked(true);
       return;
@@ -124,28 +135,35 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
     } finally {
       setBillingChecked(true);
     }
-  }, [shouldEnforceBilling, subscriptionService, orgIdForBilling]);
+  }, [shouldEnforceBilling, isDashboardRoute, subscriptionService, orgIdForBilling]);
 
   useEffect(() => {
+    if (isDashboardRoute) {
+      setBillingChecked(true);
+      return;
+    }
     void refreshBillingStatus();
-  }, [refreshBillingStatus]);
+  }, [isDashboardRoute, refreshBillingStatus]);
 
   useEffect(() => {
-    if (!shouldEnforceBilling) return;
+    if (!shouldEnforceBilling || isDashboardRoute) return;
     const id = window.setInterval(() => {
       void refreshBillingStatus();
     }, 60_000);
     return () => window.clearInterval(id);
-  }, [shouldEnforceBilling, refreshBillingStatus]);
+  }, [shouldEnforceBilling, isDashboardRoute, refreshBillingStatus]);
+
+  const handleSidebarCollapsedChange = useCallback((collapsed: boolean) => {
+    setSidebarCollapsed(collapsed);
+    writeOrgSidebarCollapsed(collapsed);
+  }, []);
 
   useEffect(() => {
-    const stored = localStorage.getItem('org_sidebar_collapsed');
-    setSidebarCollapsed(stored === '1');
-    const handler = (e: any) => setSidebarCollapsed(!!e?.detail?.collapsed || localStorage.getItem('org_sidebar_collapsed') === '1');
-    window.addEventListener('org-sidebar-toggle', handler as any);
-    return () => window.removeEventListener('org-sidebar-toggle', handler as any);
+    const syncFromStorage = () => setSidebarCollapsed(readOrgSidebarCollapsed());
+    window.addEventListener("storage", syncFromStorage);
+    return () => window.removeEventListener("storage", syncFromStorage);
   }, []);
-  
+
   useEffect(() => {
     if (!isAuthenticated) {
       navigate('/login', { state: { from: location.pathname } });
@@ -243,7 +261,9 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
     if (!isComplete) {
       return (
         <OnboardingSetupScreen
+          hasCustomDomain={hasCustomDomain}
           hasServices={hasServices}
+          hasWebsite={hasWebsite}
           hasTiming={hasTiming}
           nextStep={nextStep}
         />
@@ -279,39 +299,55 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   }
 
   const isTemplateBuilder = location.pathname.includes("/template-builder");
+  const isClientManagement = /^\/organization\/clients\/?$/.test(location.pathname);
+  const isFullBleedPage = isTemplateBuilder || isClientManagement;
+  const inOnboardingFlow =
+    userType === "organization" && !isStaff && !isComplete && isOnboardingRoute;
 
   return (
+    <OrgTemplateAssetsProvider>
     <div className="app-shell h-dvh overflow-hidden safe-area-sides">
-      <OrganizationSidebar />
+      {!inOnboardingFlow && (
+        <OrganizationSidebar
+          collapsed={sidebarCollapsed}
+          onCollapsedChange={handleSidebarCollapsedChange}
+        />
+      )}
       <div
         className={cn(
           "h-dvh overflow-hidden transition-all duration-300",
-          isMobile ?
-            "safe-area-top pl-0 pb-20"
-          : sidebarCollapsed ?
-            "pt-0 lg:pl-16"
-          : "pt-0 lg:pl-64"
+          inOnboardingFlow
+            ? "w-full pt-0"
+            : isMobile
+              ? "safe-area-top pl-0 pb-20"
+              : sidebarCollapsed
+                ? `pt-0 ${ORG_SIDEBAR_OFFSET_CLASS.collapsed}`
+                : `pt-0 ${ORG_SIDEBAR_OFFSET_CLASS.expanded}`,
         )}
-        style={isMobile ? { paddingBottom: 'calc(5rem + var(--safe-area-bottom))' } : undefined}
+        style={isMobile && !inOnboardingFlow ? { paddingBottom: 'calc(5rem + var(--safe-area-bottom))' } : undefined}
       >
         {/* No top padding on desktop: aligns main column with sidebar; mobile uses safe-area-top only */}
         <main
           className={cn(
             "h-full w-full max-w-none",
-            isTemplateBuilder
-              ? "overflow-hidden p-0"
-              : "overflow-y-auto px-4 pb-4 pt-4 md:px-6 md:pb-6 md:pt-5 lg:px-10 lg:pb-8 lg:pt-6 xl:px-12",
+            inOnboardingFlow && "bg-appointza-cream",
+            isFullBleedPage
+              ? "flex min-h-0 flex-col overflow-hidden p-0"
+              : "overflow-y-auto pb-4 pt-4 md:pb-6 md:pt-5 lg:pb-8 lg:pt-6",
           )}
         >
-          {canSwitchMode && !isTemplateBuilder && (
-            <div className="mb-6">
+          {canSwitchMode && !isFullBleedPage && !inOnboardingFlow && (
+            <div className={cn(org.pageHeader, "mb-6 shrink-0 pb-0 pt-0")}>
               <DashboardSwitcher />
             </div>
           )}
-          {children}
+          <div className={cn(isFullBleedPage && "flex min-h-0 flex-1 flex-col overflow-hidden")}>
+            {children}
+          </div>
         </main>
       </div>
     </div>
+    </OrgTemplateAssetsProvider>
   );
 };
 

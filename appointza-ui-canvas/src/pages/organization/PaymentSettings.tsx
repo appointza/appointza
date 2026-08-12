@@ -4,6 +4,7 @@ import { OrganizationPageShell } from "@/components/layout/OrganizationPageShell
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
@@ -573,11 +574,11 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
 
               <div>
                 <Label htmlFor="gateway_id" className="text-sm sm:text-base">Gateway ID</Label>
-                <Input
+                <NumberInput
                   id="gateway_id"
-                  type="number"
+                  min={1}
                   value={formData.gateway_id}
-                  onChange={(e) => handleInputChange('gateway_id', parseInt(e.target.value) || 1)}
+                  onValueChange={(gateway_id) => handleInputChange('gateway_id', gateway_id)}
                   placeholder="Enter gateway ID"
                   className="h-10 sm:h-11"
                 />

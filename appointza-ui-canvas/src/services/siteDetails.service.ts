@@ -25,14 +25,18 @@ export class SiteDetailsService {
     return resp.item;
   }
 
-  async resolveTemplateBySubdomain(req: {
-    area: string;
-    city: string;
-    state: string;
-    organizationName: string;
-  }) {
-    let postdata: ActionReq<any> = new ActionReq<any>();
-    postdata.item = req;
+  /** Resolve public booking page by orgloctempid GUID. */
+  async selectByOrgLocTempId(orgloctempid: string) {
+    const resp = await this.http.get<ActionRes<Array<SiteDetailsItem>>>(
+      `${this.baseurl}/GetSiteDetailsByOrgLocTempId/${encodeURIComponent(orgloctempid)}`,
+      true,
+    );
+    return resp.item;
+  }
+
+  async resolveTemplateByCustomUrl(customUrl: string) {
+    let postdata: ActionReq<{ customUrl: string }> = new ActionReq<{ customUrl: string }>();
+    postdata.item = { customUrl };
     let resp = await this.http.post<ActionRes<any>>(
       this.baseurl + '/ResolveTemplateBySubdomain',
       postdata

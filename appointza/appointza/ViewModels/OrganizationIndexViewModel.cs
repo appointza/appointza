@@ -74,7 +74,6 @@ namespace appointza.ViewModels
         // Factory method to create from existing data
         public static OrganizationIndexViewModel CreateFromViewData(
             OrganisationDetail organization,
-            LocationInfo locationInfo,
             Sitedetails siteDetails,
             string error = null)
         {

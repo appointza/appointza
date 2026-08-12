@@ -3,6 +3,9 @@ window.APP_CONFIG = {
   // API Configuration - Production Server
   baseurl: 'https://appointza.com',
   templateBaseUrl: 'https://appointza.com/template',
+  uiBaseUrl: 'https://appointza.com',
+  marketingDomain: 'appointza.com',
+  domainname: 'appointza.com',
   
   // Environment
   production: true,

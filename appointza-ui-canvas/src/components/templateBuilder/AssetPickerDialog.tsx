@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -24,10 +24,15 @@ export function AssetPickerDialog({
   onSelect,
   title = "Choose from assets",
 }: AssetPickerDialogProps) {
-  const { assets, isLoading, uploadFiles, getImageUrl } = useOrgTemplateAssets();
+  const { assets, isLoading, uploadFiles, getImageUrl, ensureLoaded } = useOrgTemplateAssets();
   const { toast } = useToast();
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    if (!open) return;
+    void ensureLoaded();
+  }, [open, ensureLoaded]);
 
   const handleUpload = async (fileList: FileList | null) => {
     if (!fileList?.length) return;

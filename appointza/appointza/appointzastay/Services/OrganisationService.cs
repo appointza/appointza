@@ -184,9 +184,25 @@ public class OrganisationService
         string? cancellationPolicy, string? paymentPolicy,
         string? petPolicy, string? idProofRequired, string? refundPolicy,
         string? houseRules,
-        string? overnightTimeMode = null)
+        string? overnightTimeMode = null,
+        string? bookingType = null,
+        int? minimumHours = null)
     {
         var org = _org.Current;
+        if (PropertyCatalog.TryParseBookingType(bookingType, out var parsedBooking))
+            org.BookingType = parsedBooking;
+
+        if (org.BookingType == PropertyBookingType.hourly)
+        {
+            org.MinimumHours = minimumHours.HasValue && minimumHours.Value > 0
+                ? minimumHours.Value
+                : Math.Max(1, org.MinimumHours > 0 ? org.MinimumHours : 2);
+        }
+        else
+        {
+            org.MinimumHours = 0;
+        }
+
         org.CheckInTime = string.IsNullOrWhiteSpace(checkInTime) ? "14:00" : checkInTime.Trim();
         org.CheckOutTime = string.IsNullOrWhiteSpace(checkOutTime) ? "11:00" : checkOutTime.Trim();
         org.OvernightTimeMode = string.Equals(overnightTimeMode, "dynamic", StringComparison.OrdinalIgnoreCase)

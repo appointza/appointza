@@ -2,11 +2,11 @@ import MarketingHomePage from "@/components/home/MarketingHomePage";
 import { useNavigate } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Helmet } from "react-helmet-async";
-import { getAppBaseUrl, getAppDomain } from "@/utils/environment";
+import { getAppBaseUrl } from "@/utils/environment";
 import { OrganisationService } from "@/services/organisation.service";
 import { Capacitor } from "@capacitor/core";
 import { useSafeArea } from "@/hooks/useSafeArea";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
+import { extractOrganisationCustomSubdomain } from "@/utils/orgPublicSiteUrl.util";
 import { resolvePostLoginPath } from "@/utils/postAuthNavigation";
 import {
   HOME_SEO_TITLE,
@@ -19,7 +19,7 @@ import {
 const Index = () => {
   const seoBaseUrl = getAppBaseUrl() || window.location.origin;
   const seoImageUrl = `${seoBaseUrl}/lovable-uploads/6205c671-a6b9-4927-8268-bd1fa436cd0b.png`;
-  const initialCustomDomain = parseSubdomainLocation(window.location.hostname, getAppDomain());
+  const initialCustomDomain = extractOrganisationCustomSubdomain(window.location.host);
   const [isCustomDomain, setIsCustomDomain] = useState<boolean>(!!initialCustomDomain);
   const [isProcessingCustomDomain, setIsProcessingCustomDomain] = useState<boolean>(!!initialCustomDomain);
   const navigate = useNavigate();
@@ -104,25 +104,20 @@ const Index = () => {
     const handleCustomDomain = async () => {
       const hostname = window.location.host;
       
-      const parsedLocation = parseSubdomainLocation(hostname, getAppDomain());
-      if (parsedLocation) {
+      const customUrlSlug = extractOrganisationCustomSubdomain(hostname);
+      if (customUrlSlug) {
         
         console.log('🌐 Custom domain detected:', hostname);
         setIsCustomDomain(true);
         setIsProcessingCustomDomain(true);
         
         try {
-          console.log('📋 Parsed details:', parsedLocation);
+          console.log('📋 Custom URL slug:', customUrlSlug);
 
-          const orgDetail = await organisationService.getOrganisationBySubdomainLocation(
-            parsedLocation.area,
-            parsedLocation.city,
-            parsedLocation.state,
-            parsedLocation.organization
-          );
+          const orgDetail = await organisationService.getOrganisationByCustomUrl(customUrlSlug);
 
           if (!orgDetail || !orgDetail.organisationlocationid) {
-            throw new Error('Organization location not found for this subdomain');
+            throw new Error('Organization location not found for this custom URL');
           }
 
           console.log('✅ Found organization location:', orgDetail.organisationlocationid);

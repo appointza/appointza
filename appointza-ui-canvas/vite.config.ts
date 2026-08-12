@@ -96,26 +96,27 @@ export default defineConfig(({ mode }) => {
 
   return {
     server: {
-      host: "::",
+      host: "0.0.0.0",
       port: 8083,
-      allowedHosts: [
-        "localhost",
-        ".localhost",
-        "127.0.0.1",
-        ".127.0.0.1",
-      ],
+      strictPort: true,
+      allowedHosts: true,
       proxy: {
         "/api": {
-          target: "http://localhost:5117",
+          target: "https://appointza.com",
           changeOrigin: true,
           rewrite: (path) => path,
         },
         "/health": {
-          target: "http://localhost:5117",
+          target: "https://appointza.com",
           changeOrigin: true,
         },
       },
       middlewareMode: false,
+    },
+    preview: {
+      host: "0.0.0.0",
+      port: 8083,
+      strictPort: true,
     },
     build: {
       // Always output to shared deploy folder for server + Android sync

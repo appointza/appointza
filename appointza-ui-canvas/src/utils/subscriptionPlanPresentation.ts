@@ -4,7 +4,7 @@ import { resolveFreeBookings } from "@/utils/subscriptionPlanQuota";
 /**
  * Canonical plan list used as a frontend fallback when /Subscription/SelectPlans
  * returns 0 rows. Keep in sync with Database/subscription_tables.sql and
- * SubscriptionPlanService.EnsurePlanCatalogSyncedTransaction.
+ * Database/subscription_tables.sql (managed manually — API only reads subscription_plans).
  */
 const FALLBACK_PLANS: SubscriptionPlan[] = [
   {
@@ -109,12 +109,12 @@ export const SHARED_PLAN_FEATURES: string[] = [
   "Staff, calendars & multi-location",
   "Customer notifications (email / SMS / WhatsApp where enabled)",
   "Payments & booking-fee ledger",
-  "Business insights & monthly reports",
+  "Business insights & reports",
   "Standard support",
 ];
 
 const PLAN_PRESENTATION: Record<string, { bestFor: string; popular?: boolean }> = {
-  free: { bestFor: "Start with 50 free bookings every month" },
+  free: { bestFor: "Start with 50 free bookings" },
   starter: { bestFor: "Small businesses starting out" },
   growth: { bestFor: "Growing salons, clinics & service teams", popular: true },
   business: { bestFor: "Busy teams with higher booking volume" },
@@ -158,7 +158,7 @@ export const getPlanPresentation = (plan: SubscriptionPlan): PlanPresentation =>
   const allowance = resolveFreeBookings(plan);
   const freeBookingsLabel =
     allowance > 0
-      ? `${allowance.toLocaleString("en-IN")} included bookings / month`
+      ? `${allowance.toLocaleString("en-IN")} included bookings`
       : "Unlimited";
 
   const bookingFeeFormula = `₹${Number(plan.booking_fee_inr).toLocaleString("en-IN")} per booking or ${formatPercent(Number(plan.booking_fee_percent))}% of booking value — whichever is higher`;

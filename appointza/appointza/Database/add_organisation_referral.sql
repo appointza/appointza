@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS organisation_referral_rewards (
     id BIGSERIAL PRIMARY KEY,
     referrer_organisation_id BIGINT NOT NULL,
     referred_organisation_id BIGINT NOT NULL,
-    bonus_months INT NOT NULL DEFAULT 1,
+    bonus_credits INT NOT NULL DEFAULT 50,
     created_at TIMESTAMP NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
     CONSTRAINT uq_referral_referred_org UNIQUE (referred_organisation_id)
 );

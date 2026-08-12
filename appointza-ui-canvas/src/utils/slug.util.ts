@@ -70,31 +70,21 @@ export const normalizedContains = (text1: string, text2: string): boolean => {
 };
 
 /**
- * Generates a subdomain URL from organization and location details
- * Example: "Organization Name", "Area Name", "City Name", "State Name"
- * => "organization-name-area-name-city-name-state-name"
+ * Stored custom URL slug only — strips scheme, domain, and path.
+ * Example: "http://awonderonesurprise.localhost:8083/path" → "awonderonesurprise"
  */
-export const generateSubdomainSlug = (
-  organizationName: string,
-  areaName: string,
-  cityName: string,
-  stateName: string
-): string => {
-  const orgSlug = toSlug(organizationName);
-  const areaSlug = toSlug(areaName);
-  const citySlug = toSlug(cityName);
-  const stateSlug = toSlug(stateName);
+export function normalizeCustomUrlSlug(stored: string | null | undefined): string {
+  const trimmed = (stored || "").trim();
+  if (!trimmed) return "";
 
-  // Build subdomain parts, skipping empty values
-  const parts: string[] = [];
-
-  if (orgSlug) parts.push(orgSlug);
-  if (areaSlug) parts.push(areaSlug);
-  if (citySlug) parts.push(citySlug);
-  if (stateSlug) parts.push(stateSlug);
-
-  return parts.join('-');
-};
+  const hostOnly = trimmed.replace(/^https?:\/\//i, "").split("/")[0];
+  const slug = hostOnly.split(".")[0] || "";
+  return slug
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
 
 /**
  * Origin (scheme + host + port) from a stored custom URL — path/query in DB are ignored.
@@ -138,17 +128,3 @@ export function customSiteOriginsMatch(currentHref: string, customOrigin: string
   }
 }
 
-/**
- * Generates a full subdomain URL
- * Example: returns "organization-name-area-name-city-name-state-name.appointza.com"
- */
-export const generateSubdomainUrl = (
-  organizationName: string,
-  areaName: string,
-  cityName: string,
-  stateName: string,
-  domain: string = 'appointza.com'
-): string => {
-  const slug = generateSubdomainSlug(organizationName, areaName, cityName, stateName);
-  return `${slug}.${domain}`;
-};

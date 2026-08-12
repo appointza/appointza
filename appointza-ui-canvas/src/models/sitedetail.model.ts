@@ -14,6 +14,7 @@
     pincode: string = "";
     customurl: string = "";
     whatsapp_mobile: string = "";
+    orgloctempid: string = "";
     templateid: number = 0;
     version: number = 0;
     createdby: number = 0;
@@ -104,6 +105,8 @@
     orgnaisatinservice: OrganisationService[] = [];
     OrganisationServiceTiming: OrganisationServiceTiming[] = [];
     template_html: string = "";
+    hospitality_profile?: import("./hospitality.model").OrganisationHospitalityProfile | null;
+    hospitality_rooms?: import("./hospitality.model").OrganisationRoom[];
   }
   
   export class SiteDetailsSelectReq {

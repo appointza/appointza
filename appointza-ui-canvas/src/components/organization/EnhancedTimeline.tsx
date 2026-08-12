@@ -2,24 +2,33 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar, FileText, Clock, User, Image as ImageIcon, File, Eye, Plus, Loader2, Upload, X, Pencil } from "lucide-react";
+import { Calendar, FileText, Clock, User, Image as ImageIcon, File, Eye, Plus, Loader2, Upload, X, Pencil, Settings2 } from "lucide-react";
 import { format } from "date-fns";
-import { BookedAppoinmentRes } from "@/models/appoinment.model";
+import { BookedAppoinmentRes, SearchAppointmentByMobileReq } from "@/models/appoinment.model";
 import { AppointmentRecord } from "@/models/appointmentrecord.model";
 import { AppointmentRecordService } from "@/services/appointmentrecord.service";
-import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
+import CreateAppointmentTaskValueDialog from "@/components/organization/CreateAppointmentTaskValueDialog";
+import type { ReferenceValue } from "@/models/referencevalue.model";
 import { ReferenceValueService } from "@/services/referencevalue.service";
-import { sortReferenceValuesByDisplayOrder } from "@/utils/referencevalue.util";
-import { useState, useEffect, useMemo } from "react";
+import { ReferenceTypeService } from "@/services/referencetype.service";
+import { AppoinmentService } from "@/services/appoinment.service";
+import { UsersService } from "@/services/users.service";
+import { UsersSelectReq } from "@/models/users.model";
+import {
+  loadAppointmentTaskValues,
+  parseDataTypeFromNotes,
+} from "@/utils/appointmentTaskValues.util";
+import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { FilesService } from "@/services/files.service";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -29,7 +38,10 @@ interface EnhancedTimelineProps {
   appointmentRecords: AppointmentRecord[];
   userId: number;
   organizationId: number;
+  clientMobile?: string;
+  openAddRecordRequest?: number;
   onRecordAdded?: () => void;
+  onRequireClientRegistration?: () => void;
 }
 
 interface TimelineItem {
@@ -44,10 +56,22 @@ interface TimelineItem {
   record?: AppointmentRecord;
 }
 
-const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizationId, onRecordAdded }: EnhancedTimelineProps) => {
+const EnhancedTimeline = ({
+  appointments,
+  appointmentRecords,
+  userId,
+  organizationId,
+  clientMobile = "",
+  openAddRecordRequest = 0,
+  onRecordAdded,
+  onRequireClientRegistration,
+}: EnhancedTimelineProps) => {
   const filesService = useMemo(() => new FilesService(), []);
   const appointmentRecordService = useMemo(() => new AppointmentRecordService(), []);
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
+  const referenceTypeService = useMemo(() => new ReferenceTypeService(), []);
+  const appointmentService = useMemo(() => new AppoinmentService(), []);
+  const usersService = useMemo(() => new UsersService(), []);
   const { toast } = useToast();
   const { user } = useAuth();
   const [imageUrls, setImageUrls] = useState<{ [key: number]: string }>({});
@@ -65,24 +89,74 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
   const [isUploading, setIsUploading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingRecord, setEditingRecord] = useState<AppointmentRecord | null>(null);
+  const [isLoadingTasks, setIsLoadingTasks] = useState(false);
+  const [isCreateValueOpen, setIsCreateValueOpen] = useState(false);
 
-  // Load tasks for mapping and dialog inputs
-  useEffect(() => {
-    if (organizationId > 0) {
-      const loadTasks = async () => {
-        try {
-          const taskReq = new ReferenceValueSelectReq();
-          taskReq.referencetypeid = 4; // APPOINTMENTTASK
-          taskReq.organisationid = organizationId;
-          const taskList = await referenceValueService.select(taskReq);
-          setTasks(sortReferenceValuesByDisplayOrder(taskList || []));
-        } catch (error) {
-          console.error("Error loading tasks:", error);
-        }
-      };
-      loadTasks();
+  const reloadTasks = useCallback(async () => {
+    if (organizationId <= 0) return [];
+    setIsLoadingTasks(true);
+    try {
+      const taskList = await loadAppointmentTaskValues(
+        referenceTypeService,
+        referenceValueService,
+        organizationId,
+      );
+      setTasks(taskList);
+      return taskList;
+    } catch (error) {
+      console.error("Error loading appointment task values:", error);
+      setTasks([]);
+      return [];
+    } finally {
+      setIsLoadingTasks(false);
     }
-  }, [organizationId, referenceValueService]);
+  }, [organizationId, referenceTypeService, referenceValueService]);
+
+  const handleAppointmentValueCreated = async (created: ReferenceValue) => {
+    await reloadTasks();
+    if (created.id) {
+      setTaskValues((prev) => ({
+        ...prev,
+        [created.id]: prev[created.id] ?? "",
+      }));
+    }
+  };
+
+  const resolveRecordUserId = useCallback(async (): Promise<number> => {
+    if (userId > 0) return userId;
+
+    const mobile = clientMobile.trim();
+    if (!mobile) return 0;
+
+    try {
+      const userReq = new UsersSelectReq();
+      userReq.mobile = mobile;
+      userReq.organisationid = organizationId;
+      const users = await usersService.select(userReq);
+      const matched = (users || []).find(
+        (u) => (u.mobile || "").replace(/\D/g, "") === mobile.replace(/\D/g, ""),
+      );
+      if (matched?.id) return Number(matched.id);
+    } catch (error) {
+      console.error("Error resolving user by mobile:", error);
+    }
+
+    try {
+      const searchReq = new SearchAppointmentByMobileReq();
+      searchReq.organisationid = organizationId;
+      searchReq.mobilenumber = mobile;
+      const results = await appointmentService.searchByMobile(searchReq);
+      if (results?.[0]?.userid) return Number(results[0].userid);
+    } catch (error) {
+      console.error("Error resolving user from appointments:", error);
+    }
+
+    return 0;
+  }, [appointmentService, clientMobile, organizationId, userId, usersService]);
+
+  useEffect(() => {
+    void reloadTasks();
+  }, [reloadTasks]);
 
   const taskLabelById = useMemo(() => {
     const map: Record<number, string> = {};
@@ -172,7 +246,19 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
     }
   };
 
-  const handleOpenAddRecord = () => {
+  const handleOpenAddRecord = async () => {
+    const effectiveUserId = await resolveRecordUserId();
+    if (effectiveUserId <= 0) {
+      toast({
+        title: "Register client first",
+        description:
+          "This guest needs a customer account before you can add an appointment record. Use On-Spot Registration.",
+        variant: "destructive",
+      });
+      onRequireClientRegistration?.();
+      return;
+    }
+
     setSelectedDate(new Date());
     setReport("");
     setNotes("");
@@ -181,6 +267,13 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
     setEditingRecord(null);
     setIsAddRecordOpen(true);
   };
+
+  useEffect(() => {
+    if (openAddRecordRequest > 0) {
+      void handleOpenAddRecord();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- trigger only when parent requests open
+  }, [openAddRecordRequest]);
 
   const handleOpenEditRecord = (record: AppointmentRecord) => {
     const recordDate = parseDateFromApi(record.appointmentdate);
@@ -192,6 +285,11 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
     setEditingRecord(record);
     setIsAddRecordOpen(true);
   };
+
+  const handleCloseAddRecord = useCallback(() => {
+    setIsAddRecordOpen(false);
+    setEditingRecord(null);
+  }, []);
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -287,28 +385,16 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
 
   const renderTaskInput = (task: ReferenceValue) => {
     const currentValue = taskValues[task.id] !== undefined ? taskValues[task.id] : "";
-    const notesLower = task.notes?.toLowerCase() || "";
-    
-    // Determine datatype from notes
-    const datatype = notesLower.includes("number") 
-      ? "number" 
-      : notesLower.includes("boolean") 
-      ? "boolean"
-      : notesLower.includes("datetime") || notesLower.includes("date time")
-      ? "datetime"
-      : notesLower.includes("date")
-      ? "date"
-      : notesLower.includes("time")
-      ? "time"
-      : "string";
+    const { datatype: rawType } = parseDataTypeFromNotes(task.notes || "");
+    const datatype = rawType.toLowerCase();
 
     switch (datatype) {
       case "number":
         return (
-          <Input
-            type="number"
-            value={currentValue || 0}
-            onChange={(e) => handleTaskValueChange(task.id, parseFloat(e.target.value) || 0)}
+          <NumberInput
+            float
+            value={typeof currentValue === "number" ? currentValue : 0}
+            onValueChange={(value) => handleTaskValueChange(task.id, value)}
             placeholder="Enter number"
           />
         );
@@ -520,9 +606,21 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
 
     setIsSaving(true);
     try {
+      const effectiveUserId = editingRecord?.userid || (await resolveRecordUserId());
+      if (effectiveUserId <= 0) {
+        toast({
+          title: "Register client first",
+          description:
+            "This guest needs a customer account before you can save an appointment record.",
+          variant: "destructive",
+        });
+        onRequireClientRegistration?.();
+        return;
+      }
+
       const newRecord = new AppointmentRecord();
       newRecord.id = editingRecord?.id || 0;
-      newRecord.userid = editingRecord?.userid || userId;
+      newRecord.userid = effectiveUserId;
       newRecord.organisationid = organizationId;
       // Convert date to UTC to avoid timezone conversion issues (day - 1 problem)
       newRecord.appointmentdate = sendToApi(selectedDate);
@@ -743,30 +841,47 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
 
   return (
     <>
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle>Timeline</CardTitle>
-            <Button onClick={handleOpenAddRecord} size="sm">
+      <Card className="border-0 bg-transparent shadow-none">
+        <CardHeader className="p-0 pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-lg sm:text-xl">Timeline</CardTitle>
+            <Button onClick={() => void handleOpenAddRecord()} size="sm" className="shrink-0">
               <Plus className="mr-2 h-4 w-4" />
-              Add Record
+              Add Appointment Record
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-6">
-          <div className="space-y-6">
+        <CardContent className="p-0">
+          {!isLoadingTasks && tasks.length === 0 ? (
+            <div className="mb-4 rounded-xl border border-dashed border-stone-200 bg-stone-50 p-4 text-sm text-stone-600">
+              <div className="flex items-start gap-3">
+                <Settings2 className="mt-0.5 h-4 w-4 shrink-0 text-appointza-coral" />
+                <div>
+                  <p className="font-medium text-appointza-navy">No appointment fields configured</p>
+                  <p className="mt-1">Create appointment value fields here — same form as Profile → Appointment values.</p>
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="mt-2 h-auto p-0 text-appointza-coral"
+                    onClick={() => setIsCreateValueOpen(true)}
+                  >
+                    Create reference value
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+          <div className="space-y-4">
             {timeline.map((item, index) => {
               if (item.type === "separator") {
                 return (
                   <div key={item.id} className="relative">
-                    <div className="flex items-center space-x-4 mb-4">
-                      <div className="flex-shrink-0">
-                        <div className="w-10 h-10 bg-gray-100 border-2 border-gray-300 rounded-full flex items-center justify-center">
-                          {getTypeIcon(item.type)}
-                        </div>
+                    <div className="mb-3 flex items-center gap-3">
+                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 border-stone-300 bg-stone-100">
+                        {getTypeIcon(item.type)}
                       </div>
-                      <div className="flex-1">
-                        <h3 className="text-lg font-semibold text-gray-900">{item.title}</h3>
+                      <div className="min-w-0 flex-1">
+                        <h3 className="text-base font-semibold text-gray-900">{item.title}</h3>
                       </div>
                     </div>
                   </div>
@@ -777,19 +892,22 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
                 <div key={item.id} className="relative">
                   {/* Timeline line */}
                   {index < timeline.length - 1 && timeline[index + 1].type !== "separator" && (
-                    <div className="absolute left-6 top-12 w-0.5 h-full bg-gray-200" style={{ height: 'calc(100% + 1rem)' }} />
+                    <div
+                      className="absolute left-4 top-8 w-0.5 bg-stone-200"
+                      style={{ height: "calc(100% + 0.75rem)" }}
+                    />
                   )}
                   
-                  <div className="flex space-x-4">
+                  <div className="flex gap-3">
                     {/* Timeline icon */}
-                    <div className="flex-shrink-0">
-                      <div className="w-12 h-12 bg-white border-2 border-gray-200 rounded-full flex items-center justify-center">
+                    <div className="shrink-0">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full border-2 border-stone-200 bg-white">
                         {getTypeIcon(item.type)}
                       </div>
                     </div>
                     
                     {/* Timeline content */}
-                    <div className="flex-1 min-w-0 pb-6">
+                    <div className="min-w-0 flex-1 pb-4">
                       <div className="flex items-center justify-between mb-1">
                         <h4 className="font-medium text-gray-900">{item.title}</h4>
                         {getTypeBadge(item.type)}
@@ -1039,19 +1157,23 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
         </DialogContent>
       </Dialog>
 
-      {/* Add Record Dialog */}
-      <Dialog open={isAddRecordOpen} onOpenChange={setIsAddRecordOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editingRecord ? `Edit Appointment Record #${editingRecord.id}` : "Add Appointment Record"}</DialogTitle>
-            <DialogDescription>
-              {editingRecord
-                ? "Update the existing appointment record."
-                : "Add a new appointment record for historical data or records from before using the software."}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 mt-4">
+      {/* Add / edit record — side panel on desktop, bottom drawer on mobile */}
+      <ResponsiveEditSheet
+        open={isAddRecordOpen}
+        onOpenChange={setIsAddRecordOpen}
+        title={editingRecord ? `Edit Appointment Record #${editingRecord.id}` : "Add Appointment Record"}
+        subtitle={
+          editingRecord
+            ? "Update the existing appointment record."
+            : "Add a new appointment record for historical data or records from before using the software."
+        }
+        isEdit={Boolean(editingRecord)}
+        saving={isSaving}
+        onCancel={handleCloseAddRecord}
+        onSave={() => void handleSaveRecord()}
+        saveLabel={editingRecord ? "Update Record" : "Save Record"}
+      >
+        <div className="space-y-4">
             {/* Appointment Date */}
             <div>
               <Label htmlFor="appointment-date">Appointment Date *</Label>
@@ -1109,9 +1231,28 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
             </div>
 
             {/* Tasks */}
-            {tasks.length > 0 && (
+            {isLoadingTasks ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading appointment fields…
+              </div>
+            ) : tasks.length > 0 ? (
               <div>
-                <Label>Tasks</Label>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <Label>Appointment values</Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCreateValueOpen(true)}
+                  >
+                    <Plus className="mr-1.5 h-4 w-4" />
+                    Add value
+                  </Button>
+                </div>
+                <p className="mb-2 text-xs text-muted-foreground">
+                  Same fields as Profile → Appointment values
+                </p>
                 <div className="space-y-3 mt-2">
                   {tasks.map((task) => (
                     <div key={task.id} className="border rounded-lg p-3">
@@ -1122,6 +1263,18 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
                     </div>
                   ))}
                 </div>
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed bg-muted/10 p-4 text-sm text-muted-foreground">
+                <p>No appointment fields yet.</p>
+                <Button
+                  type="button"
+                  variant="link"
+                  className="mt-1 h-auto p-0 text-appointza-coral"
+                  onClick={() => setIsCreateValueOpen(true)}
+                >
+                  Create reference value
+                </Button>
               </div>
             )}
 
@@ -1219,30 +1372,16 @@ const EnhancedTimeline = ({ appointments, appointmentRecords, userId, organizati
                 </div>
               )}
             </div>
+        </div>
+      </ResponsiveEditSheet>
 
-            {/* Action Buttons */}
-            <div className="flex justify-end space-x-2 pt-4">
-              <Button
-                variant="outline"
-                onClick={() => setIsAddRecordOpen(false)}
-                disabled={isSaving}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleSaveRecord} disabled={isSaving}>
-                {isSaving ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {editingRecord ? "Updating..." : "Saving..."}
-                  </>
-                ) : (
-                  editingRecord ? "Update Record" : "Save Record"
-                )}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <CreateAppointmentTaskValueDialog
+        open={isCreateValueOpen}
+        onOpenChange={setIsCreateValueOpen}
+        organizationId={organizationId}
+        existingTasks={tasks}
+        onCreated={handleAppointmentValueCreated}
+      />
     </>
   );
 };

@@ -116,6 +116,31 @@ namespace appointza.Utils
         }
 
         /// <summary>
+        /// First label from a stored custom URL value (slug only).
+        /// Examples: "appointzachn", "http://appointzachn.localhost:8083" → normalized "appointzachn"
+        /// </summary>
+        public static string ExtractCustomUrlSlug(string? storedCustomUrl)
+        {
+            if (string.IsNullOrWhiteSpace(storedCustomUrl))
+                return string.Empty;
+
+            var trimmed = storedCustomUrl.Trim();
+            var withoutScheme = Regex.Replace(trimmed, "^https?://", "", RegexOptions.IgnoreCase);
+            var hostOnly = withoutScheme.Split('/')[0];
+            var slug = hostOnly.Split('.')[0];
+            return Normalize(slug);
+        }
+
+        public static bool CustomUrlSlugMatches(string? storedCustomUrl, string? requestedSlug)
+        {
+            var stored = ExtractCustomUrlSlug(storedCustomUrl);
+            var requested = Normalize(requestedSlug);
+            return !string.IsNullOrEmpty(stored) &&
+                   !string.IsNullOrEmpty(requested) &&
+                   stored.Equals(requested, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Generates a subdomain URL from organization and location details
         /// Example: "Organization Name", "Area Name", "City Name", "State Name" 
         /// => "organization-name-area-name-city-name-state-name"

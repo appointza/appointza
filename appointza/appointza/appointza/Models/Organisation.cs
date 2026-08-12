@@ -39,12 +39,13 @@ public bool isfactory { get; set; }
 public string notes { get; set; }
 public decimal booking_amount { get; set; } = 5.10m;
 public bool isserviceamount { get; set; }
-public string referral_code { get; set; }
+public string referral_code { get; set; } = "";
 public long referred_by_organisation_id { get; set; }
+public string organisation_type { get; set; } = "service";
 
         /// <summary>Used only on insert to start SaaS trial; not a DB column.</summary>
         [JsonIgnore]
-        public string subscription_plan_code { get; set; }
+        public string subscription_plan_code { get; set; } = "";
         
                 public class AttributesData
                 {
@@ -94,6 +95,7 @@ public long referred_by_organisation_id { get; set; }
         public double organisationlocationlongitude { get; set; }
         public string organisationlocationgooglelocation { get; set; }
         public string organisationlocationpincode { get; set; }
+        public string organisationlocationcustomurl { get; set; }
     }
 
 

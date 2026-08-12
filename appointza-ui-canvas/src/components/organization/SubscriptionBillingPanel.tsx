@@ -334,11 +334,11 @@ const SubscriptionBillingPanel = ({ embedded = false }: { embedded?: boolean }) 
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-lg text-appointza-navy">
             <Gift className="h-5 w-5 text-orange-600" />
-            Refer & earn free months
+            Refer & earn credits
           </CardTitle>
           <CardDescription>
             Share your unique code. When a new organization registers with it, you get{" "}
-            {referralInfo?.bonus_months_per_referral ?? 1} extra month of free subscription.
+            {referralInfo?.bonus_credits_per_referral ?? 50} free booking credits.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">

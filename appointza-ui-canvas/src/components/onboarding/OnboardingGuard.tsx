@@ -4,6 +4,7 @@ import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
 import { useAuth } from '@/contexts/AuthContext';
 import { Loader2 } from 'lucide-react';
 import { Card, CardContent } from '@/components/ui/card';
+import { ORGANIZATION_ONBOARDING_ROUTES } from '@/utils/organizationOnboarding.util';
 
 interface OnboardingGuardProps {
   children: React.ReactNode;
@@ -17,10 +18,7 @@ export const OnboardingGuard = ({ children, allowedRoutes = [] }: OnboardingGuar
   const { isComplete, isLoading, nextStep, refetch } = useOnboardingStatus();
   const hasRedirected = useRef(false);
 
-  const onboardingRoutes = [
-    '/organization/services',
-    '/organization/timing',
-  ];
+  const onboardingRoutes = [...ORGANIZATION_ONBOARDING_ROUTES];
 
   const allAllowedRoutes = [...onboardingRoutes, ...allowedRoutes];
 
@@ -29,10 +27,16 @@ export const OnboardingGuard = ({ children, allowedRoutes = [] }: OnboardingGuar
   );
 
   useEffect(() => {
-    if (isAuthenticated && userType === 'organization' && user?.organisationid) {
-      refetch();
+    if (!isAuthenticated || userType !== 'organization' || !user?.organisationid) {
+      return;
     }
-  }, [isAuthenticated, userType, user?.organisationid, refetch]);
+
+    if (isComplete || isAllowedRoute) {
+      return;
+    }
+
+    void refetch();
+  }, [isAuthenticated, userType, user?.organisationid, isComplete, isAllowedRoute, refetch]);
 
   useEffect(() => {
     hasRedirected.current = false;
@@ -58,9 +62,21 @@ export const OnboardingGuard = ({ children, allowedRoutes = [] }: OnboardingGuar
       return;
     }
 
-    if (nextStep === 'services') {
+    if (nextStep === 'customDomain') {
+      hasRedirected.current = true;
+      navigate('/organization/custom-domain', {
+        replace: true,
+        state: { from: location.pathname, onboarding: true },
+      });
+    } else if (nextStep === 'services') {
       hasRedirected.current = true;
       navigate('/organization/services', {
+        replace: true,
+        state: { from: location.pathname, onboarding: true },
+      });
+    } else if (nextStep === 'website') {
+      hasRedirected.current = true;
+      navigate('/organization/templates', {
         replace: true,
         state: { from: location.pathname, onboarding: true },
       });

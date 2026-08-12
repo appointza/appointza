@@ -1358,7 +1358,113 @@ namespace appointza.Services
                 }
             }
 
+            if (req.include_room_customers)
+            {
+                await AppendRoomCustomersTransaction(db, req, result);
+            }
+
             return result;
+        }
+
+        static string NormalizeClientPhone(string? value) =>
+            new string((value ?? "").Where(char.IsDigit).ToArray());
+
+        async Task AppendRoomCustomersTransaction(IDb db, ClientsSelectReq req, List<ClientInfoRes> result)
+        {
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
+
+            var query = @"
+                SELECT
+                    r.id AS room_id,
+                    r.room_number,
+                    COALESCE(r.guest->>'name', '') AS guest_name,
+                    COALESCE(r.guest->>'phone', '') AS guest_phone,
+                    COALESCE(r.guest->>'email', '') AS guest_email,
+                    COALESCE(r.booking->>'booking_id', '') AS booking_reference,
+                    COALESCE(r.booking->>'check_in', '') AS check_in,
+                    ol.city
+                FROM organisation_rooms r
+                LEFT JOIN organisationlocation ol ON ol.id = r.organisation_location_id
+                WHERE r.isactive = TRUE
+                  AND r.guest IS NOT NULL
+                  AND (
+                    COALESCE(NULLIF(TRIM(r.guest->>'phone'), ''), '') <> ''
+                    OR COALESCE(NULLIF(TRIM(r.guest->>'name'), ''), '') <> ''
+                  )";
+
+            if (req.organisationlocationid > 0)
+                query += " AND r.organisation_location_id = @organisationlocationid";
+            if (req.organisationid > 0)
+                query += " AND r.organisation_id = @organisationid";
+            if (!string.IsNullOrWhiteSpace(req.mobilenumber))
+                query += " AND (r.guest->>'phone' ILIKE @mobilenumber OR r.guest->>'name' ILIKE @mobilenumber)";
+
+            query += " ORDER BY COALESCE(r.booking->>'check_in', '') DESC, r.id DESC";
+
+            var command = db.GetCommand(query);
+            if (req.organisationlocationid > 0)
+                db.AddParameter(command, "organisationlocationid", DbTypes.Types.Long).Value = req.organisationlocationid;
+            if (req.organisationid > 0)
+                db.AddParameter(command, "organisationid", DbTypes.Types.Long).Value = req.organisationid;
+            if (!string.IsNullOrWhiteSpace(req.mobilenumber))
+                db.AddParameter(command, "mobilenumber", DbTypes.Types.String).Value = $"%{req.mobilenumber}%";
+
+            var roomClients = new List<ClientInfoRes>();
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                while (await reader.ReadAsync())
+                {
+                    var guestName = reader["guest_name"]?.ToString()?.Trim() ?? "";
+                    var guestPhone = reader["guest_phone"]?.ToString()?.Trim() ?? "";
+                    if (string.IsNullOrWhiteSpace(guestName) && string.IsNullOrWhiteSpace(guestPhone))
+                        continue;
+
+                    roomClients.Add(new ClientInfoRes
+                    {
+                        userid = -Convert.ToInt64(reader["room_id"]),
+                        username = string.IsNullOrWhiteSpace(guestName) ? $"Room guest ({reader["room_number"]})" : guestName,
+                        mobile = guestPhone,
+                        city = reader["city"] == DBNull.Value ? "" : reader["city"].ToString() ?? "",
+                        is_room_customer = true,
+                        room_id = reader["room_id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["room_id"]),
+                        room_number = reader["room_number"]?.ToString() ?? "",
+                        booking_reference = reader["booking_reference"]?.ToString() ?? "",
+                        guest_email = reader["guest_email"]?.ToString() ?? "",
+                    });
+                }
+            }
+
+            foreach (var roomClient in roomClients)
+            {
+                var phoneKey = NormalizeClientPhone(roomClient.mobile);
+                ClientInfoRes? existing = null;
+                if (!string.IsNullOrEmpty(phoneKey))
+                {
+                    existing = result.FirstOrDefault(c => NormalizeClientPhone(c.mobile) == phoneKey);
+                }
+
+                if (existing != null)
+                {
+                    existing.is_room_customer = true;
+                    if (existing.room_id <= 0)
+                        existing.room_id = roomClient.room_id;
+                    if (string.IsNullOrWhiteSpace(existing.room_number))
+                        existing.room_number = roomClient.room_number;
+                    if (string.IsNullOrWhiteSpace(existing.booking_reference))
+                        existing.booking_reference = roomClient.booking_reference;
+                    if (string.IsNullOrWhiteSpace(existing.guest_email))
+                        existing.guest_email = roomClient.guest_email;
+                    if (string.IsNullOrWhiteSpace(existing.username) && !string.IsNullOrWhiteSpace(roomClient.username))
+                        existing.username = roomClient.username;
+                    continue;
+                }
+
+                var duplicateRoom = result.Any(c => c.room_id == roomClient.room_id && c.is_room_customer);
+                if (!duplicateRoom)
+                    result.Add(roomClient);
+            }
+
+            result.Sort((a, b) => string.Compare(a.username, b.username, StringComparison.OrdinalIgnoreCase));
         }
 
         public async Task<List<BookedAppoinmentRes>> SearchAppointmentsByMobileTransaction(IDb db, SearchAppointmentByMobileReq req)

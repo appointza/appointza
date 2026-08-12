@@ -1,4 +1,5 @@
 using appointza.Models;
+using appointza.Models.Hospitality;
 using appointza.Services;
 using appointza.Utils;
 using System.Text.RegularExpressions;
@@ -14,6 +15,7 @@ namespace appointza.Controllers
         ILogger<OrganisationSiteController> logger;
         OrganisationSiteService organisationsiteService;
         OrganisationService organisationService;
+        OrganisationLocationService organisationLocationService;
         ReferenceValueService referenceValueService;
         EventService eventService;
         
@@ -21,12 +23,14 @@ namespace appointza.Controllers
             ILogger<OrganisationSiteController> logger,
             OrganisationSiteService organisationsiteService,
             OrganisationService organisationService,
+            OrganisationLocationService organisationLocationService,
             ReferenceValueService referenceValueService,
             EventService eventService)
         {
             this.logger = logger;
             this.organisationsiteService = organisationsiteService;
             this.organisationService = organisationService;
+            this.organisationLocationService = organisationLocationService;
             this.referenceValueService = referenceValueService;
             this.eventService = eventService;
         }
@@ -106,17 +110,15 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
-        [HttpGet("GetSiteDetails/{encryptedLocationId}")]
-        public async Task<ActionResult<ActionRes<List<Sitedetails>>>> GetSiteDetailsByEncryptedId(string encryptedLocationId)
+        [HttpGet("GetSiteDetailsByOrgLocTempId/{orgloctempid}")]
+        public async Task<ActionResult<ActionRes<List<Sitedetails>>>> GetSiteDetailsByOrgLocTempId(string orgloctempid)
         {
             try
             {
-                // Decode the encrypted location ID
-                var locationId = LocationEncryptionUtil.DecodeLocationId(encryptedLocationId);
-                
+                var locationId = await organisationLocationService.GetLocationIdByOrgLocTempId(orgloctempid);
                 if (locationId <= 0)
                 {
-                    return BadRequest("Invalid or expired location ID");
+                    return NotFound("Location not found");
                 }
 
                 var result = new ActionRes<List<Sitedetails>>
@@ -128,29 +130,8 @@ namespace appointza.Controllers
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error getting site details by encrypted location ID: {EncryptedLocationId}", encryptedLocationId);
+                logger.LogError(ex, "Error getting site details by orgloctempid: {OrgLocTempId}", orgloctempid);
                 return StatusCode(500, "Internal server error");
-            }
-        }
-
-        [HttpGet("TestEncryption/{locationId}")]
-        public ActionResult TestEncryption(long locationId)
-        {
-            try
-            {
-                var encoded = LocationEncryptionUtil.EncodeLocationId(locationId);
-                var decoded = LocationEncryptionUtil.DecodeLocationId(encoded);
-                
-                return Ok(new { 
-                    originalId = locationId, 
-                    encoded = encoded, 
-                    decoded = decoded, 
-                    success = locationId == decoded 
-                });
-            }
-            catch (Exception ex)
-            {
-                return StatusCode(500, new { error = ex.Message });
             }
         }
 
@@ -165,16 +146,13 @@ namespace appointza.Controllers
                 return BadRequest("Missing request payload.");
             }
 
-            var area = NormalizeLocationPart(req.item.area);
-            var city = NormalizeLocationPart(req.item.city);
-            var state = NormalizeLocationPart(req.item.state);
-            var organizationName = NormalizeLocationPart(req.item.organizationName);
+            var customUrl = (req.item.customUrl ?? "").Trim();
+            if (string.IsNullOrEmpty(customUrl))
+            {
+                return BadRequest("customUrl is required.");
+            }
 
-            var organisationDetail = await organisationService.GetOrganisationBySubdomainLocation(
-                area,
-                city,
-                state,
-                organizationName);
+            var organisationDetail = await organisationService.GetOrganisationByCustomUrl(customUrl);
 
             if (organisationDetail == null || organisationDetail.organisationlocationid <= 0)
             {
@@ -492,23 +470,143 @@ namespace appointza.Controllers
                     return loop.Replace("{{facility_displaytext}}", facility ?? "");
                 });
 
+            html = BindHospitalitySections(
+                html,
+                siteDetail,
+                organisationDetail?.organisationid ?? 0,
+                organisationDetail?.organisationlocationid ?? 0,
+                apiBaseUrl,
+                frontendBaseUrl);
+
             return html;
         }
 
-        private static string NormalizeLocationPart(string value)
+        private static string BindHospitalitySections(
+            string templateHtml,
+            Sitedetails siteDetail,
+            long organisationId,
+            long locationId,
+            string apiBaseUrl,
+            string frontendBaseUrl)
         {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "";
-            }
+            var html = templateHtml ?? "";
+            var profile = siteDetail.hospitality_profile;
+            var rooms = (siteDetail.hospitality_rooms ?? []).Where(r => r.isactive).ToList();
+            var packages = (profile?.packages ?? []).Where(p => p.is_active && !string.IsNullOrWhiteSpace(p.name)).OrderBy(p => p.sort_order).ToList();
+            var foodMenu = (profile?.food_menu ?? []).Where(f => !string.IsNullOrWhiteSpace(f.title) || !string.IsNullOrWhiteSpace(f.meal)).ToList();
+            var nearbyPlaces = (profile?.nearby_places ?? []).Where(p => !string.IsNullOrWhiteSpace(p.name)).ToList();
 
-            // Match server-side query normalization: lower + remove spaces.
-            // Also normalize hyphens (e.g., "tamil-nadu" -> "tamilnadu").
-            return value
-                .Trim()
-                .ToLowerInvariant()
-                .Replace(" ", "")
-                .Replace("-", "");
+            var cancellationPolicy = profile?.cancellation_policy ?? "";
+            var paymentPolicy = profile?.payment_policy ?? "";
+            var checkInTime = profile?.checkin_time ?? "14:00";
+            var checkOutTime = profile?.checkout_time ?? "11:00";
+
+            html = html.Replace("{{hospitality.cancellation_policy}}", cancellationPolicy);
+            html = html.Replace("{{hospitality.payment_policy}}", paymentPolicy);
+            html = html.Replace("{{hospitality.check_in_time}}", checkInTime);
+            html = html.Replace("{{hospitality.check_out_time}}", checkOutTime);
+            html = html.Replace("{{organisation.cancellation_policy}}", cancellationPolicy);
+            html = html.Replace("{{organisation.payment_policy}}", paymentPolicy);
+            html = html.Replace("{{organisation.check_in_time}}", checkInTime);
+            html = html.Replace("{{organisation.check_out_time}}", checkOutTime);
+
+            html = ApplyConditionalSection(html, "{{#hasrooms}}", "{{/hasrooms}}", rooms.Count > 0);
+            html = ApplyConditionalSection(html, "{{#haspackages}}", "{{/haspackages}}", packages.Count > 0);
+            html = ApplyConditionalSection(html, "{{#hasfoodmenu}}", "{{/hasfoodmenu}}", foodMenu.Count > 0);
+            html = ApplyConditionalSection(html, "{{#hasnearby}}", "{{/hasnearby}}", nearbyPlaces.Count > 0);
+
+            html = ApplyLoopSection(html, "{{#rooms}}", "{{/rooms}}", rooms, (loop, room) =>
+            {
+                var code = ResolveRoomCode(room);
+                var available = string.Equals(room.status, "available", StringComparison.OrdinalIgnoreCase);
+                var name = !string.IsNullOrWhiteSpace(room.room_name) ? room.room_name.Trim() : $"Room {room.room_number}";
+                var mainPhoto = ResolveHospitalityMediaUrl(room.main_photo, apiBaseUrl, "");
+                var bookUrl = $"{frontendBaseUrl}/book?roomId={Uri.EscapeDataString(code)}&organisationId={organisationId}&locationId={locationId}";
+
+                var roomHtml = loop
+                    .Replace("{{room.id}}", code)
+                    .Replace("{{room.room_number}}", room.room_number ?? "")
+                    .Replace("{{room.room_name}}", room.room_name ?? "")
+                    .Replace("{{room.name}}", name)
+                    .Replace("{{room.type}}", room.room_type ?? "")
+                    .Replace("{{room.capacity}}", (room.capacity?.total_guests ?? 2).ToString())
+                    .Replace("{{room.price}}", (room.pricing?.price_per_night ?? 0).ToString())
+                    .Replace("{{room.main_photo}}", mainPhoto)
+                    .Replace("{{room.video_url}}", room.booking_rules?.video_url ?? "")
+                    .Replace("{{room.status}}", room.status ?? "")
+                    .Replace("{{room.status_label}}", FormatRoomStatusLabel(room.status))
+                    .Replace("{{ROOM_BOOK_URL}}", bookUrl);
+
+                roomHtml = ApplyConditionalSection(roomHtml, "{{#if_room_available}}", "{{/if_room_available}}", available);
+                roomHtml = ApplyConditionalSection(roomHtml, "{{#if_room_unavailable}}", "{{/if_room_unavailable}}", !available);
+                return roomHtml;
+            });
+
+            html = ApplyLoopSection(html, "{{#packages}}", "{{/packages}}", packages, (loop, pkg) =>
+            {
+                var packageId = !string.IsNullOrWhiteSpace(pkg.id) ? pkg.id.Trim() : $"name:{pkg.name.Trim().ToLowerInvariant()}";
+                var bookUrl = $"{frontendBaseUrl}/book?packageId={Uri.EscapeDataString(packageId)}&organisationId={organisationId}&locationId={locationId}";
+                return loop
+                    .Replace("{{package.id}}", packageId)
+                    .Replace("{{package.name}}", pkg.name ?? "")
+                    .Replace("{{package.price}}", pkg.price ?? "")
+                    .Replace("{{package.description}}", pkg.description ?? "")
+                    .Replace("{{package.badge}}", pkg.badge ?? "")
+                    .Replace("{{package.image_url}}", ResolveHospitalityMediaUrl(pkg.image_url, apiBaseUrl, ""))
+                    .Replace("{{package.minimum_nights}}", pkg.minimum_nights.ToString())
+                    .Replace("{{package.max_guests}}", pkg.max_guests.ToString())
+                    .Replace("{{package.room_type}}", pkg.room_type ?? "")
+                    .Replace("{{package.includes}}", string.Join(" · ", pkg.includes ?? []))
+                    .Replace("{{PACKAGE_BOOK_URL}}", bookUrl);
+            });
+
+            html = ApplyLoopSection(html, "{{#food_menu}}", "{{/food_menu}}", foodMenu, (loop, item) =>
+                loop
+                    .Replace("{{food.meal}}", item.meal ?? "")
+                    .Replace("{{food.title}}", item.title ?? "")
+                    .Replace("{{food.description}}", item.description ?? "")
+                    .Replace("{{food.cuisines}}", string.Join(", ", item.cuisines ?? [])));
+
+            html = ApplyLoopSection(html, "{{#nearby_places}}", "{{/nearby_places}}", nearbyPlaces, (loop, place) =>
+                loop
+                    .Replace("{{place.name}}", place.name ?? "")
+                    .Replace("{{place.distance}}", place.distance ?? "")
+                    .Replace("{{place.travel_time}}", place.travel_time ?? "")
+                    .Replace("{{place.icon}}", place.icon ?? "")
+                    .Replace("{{place.image_url}}", place.image_url ?? "")
+                    .Replace("{{place.map_url}}", place.map_url ?? ""));
+
+            return html;
+        }
+
+        private static string ResolveRoomCode(OrganisationRoom room)
+        {
+            var code = room.booking_rules?.room_code?.Trim();
+            if (!string.IsNullOrEmpty(code))
+                return code;
+            if (!string.IsNullOrWhiteSpace(room.room_number))
+                return $"room-{room.room_number.Trim().Replace(' ', '-').ToLowerInvariant()}";
+            return $"room-{room.id}";
+        }
+
+        private static string ResolveHospitalityMediaUrl(string value, string apiBaseUrl, string fallback)
+        {
+            var trimmed = (value ?? "").Trim();
+            if (string.IsNullOrEmpty(trimmed))
+                return fallback;
+            if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+                return trimmed;
+            if (long.TryParse(trimmed, out var id) && id > 0)
+                return $"{apiBaseUrl}/api/Files/Get?id={id}";
+            return trimmed;
+        }
+
+        private static string FormatRoomStatusLabel(string? status)
+        {
+            if (string.IsNullOrWhiteSpace(status))
+                return "Unknown";
+            return char.ToUpper(status[0]) + status[1..].Replace('_', ' ');
         }
 
         private static string ApplyConditionalSection(string template, string startMarker, string endMarker, bool keepContent)

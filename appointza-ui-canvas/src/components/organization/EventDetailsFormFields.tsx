@@ -1,10 +1,10 @@
-import type { ChangeEvent, Dispatch, SetStateAction } from "react";
-import { Loader2, Upload, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import type { Dispatch, SetStateAction } from "react";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
 import {
   Select,
   SelectContent,
@@ -13,7 +13,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Event } from "@/models/event.model";
-import { FilesService } from "@/services/files.service";
 import {
   compareDateOnly,
   isDateOnlyAfterToday,
@@ -115,22 +114,15 @@ export type EventDetailsFormFieldsProps = {
   idPrefix: string;
   toast: ToastFn;
   eventImages: number[];
-  isUploadingEventImage: boolean;
-  onEventImageUpload: (e: ChangeEvent<HTMLInputElement>) => void;
-  onRemoveEventImage: (id: number) => void;
-  filesService: FilesService;
+  onEventImagesChange: (imageIds: number[]) => void;
 };
 
 export function EventDetailsFormFields({
   event,
   setEvent,
   idPrefix,
-  toast,
   eventImages,
-  isUploadingEventImage,
-  onEventImageUpload,
-  onRemoveEventImage,
-  filesService,
+  onEventImagesChange,
 }: EventDetailsFormFieldsProps) {
   const selectTriggerClass = cn(org.selectTrigger);
 
@@ -299,18 +291,13 @@ export function EventDetailsFormFields({
         <Label htmlFor={`${idPrefix}-entry-amount`} className={serviceFormLabelClass}>
           Entry amount (₹)
         </Label>
-        <Input
+        <NumberInput
           id={`${idPrefix}-entry-amount`}
-          type="number"
           step="0.01"
+          float
           className={serviceFormInputClass}
-          value={event.entry_amount.toString()}
-          onChange={(e) =>
-            setEvent({
-              ...event,
-              entry_amount: parseFloat(e.target.value) || 0,
-            })
-          }
+          value={event.entry_amount}
+          onValueChange={(entry_amount) => setEvent({ ...event, entry_amount })}
           onWheel={(e) => e.currentTarget.blur()}
           placeholder="Enter entry amount"
         />
@@ -327,19 +314,13 @@ export function EventDetailsFormFields({
         <Label htmlFor={`${idPrefix}-slot-limit`} className={serviceFormLabelClass}>
           Slot limit
         </Label>
-        <Input
+        <NumberInput
           id={`${idPrefix}-slot-limit`}
-          type="number"
-          min="0"
-          step="1"
+          min={0}
+          step={1}
           className={serviceFormInputClass}
-          value={event.slot_limit.toString()}
-          onChange={(e) =>
-            setEvent({
-              ...event,
-              slot_limit: parseInt(e.target.value) || 0,
-            })
-          }
+          value={event.slot_limit}
+          onValueChange={(slot_limit) => setEvent({ ...event, slot_limit })}
           onWheel={(e) => e.currentTarget.blur()}
           placeholder="Enter slot limit"
         />
@@ -386,69 +367,13 @@ export function EventDetailsFormFields({
         />
       </div>
 
-      <div className="grid gap-2">
-        <Label htmlFor={`${idPrefix}-images`} className={serviceFormLabelClass}>
-          Cover image
-        </Label>
-        <div className="flex flex-col gap-4">
-          <Input
-            id={`${idPrefix}-images`}
-            type="file"
-            accept="image/*"
-            onChange={onEventImageUpload}
-            disabled={isUploadingEventImage}
-            className="hidden"
-          />
-          <Label
-            htmlFor={`${idPrefix}-images`}
-            className="group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-stone-200 bg-appointza-cream/60 px-6 py-10 text-center transition-colors hover:bg-appointza-cream"
-          >
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white text-stone-500 shadow-sm">
-              <Upload className="h-6 w-6" aria-hidden />
-            </div>
-            <span className="inline-flex items-center gap-2 rounded-full bg-gradient-coral px-5 py-2 text-sm font-semibold text-white shadow-sm shadow-[#FF6B6B]/20">
-              {isUploadingEventImage ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Uploading…
-                </>
-              ) : (
-                <>
-                  <Upload className="h-4 w-4" />
-                  Upload cover
-                </>
-              )}
-            </span>
-            <span className="text-xs text-stone-500">Recommended 1600×900</span>
-          </Label>
-
-          {eventImages.length > 0 && (
-            <div className="grid grid-cols-3 gap-4">
-              {eventImages.map((imageId) => (
-                <div key={imageId} className="relative group">
-                  <img
-                    src={filesService.getImageUrl(imageId)}
-                    alt={`Event image ${imageId}`}
-                    className="h-32 w-full rounded-xl border border-stone-100 object-cover"
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = "/placeholder.svg";
-                    }}
-                  />
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="icon"
-                    className="absolute top-1 right-1 h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={() => onRemoveEventImage(imageId)}
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      <OrgImageAssetField
+        label="Cover image"
+        description="Recommended 1600×900. Upload or pick from organisation assets."
+        imageIds={eventImages}
+        onChange={onEventImagesChange}
+        idPrefix={`${idPrefix}-images`}
+      />
 
       <div className="grid gap-2">
         <Label htmlFor={`${idPrefix}-status`} className={serviceFormLabelClass}>

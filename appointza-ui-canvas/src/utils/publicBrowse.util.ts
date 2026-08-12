@@ -11,10 +11,7 @@ export function organisationInitials(name: string): string {
 /** Subdomain visitor URL + display label for marketing / public browse cards. */
 export function organisationPublicUrls(org: OrganisationDetail) {
   const fullUrl = buildOrganisationPublicSiteUrl({
-    organisationName: org.organisationname || "organization",
-    areaName: org.organisationlocationname || "area",
-    cityName: org.organisationlocationcity || "city",
-    stateName: org.organisationlocationstate || "state",
+    customUrl: org.organisationlocationcustomurl,
   });
 
   try {

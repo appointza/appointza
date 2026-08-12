@@ -12,8 +12,11 @@ import {
   UsersGenerateQRCodeRes,
   OrgLocationReq,
   AppointmentPaymentsummary,
+  OrganisationDashboardStats,
   UpdateLocationTemplateIdReq,
   UpdateLocationMediaReq,
+  CustomUrlAvailabilityReq,
+  CustomUrlAvailabilityRes,
 } from '../models/organisationlocation.model';
 import { AxiosHelperUtils } from '../utils/axioshelper.utils';
 import { environment } from '../utils/environment';
@@ -143,6 +146,16 @@ export class OrganisationLocationService {
         return resp.item;
     }
 
+    async selectOrganisationDashboardStats(req: OrgLocationReq) {
+        const postdata = new ActionReq<OrgLocationReq>();
+        postdata.item = req;
+        const resp = await this.http.post<ActionRes<OrganisationDashboardStats>>(
+            this.baseurl + '/SelectOrganisationDashboardStats',
+            postdata
+        );
+        return resp.item;
+    }
+
     async updateLocationTemplateId(req: UpdateLocationTemplateIdReq) {
         let postdata: ActionReq<UpdateLocationTemplateIdReq> = new ActionReq<UpdateLocationTemplateIdReq>();
         postdata.item = req;
@@ -169,6 +182,20 @@ export class OrganisationLocationService {
         postdata.item = req;
         const resp = await this.http.post<ActionRes<OrganisationLocation>>(
             this.baseurl + '/UpdateLocationMedia',
+            postdata
+        );
+        return resp.item;
+    }
+
+    async checkCustomUrlAvailability(customUrl: string, organisationLocationId?: number) {
+        const postdata = new ActionReq<CustomUrlAvailabilityReq>();
+        postdata.item = new CustomUrlAvailabilityReq();
+        postdata.item.customurl = customUrl.trim();
+        if (organisationLocationId && organisationLocationId > 0) {
+            postdata.item.organisationlocationid = organisationLocationId;
+        }
+        const resp = await this.http.post<ActionRes<CustomUrlAvailabilityRes>>(
+            this.baseurl + '/CheckCustomUrlAvailability',
             postdata
         );
         return resp.item;

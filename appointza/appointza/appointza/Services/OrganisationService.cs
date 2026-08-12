@@ -43,7 +43,7 @@ namespace appointza.Services
         {
             List<Organisation> result = new List<Organisation>();
                 string query = @"
-                SELECT Organisation.id,Organisation.name,Organisation.gstnumber,Organisation.secondarytypecode,Organisation.secondarytype,Organisation.primarytype,Organisation.imageid,Organisation.organisationlogo,Organisation.tagline,Organisation.primarytypecode,Organisation.version,Organisation.createdby,Organisation.createdon,Organisation.modifiedby,Organisation.modifiedon,Organisation.attributes,Organisation.isactive,Organisation.issuspended,Organisation.parentid,Organisation.isfactory,Organisation.notes,Organisation.booking_amount,Organisation.isserviceamount
+                SELECT Organisation.id,Organisation.name,Organisation.gstnumber,Organisation.secondarytypecode,Organisation.secondarytype,Organisation.primarytype,Organisation.imageid,Organisation.organisationlogo,Organisation.tagline,Organisation.primarytypecode,Organisation.version,Organisation.createdby,Organisation.createdon,Organisation.modifiedby,Organisation.modifiedon,Organisation.attributes,Organisation.isactive,Organisation.issuspended,Organisation.parentid,Organisation.isfactory,Organisation.notes,Organisation.booking_amount,Organisation.isserviceamount,Organisation.organisation_type
                 FROM Organisation
                 ";
                 var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
@@ -96,6 +96,7 @@ temp.attributes_json = reader["attributes"] == DBNull.Value ? "null" : reader["a
 temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
 temp.booking_amount = reader["booking_amount"] == DBNull.Value ? 0 : Convert.ToDecimal(reader["booking_amount"]);
 temp.isserviceamount = reader["isserviceamount"] == DBNull.Value ? false : Convert.ToBoolean(reader["isserviceamount"]);
+temp.organisation_type = reader["organisation_type"] == DBNull.Value ? "service" : reader["organisation_type"].ToString();
                         result.Add(temp);
                     }
                 }
@@ -114,10 +115,10 @@ temp.isserviceamount = reader["isserviceamount"] == DBNull.Value ? false : Conve
         {
                 String query = @"
                 INSERT INTO Organisation (
-                    name,gstnumber,secondarytypecode,secondarytype,primarytype,imageid,organisationlogo,tagline,primarytypecode,version,createdby,createdon,modifiedby,modifiedon,attributes,isactive,issuspended,parentid,isfactory,notes,booking_amount,isserviceamount
+                    name,gstnumber,secondarytypecode,secondarytype,primarytype,imageid,organisationlogo,tagline,primarytypecode,version,createdby,createdon,modifiedby,modifiedon,attributes,isactive,issuspended,parentid,isfactory,notes,booking_amount,isserviceamount,organisation_type
                 )
                 VALUES (
-                   @name,@gstnumber,@secondarytypecode,@secondarytype,@primarytype,@imageid,@organisationlogo,@tagline,@primarytypecode,@version,@createdby,@createdon,@modifiedby,@modifiedon,@attributes,@isactive,@issuspended,@parentid,@isfactory,@notes,@booking_amount,@isserviceamount
+                   @name,@gstnumber,@secondarytypecode,@secondarytype,@primarytype,@imageid,@organisationlogo,@tagline,@primarytypecode,@version,@createdby,@createdon,@modifiedby,@modifiedon,@attributes,@isactive,@issuspended,@parentid,@isfactory,@notes,@booking_amount,@isserviceamount,@organisation_type
                 )
                 RETURNING id;
                 ";
@@ -152,6 +153,7 @@ db.AddParameter(command, "isfactory", DbTypes.Types.Boolean).Value = organisatio
 db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisation.notes) ? "" : organisation.notes;
 db.AddParameter(command, "booking_amount", DbTypes.Types.Decimal).Value = organisation.booking_amount;
 db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organisation.isserviceamount;
+db.AddParameter(command, "organisation_type", DbTypes.Types.String).Value = NormalizeOrganisationType(organisation.organisation_type);
                 
                 using (DbDataReader reader = await db.Execute(command))
                 {
@@ -289,7 +291,7 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
                 String query = @"
                 UPDATE Organisation
                     SET 
-                        name = @name,gstnumber = @gstnumber,secondarytypecode = @secondarytypecode,secondarytype = @secondarytype,primarytype = @primarytype,imageid = @imageid,organisationlogo = @organisationlogo,tagline = @tagline,primarytypecode = @primarytypecode,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,parentid = @parentid,isfactory = @isfactory,notes = @notes,booking_amount = @booking_amount,isserviceamount = @isserviceamount,
+                        name = @name,gstnumber = @gstnumber,secondarytypecode = @secondarytypecode,secondarytype = @secondarytype,primarytype = @primarytype,imageid = @imageid,organisationlogo = @organisationlogo,tagline = @tagline,primarytypecode = @primarytypecode,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,parentid = @parentid,isfactory = @isfactory,notes = @notes,booking_amount = @booking_amount,isserviceamount = @isserviceamount,organisation_type = @organisation_type,
                         version = version + 1
                 ";
                 
@@ -327,6 +329,7 @@ db.AddParameter(command, "isfactory", DbTypes.Types.Boolean).Value = organisatio
 db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisation.notes) ? "" : organisation.notes;
 db.AddParameter(command, "booking_amount", DbTypes.Types.Decimal).Value = organisation.booking_amount;
 db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organisation.isserviceamount;
+db.AddParameter(command, "organisation_type", DbTypes.Types.String).Value = NormalizeOrganisationType(organisation.organisation_type);
 
                 if (await db.ExecuteNonQuery(command) > 0)
                 {
@@ -335,6 +338,18 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
                 }
             return result;
         }
+
+        static string NormalizeOrganisationType(string? value)
+        {
+            var normalized = (value ?? "").Trim().ToLowerInvariant();
+            return normalized switch
+            {
+                "hospitality" => "hospitality",
+                "both" => "both",
+                _ => "service",
+            };
+        }
+
         public async Task<bool> Delete(OrganisationDeleteReq organisation)
         {
              bool result = false;
@@ -412,7 +427,8 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
         OrganisationLocation.latitude AS organisationlocationlatitude,
         OrganisationLocation.longitude AS organisationlocationlongitude,
         OrganisationLocation.googlelocation AS organisationlocationgooglelocation,
-        OrganisationLocation.pincode AS organisationlocationpincode
+        OrganisationLocation.pincode AS organisationlocationpincode,
+        OrganisationLocation.customurl AS organisationlocationcustomurl
 
     FROM Organisation
     LEFT JOIN OrganisationLocation 
@@ -478,7 +494,7 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
                     temp.organisationlocationlongitude = reader["organisationlocationlongitude"] == DBNull.Value ? 0 : Convert.ToDouble(reader["organisationlocationlongitude"]);
                     temp.organisationlocationgooglelocation = reader["organisationlocationgooglelocation"] == DBNull.Value ? "" : reader["organisationlocationgooglelocation"].ToString();
                     temp.organisationlocationpincode = reader["organisationlocationpincode"] == DBNull.Value ? "" : reader["organisationlocationpincode"].ToString();
-                    
+                    temp.organisationlocationcustomurl = reader["organisationlocationcustomurl"] == DBNull.Value ? "" : reader["organisationlocationcustomurl"].ToString();
 
                     result.Add(temp);
                 }
@@ -488,138 +504,27 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
         }
 
         /// <summary>
-        /// Find organization by location details (area, city, state)
+        /// Get organization details by organisationlocation.customurl slug.
         /// </summary>
-        public async Task<OrganisationDetail> FindOrganisationByLocation(string organizationname, string area, string city, string state)
+        public async Task<OrganisationDetail> GetOrganisationByCustomUrl(string customUrl)
         {
             List<OrganisationDetail> result = new List<OrganisationDetail>();
             using (IDb db = await dbprovider.GetDb())
             {
                 await db.Connect();
-                result = await this.FindOrganisationByLocationTransaction(db, organizationname,area, city, state);
+                result = await this.GetOrganisationByCustomUrlTransaction(db, customUrl);
             }
             return result.FirstOrDefault();
         }
 
-        public async Task<List<OrganisationDetail>> FindOrganisationByLocationTransaction(IDb db,string organizationname, string area, string city, string state)
+        public async Task<List<OrganisationDetail>> GetOrganisationByCustomUrlTransaction(IDb db, string customUrl)
         {
             List<OrganisationDetail> result = new List<OrganisationDetail>();
-
-            string query = @"
-    SELECT 
-        Organisation.id AS organisationid,
-        Organisation.name AS organisationname,
-        Organisation.gstnumber AS organisationgstnumber,
-        Organisation.secondarytypecode AS organisationsecondarytypecode,
-        Organisation.secondarytype AS organisationsecondarytype,
-        Organisation.primarytype AS organisationprimarytype,
-        Organisation.imageid AS organisationimageid,
-        Organisation.organisationlogo AS organisationlogo,
-        Organisation.tagline AS organisationtagline,
-        Organisation.primarytypecode AS organisationprimarytypecode,
-        
-        OrganisationLocation.id AS organisationlocationid,
-        OrganisationLocation.name AS organisationlocationname,
-        OrganisationLocation.addressline1 AS organisationlocationaddressline1,
-        OrganisationLocation.addressline2 AS organisationlocationaddressline2,
-        OrganisationLocation.city AS organisationlocationcity,
-        OrganisationLocation.state AS organisationlocationstate,
-        OrganisationLocation.country AS organisationlocationcountry,
-        OrganisationLocation.latitude AS organisationlocationlatitude,
-        OrganisationLocation.longitude AS organisationlocationlongitude,
-        OrganisationLocation.googlelocation AS organisationlocationgooglelocation,
-        OrganisationLocation.pincode AS organisationlocationpincode
-
-    FROM Organisation
-    LEFT JOIN OrganisationLocation 
-    ON Organisation.id = OrganisationLocation.organisationid
-    ";
-
-            var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
-
-            // Add location filters
-            if (!string.IsNullOrEmpty(city))
+            var normalizedCustomUrl = SlugHelper.Normalize(customUrl);
+            if (string.IsNullOrEmpty(normalizedCustomUrl))
             {
-                queryBuilder.AddParameter("REPLACE(LOWER(OrganisationLocation.city), ' ', '') ILIKE @city", "city", $"%{city.ToLower().Replace(" ", "")}%", DbTypes.Types.String);
+                return result;
             }
-            
-            if (!string.IsNullOrEmpty(state))
-            {
-                queryBuilder.AddParameter("REPLACE(LOWER(OrganisationLocation.state), ' ', '') ILIKE @state", "state", $"%{state.ToLower().Replace(" ", "")}%", DbTypes.Types.String);
-            }
-            
-            if (!string.IsNullOrEmpty(area))
-            {
-                queryBuilder.AddParameter("REPLACE(LOWER(OrganisationLocation.name), ' ', '') ILIKE @area", "area", $"%{area.ToLower().Replace(" ", "")}%", DbTypes.Types.String);
-            }
-
-            if (!string.IsNullOrEmpty(organizationname))
-            {
-                queryBuilder.AddParameter("REPLACE(LOWER(Organisation.name), ' ', '') ILIKE @organizationname", "organizationname", $"%{organizationname.ToLower().Replace(" ", "")}%", DbTypes.Types.String);
-            }
-            // Add required WHERE conditions
-            queryBuilder.AddParameter("Organisation.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
-            queryBuilder.AddParameter("OrganisationLocation.isactive", "=", "locationisactive", true, DbTypes.Types.Boolean);
-            queryBuilder.AddParameter("OrganisationLocation.isverified", "=", "locationisverified", true, DbTypes.Types.Boolean);
-            queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "Organisation.id");
-
-            var command = queryBuilder.GetCommand(db);
-
-            using (DbDataReader reader = await db.Execute(command))
-            {
-                while (await reader.ReadAsync())
-                {
-                    OrganisationDetail temp = new OrganisationDetail();
-
-                    // Organisation Fields
-                    temp.organisationid = reader["organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationid"]);
-                    temp.organisationname = reader["organisationname"] == DBNull.Value ? "" : reader["organisationname"].ToString();
-                    temp.organisationgstnumber = reader["organisationgstnumber"] == DBNull.Value ? "" : reader["organisationgstnumber"].ToString();
-                    temp.organisationsecondarytypecode = reader["organisationsecondarytypecode"] == DBNull.Value ? "" : reader["organisationsecondarytypecode"].ToString();
-                    temp.organisationsecondarytype = reader["organisationsecondarytype"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationsecondarytype"]);
-                    temp.organisationprimarytype = reader["organisationprimarytype"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationprimarytype"]);
-                    temp.organisationimageid = reader["organisationimageid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationimageid"]);
-                    temp.organisationlogo = reader["organisationlogo"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationlogo"]);
-                    temp.organisationtagline = reader["organisationtagline"] == DBNull.Value ? "" : reader["organisationtagline"].ToString();
-                    temp.organisationprimarytypecode = reader["organisationprimarytypecode"] == DBNull.Value ? "" : reader["organisationprimarytypecode"].ToString();
-
-                    // OrganisationLocation Fields
-                    temp.organisationlocationid = reader["organisationlocationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationlocationid"]);
-                    temp.organisationlocationname = reader["organisationlocationname"] == DBNull.Value ? "" : reader["organisationlocationname"].ToString();
-                    temp.organisationlocationaddressline1 = reader["organisationlocationaddressline1"] == DBNull.Value ? "" : reader["organisationlocationaddressline1"].ToString();
-                    temp.organisationlocationaddressline2 = reader["organisationlocationaddressline2"] == DBNull.Value ? "" : reader["organisationlocationaddressline2"].ToString();
-                    temp.organisationlocationcity = reader["organisationlocationcity"] == DBNull.Value ? "" : reader["organisationlocationcity"].ToString();
-                    temp.organisationlocationstate = reader["organisationlocationstate"] == DBNull.Value ? "" : reader["organisationlocationstate"].ToString();
-                    temp.organisationlocationcountry = reader["organisationlocationcountry"] == DBNull.Value ? "" : reader["organisationlocationcountry"].ToString();
-                    temp.organisationlocationlatitude = reader["organisationlocationlatitude"] == DBNull.Value ? 0 : Convert.ToDouble(reader["organisationlocationlatitude"]);
-                    temp.organisationlocationlongitude = reader["organisationlocationlongitude"] == DBNull.Value ? 0 : Convert.ToDouble(reader["organisationlocationlongitude"]);
-                    temp.organisationlocationgooglelocation = reader["organisationlocationgooglelocation"] == DBNull.Value ? "" : reader["organisationlocationgooglelocation"].ToString();
-                    temp.organisationlocationpincode = reader["organisationlocationpincode"] == DBNull.Value ? "" : reader["organisationlocationpincode"].ToString();
-
-                    result.Add(temp);
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Get organization details by subdomain location using SubdomainHelper
-        /// </summary>
-        public async Task<OrganisationDetail> GetOrganisationBySubdomainLocation(string area, string city, string state, string organizationName)
-        {
-            List<OrganisationDetail> result = new List<OrganisationDetail>();
-            using (IDb db = await dbprovider.GetDb())
-            {
-                await db.Connect();
-                result = await this.GetOrganisationBySubdomainLocationTransaction(db, area, city, state, organizationName);
-            }
-            return result.FirstOrDefault();
-        }
-
-        public async Task<List<OrganisationDetail>> GetOrganisationBySubdomainLocationTransaction(IDb db, string area, string city, string state, string organizationName)
-        {
-            List<OrganisationDetail> result = new List<OrganisationDetail>();
 
             string query = @"
     SELECT 
@@ -645,60 +550,17 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
         OrganisationLocation.longitude AS organisationlocationlongitude,
         OrganisationLocation.googlelocation AS organisationlocationgooglelocation,
         OrganisationLocation.pincode AS organisationlocationpincode,
-        OrganisationLocation.customurl AS organisationlocationcustomurl,
-        OrganisationLocation.templateid AS organisationlocationtemplateid,
-        OrganisationLocation.version AS organisationlocationversion,
-        OrganisationLocation.createdby AS organisationlocationcreatedby,
-        OrganisationLocation.createdon AS organisationlocationcreatedon,
-        OrganisationLocation.modifiedby AS organisationlocationmodifiedby,
-        OrganisationLocation.modifiedon AS organisationlocationmodifiedon,
-        OrganisationLocation.images AS organisationlocationimages,
-        OrganisationLocation.attributes AS organisationlocationattributes,
-        OrganisationLocation.isactive AS organisationlocationisactive,
-        OrganisationLocation.issuspended AS organisationlocationissuspended,
-        OrganisationLocation.parentid AS organisationlocationparentid,
-        OrganisationLocation.isfactory AS organisationlocationisfactory,
-        OrganisationLocation.notes AS organisationlocationnotes
+        OrganisationLocation.customurl AS organisationlocationcustomurl
 
     FROM Organisation
-    LEFT JOIN OrganisationLocation 
+    INNER JOIN OrganisationLocation 
     ON Organisation.id = OrganisationLocation.organisationid
+    AND OrganisationLocation.customurl IS NOT NULL
+    AND TRIM(OrganisationLocation.customurl) <> ''
     ";
 
             var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
 
-            // Add location filters using normalized comparison
-            // Normalize removes all spaces, hyphens, and special characters for accurate matching
-            if (!string.IsNullOrEmpty(city))
-            {
-                var normalizedCity = SlugHelper.Normalize(city);
-                Console.WriteLine($"🔍 Searching for city: {city} (normalized: {normalizedCity})");
-                // Use REGEXP_REPLACE to remove all non-alphanumeric characters from database values
-                queryBuilder.AddParameter("REGEXP_REPLACE(LOWER(OrganisationLocation.city), '[^a-z0-9]', '', 'g') ILIKE @city", "city", $"%{normalizedCity}%", DbTypes.Types.String);
-            }
-            
-            if (!string.IsNullOrEmpty(state))
-            {
-                var normalizedState = SlugHelper.Normalize(state);
-                Console.WriteLine($"🔍 Searching for state: {state} (normalized: {normalizedState})");
-                queryBuilder.AddParameter("REGEXP_REPLACE(LOWER(OrganisationLocation.state), '[^a-z0-9]', '', 'g') ILIKE @state", "state", $"%{normalizedState}%", DbTypes.Types.String);
-            }
-            
-            if (!string.IsNullOrEmpty(area))
-            {
-                var normalizedArea = SlugHelper.Normalize(area);
-                Console.WriteLine($"🔍 Searching for area: {area} (normalized: {normalizedArea})");
-                queryBuilder.AddParameter("REGEXP_REPLACE(LOWER(OrganisationLocation.name), '[^a-z0-9]', '', 'g') ILIKE @area", "area", $"%{normalizedArea}%", DbTypes.Types.String);
-            }
-
-            if (!string.IsNullOrEmpty(organizationName))
-            {
-                var normalizedOrgName = SlugHelper.Normalize(organizationName);
-                Console.WriteLine($"🔍 Searching for organization: {organizationName} (normalized: {normalizedOrgName})");
-                queryBuilder.AddParameter("REGEXP_REPLACE(LOWER(Organisation.name), '[^a-z0-9]', '', 'g') ILIKE @organisationname", "organisationname", $"%{normalizedOrgName}%", DbTypes.Types.String);
-            }
-
-            // Add required WHERE conditions
             queryBuilder.AddParameter("Organisation.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
             queryBuilder.AddParameter("OrganisationLocation.isactive", "=", "locationisactive", true, DbTypes.Types.Boolean);
             queryBuilder.AddParameter("OrganisationLocation.isverified", "=", "locationisverified", true, DbTypes.Types.Boolean);
@@ -710,9 +572,17 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
             {
                 while (await reader.ReadAsync())
                 {
+                    var storedCustomUrl = reader["organisationlocationcustomurl"] == DBNull.Value
+                        ? ""
+                        : reader["organisationlocationcustomurl"].ToString();
+
+                    if (!SlugHelper.CustomUrlSlugMatches(storedCustomUrl, normalizedCustomUrl))
+                    {
+                        continue;
+                    }
+
                     OrganisationDetail temp = new OrganisationDetail();
 
-                    // Organisation Fields
                     temp.organisationid = reader["organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationid"]);
                     temp.organisationname = reader["organisationname"] == DBNull.Value ? "" : reader["organisationname"].ToString();
                     temp.organisationgstnumber = reader["organisationgstnumber"] == DBNull.Value ? "" : reader["organisationgstnumber"].ToString();
@@ -724,7 +594,6 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
                     temp.organisationtagline = reader["organisationtagline"] == DBNull.Value ? "" : reader["organisationtagline"].ToString();
                     temp.organisationprimarytypecode = reader["organisationprimarytypecode"] == DBNull.Value ? "" : reader["organisationprimarytypecode"].ToString();
 
-                    // OrganisationLocation Fields - Full Location Object
                     temp.organisationlocationid = reader["organisationlocationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationlocationid"]);
                     temp.organisationlocationname = reader["organisationlocationname"] == DBNull.Value ? "" : reader["organisationlocationname"].ToString();
                     temp.organisationlocationaddressline1 = reader["organisationlocationaddressline1"] == DBNull.Value ? "" : reader["organisationlocationaddressline1"].ToString();
@@ -736,6 +605,7 @@ db.AddParameter(command, "isserviceamount", DbTypes.Types.Boolean).Value = organ
                     temp.organisationlocationlongitude = reader["organisationlocationlongitude"] == DBNull.Value ? 0 : Convert.ToDouble(reader["organisationlocationlongitude"]);
                     temp.organisationlocationgooglelocation = reader["organisationlocationgooglelocation"] == DBNull.Value ? "" : reader["organisationlocationgooglelocation"].ToString();
                     temp.organisationlocationpincode = reader["organisationlocationpincode"] == DBNull.Value ? "" : reader["organisationlocationpincode"].ToString();
+                    temp.organisationlocationcustomurl = storedCustomUrl;
 
                     result.Add(temp);
                 }

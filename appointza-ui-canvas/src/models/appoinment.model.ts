@@ -164,6 +164,7 @@ export class ClientsSelectReq {
   organisationid: number = 0;
   organisationlocationid: number = 0;
   mobilenumber: string = "";
+  include_room_customers: boolean = false;
 }
 
 export class ClientInfoRes {
@@ -171,4 +172,9 @@ export class ClientInfoRes {
   username: string = "";
   mobile: string = "";
   city: string = "";
+  is_room_customer?: boolean;
+  room_id?: number;
+  room_number?: string;
+  booking_reference?: string;
+  guest_email?: string;
 }

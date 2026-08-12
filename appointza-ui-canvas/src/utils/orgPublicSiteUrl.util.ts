@@ -1,65 +1,72 @@
-import { getAppDomain, getMarketingDomain } from "@/utils/environment";
-import { generateSubdomainSlug, parseCustomSiteOrigin } from "@/utils/slug.util";
-import { parseSubdomainLocation } from "@/utils/subdomain.util";
+import { getDomainName, getUiBaseUrl } from "@/utils/environment";
+import { normalizeCustomUrlSlug } from "@/utils/slug.util";
 
 export type OrganisationSiteUrlInput = {
-  organisationName: string;
-  areaName: string;
-  cityName: string;
-  stateName: string;
   customUrl?: string | null;
 };
 
-function resolveSubdomainParentHost(): string {
-  if (typeof window !== "undefined") {
-    const { hostname, port } = window.location;
-    const h = hostname.toLowerCase();
-    if (h === "localhost" || h === "127.0.0.1" || h.endsWith(".localhost")) {
-      return port ? `localhost:${port}` : "localhost";
-    }
-  }
-  return getMarketingDomain();
+/** Display host: `{customurl slug}.{domainname from config}`. */
+export function buildOrganisationCustomUrlHost(input: Pick<OrganisationSiteUrlInput, "customUrl">): string {
+  const slug = normalizeCustomUrlSlug(input.customUrl);
+  if (!slug) return "";
+  return `${slug}.${getDomainName()}`;
 }
 
-/**
- * Canonical public booking page URL — org subdomain root only (never `/template/:id`).
- */
-export function buildOrganisationPublicSiteUrl(input: OrganisationSiteUrlInput): string {
-  const custom = (input.customUrl || "").trim();
-  if (custom) {
-    const origin = parseCustomSiteOrigin(
-      custom,
-      typeof window !== "undefined" && window.location.protocol === "http:" ? "http:" : "https:",
-    );
-    if (origin) {
-      return origin;
-    }
-  }
-
-  const slug = generateSubdomainSlug(
-    input.organisationName || "organization",
-    input.areaName || "area",
-    input.cityName || "city",
-    input.stateName || "state",
-  );
-  const parentHost = resolveSubdomainParentHost();
+export function buildOrganisationPublicSiteOriginFromHost(host: string): string {
   const protocol =
-    typeof window !== "undefined" && window.location.protocol === "http:" ? "http" : "https";
-  return `${protocol}://${slug}.${parentHost}`;
+    typeof window !== "undefined" && window.location.protocol === "http:" ? "http:" : "https:";
+  return `${protocol}//${host}`;
 }
 
-/** True when the current path is a legacy `/template/:id` URL on an org subdomain. */
-export function isLegacyTemplatePathOnOrgSubdomain(): boolean {
-  if (typeof window === "undefined") return false;
-
-  return (
-    !!parseSubdomainLocation(window.location.host, getAppDomain()) &&
-    /^\/template\//i.test(window.location.pathname)
-  );
+/** Canonical public site URL — `{customurl}.{domain}`. */
+export function buildOrganisationPublicSiteUrl(input: OrganisationSiteUrlInput): string {
+  const host = buildOrganisationCustomUrlHost(input);
+  if (!host) return "";
+  return buildOrganisationPublicSiteOriginFromHost(host);
 }
 
-/** Redirect org subdomain `/template/:id` → `/` (canonical public URL). */
-export function redirectLegacyOrgTemplatePathToRoot(): void {
-  if (!isLegacyTemplatePathOnOrgSubdomain()) return;
-  window.location.replace("/");
+/** UUID assigned once when an organisation location is created (`orgloctempid`). */
+const ORG_LOC_TEMP_ID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export function isOrgLocTempId(value?: string | null): boolean {
+  return !!value?.trim() && ORG_LOC_TEMP_ID_REGEX.test(value.trim());
+}
+
+/** Booking URL using stable location GUID: `/template/{orgloctempid}`. */
+export function buildOrganisationTemplateBookingUrl(orgloctempid?: string | null): string {
+  const guid = orgloctempid?.trim();
+  if (!guid || !isOrgLocTempId(guid)) return "";
+  return `${getUiBaseUrl()}/template/${encodeURIComponent(guid)}`;
+}
+
+/** Subdomain slug from host, e.g. awonderonesurprise.localhost:8083 → awonderonesurprise */
+export function extractOrganisationCustomSubdomain(host: string): string | null {
+  const domain = getDomainName().toLowerCase();
+  const hostOnly = (host || "").replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+
+  if (!hostOnly || hostOnly === domain || hostOnly === `www.${domain}`) {
+    return null;
+  }
+
+  const suffix = `.${domain}`;
+  if (hostOnly.endsWith(suffix)) {
+    const slug = hostOnly.slice(0, -suffix.length);
+    if (slug && !slug.includes(".")) {
+      return slug;
+    }
+  }
+
+  if (hostOnly.endsWith(".localhost")) {
+    const slug = hostOnly.slice(0, -".localhost".length);
+    if (slug && !slug.includes(".")) {
+      return slug;
+    }
+  }
+
+  return null;
+}
+
+export function isOrganisationSubdomainHost(host: string = typeof window !== "undefined" ? window.location.host : ""): boolean {
+  return !!extractOrganisationCustomSubdomain(host);
 }

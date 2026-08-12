@@ -3,6 +3,7 @@ using appointza.Models;
 using appointza.Utils;
 using System;
 using System.Data.Common;
+using System.Linq;
 
 namespace appointza.Services
 {
@@ -40,7 +41,7 @@ namespace appointza.Services
         {
             List<OrganisationLocation> result = new List<OrganisationLocation>();
                 string query = @"
-                SELECT OrganisationLocation.id,OrganisationLocation.organisationid,OrganisationLocation.name,OrganisationLocation.addressline1,OrganisationLocation.addressline2,OrganisationLocation.city,OrganisationLocation.state,OrganisationLocation.country,OrganisationLocation.latitude,OrganisationLocation.longitude,OrganisationLocation.googlelocation,OrganisationLocation.geolocation_url,OrganisationLocation.pincode,OrganisationLocation.customurl,OrganisationLocation.templateid,OrganisationLocation.version,OrganisationLocation.createdby,OrganisationLocation.createdon,OrganisationLocation.modifiedby,OrganisationLocation.modifiedon,OrganisationLocation.images,OrganisationLocation.attributes,OrganisationLocation.isactive,OrganisationLocation.issuspended,OrganisationLocation.parentid,OrganisationLocation.isfactory,OrganisationLocation.notes,OrganisationLocation.isverified,OrganisationLocation.ispaymentrequired as isPaymentRequired,OrganisationLocation.facility_list,OrganisationLocation.email,OrganisationLocation.whatsapp_mobile
+                SELECT OrganisationLocation.id,OrganisationLocation.organisationid,OrganisationLocation.name,OrganisationLocation.addressline1,OrganisationLocation.addressline2,OrganisationLocation.city,OrganisationLocation.state,OrganisationLocation.country,OrganisationLocation.latitude,OrganisationLocation.longitude,OrganisationLocation.googlelocation,OrganisationLocation.geolocation_url,OrganisationLocation.pincode,OrganisationLocation.customurl,OrganisationLocation.orgloctempid,OrganisationLocation.templateid,OrganisationLocation.version,OrganisationLocation.createdby,OrganisationLocation.createdon,OrganisationLocation.modifiedby,OrganisationLocation.modifiedon,OrganisationLocation.images,OrganisationLocation.attributes,OrganisationLocation.isactive,OrganisationLocation.issuspended,OrganisationLocation.parentid,OrganisationLocation.isfactory,OrganisationLocation.notes,OrganisationLocation.isverified,OrganisationLocation.ispaymentrequired as isPaymentRequired,OrganisationLocation.facility_list,OrganisationLocation.email,OrganisationLocation.whatsapp_mobile
                 FROM OrganisationLocation
                 ";
                 var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
@@ -55,6 +56,10 @@ namespace appointza.Services
             if (req.organisationlocationid > 0)
             {
                 queryBuilder.AddParameter("OrganisationLocation.id", "=", "organisationlocationid", req.organisationlocationid, DbTypes.Types.Long);
+            }
+            if (!string.IsNullOrWhiteSpace(req.orgloctempid) && Guid.TryParse(req.orgloctempid.Trim(), out var orgLocTempId))
+            {
+                queryBuilder.AddParameter("OrganisationLocation.orgloctempid", "=", "orgloctempid", orgLocTempId, DbTypes.Types.Uuid);
             }
             queryBuilder.AddParameter("OrganisationLocation.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
 
@@ -79,6 +84,7 @@ temp.googlelocation = reader["googlelocation"] == DBNull.Value ? "" : reader["go
 temp.geolocation_url = reader["geolocation_url"] == DBNull.Value ? "" : reader["geolocation_url"].ToString();
 temp.pincode = reader["pincode"] == DBNull.Value ? "" : reader["pincode"].ToString();
 temp.customurl = reader["customurl"] == DBNull.Value ? "" : reader["customurl"].ToString();
+temp.orgloctempid = reader["orgloctempid"] == DBNull.Value ? "" : reader["orgloctempid"].ToString();
  temp.templateid = reader["templateid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["templateid"]);
 temp.version = reader["version"] == DBNull.Value ? 0 : Convert.ToInt32(reader["version"]);
  temp.createdby = reader["createdby"] == DBNull.Value ? 0 : Convert.ToInt64(reader["createdby"]);
@@ -188,21 +194,25 @@ temp.whatsapp_mobile = reader["whatsapp_mobile"] == DBNull.Value ? "" : reader["
         }
         public async Task InsertTransaction(IDb db, OrganisationLocation organisationlocation)
         {
+                await EnsureCustomUrlAvailableTransaction(db, organisationlocation);
+
                 String query = @"
                 INSERT INTO OrganisationLocation (
-                    organisationid,name,addressline1,addressline2,city,state,country,latitude,longitude,googlelocation,geolocation_url,pincode,customurl,templateid,version,createdby,createdon,modifiedby,modifiedon,images,attributes,isactive,issuspended,parentid,isfactory,notes,isverified,isPaymentRequired,facility_list,email,whatsapp_mobile
+                    organisationid,name,addressline1,addressline2,city,state,country,latitude,longitude,googlelocation,geolocation_url,pincode,customurl,orgloctempid,templateid,version,createdby,createdon,modifiedby,modifiedon,images,attributes,isactive,issuspended,parentid,isfactory,notes,isverified,isPaymentRequired,facility_list,email,whatsapp_mobile
                 )
                 VALUES (
-                   @organisationid,@name,@addressline1,@addressline2,@city,@state,@country,@latitude,@longitude,@googlelocation,@geolocation_url,@pincode,@customurl,@templateid,@version,@createdby,@createdon,@modifiedby,@modifiedon,@images,@attributes,@isactive,@issuspended,@parentid,@isfactory,@notes,@isverified,@isPaymentRequired,@facility_list,@email,@whatsapp_mobile
+                   @organisationid,@name,@addressline1,@addressline2,@city,@state,@country,@latitude,@longitude,@googlelocation,@geolocation_url,@pincode,@customurl,@orgloctempid,@templateid,@version,@createdby,@createdon,@modifiedby,@modifiedon,@images,@attributes,@isactive,@issuspended,@parentid,@isfactory,@notes,@isverified,@isPaymentRequired,@facility_list,@email,@whatsapp_mobile
                 )
                 RETURNING id;
                 ";
                 organisationlocation.isactive = true;
                 organisationlocation.version = 1;
+                organisationlocation.orgloctempid = Guid.NewGuid().ToString();
                 organisationlocation.createdon = DateTime.UtcNow;
                 organisationlocation.createdby = requeststate.usercontext.id;
                 organisationlocation.modifiedon = DateTime.UtcNow;
                 organisationlocation.modifiedby = requeststate.usercontext.id;
+                var orgLocTempId = Guid.Parse(organisationlocation.orgloctempid);
 
                 using (DbCommand command = db.GetCommand(query))
                 {
@@ -219,6 +229,7 @@ temp.whatsapp_mobile = reader["whatsapp_mobile"] == DBNull.Value ? "" : reader["
                     db.AddParameter(command, "geolocation_url", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisationlocation.geolocation_url) ? "" : organisationlocation.geolocation_url;
                     db.AddParameter(command, "pincode", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisationlocation.pincode) ? "" : organisationlocation.pincode;
                     db.AddParameter(command, "customurl", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisationlocation.customurl) ? "" : organisationlocation.customurl;
+                    db.AddParameter(command, "orgloctempid", DbTypes.Types.Uuid).Value = orgLocTempId;
                     db.AddParameter(command, "templateid", DbTypes.Types.Long).Value = organisationlocation.templateid;
                     db.AddParameter(command, "version", DbTypes.Types.Integer).Value = organisationlocation.version;
                     db.AddParameter(command, "createdby", DbTypes.Types.Long).Value = organisationlocation.createdby;
@@ -304,6 +315,8 @@ db.AddParameter(command, "whatsapp_mobile", DbTypes.Types.String).Value = String
         public async Task<bool> UpdateTransaction(IDb db, OrganisationLocation organisationlocation)
         {
             bool result = false;
+            await EnsureCustomUrlAvailableTransaction(db, organisationlocation);
+
                 String query = @"
                 UPDATE OrganisationLocation
                     SET 
@@ -654,6 +667,153 @@ FROM appointment_counts ac";
             return result;
         }
 
+        public async Task<OrganisationDashboardStatsRes> SelectOrganisationDashboardStats(OrgLocationStaffReq req)
+        {
+            OrganisationDashboardStatsRes result;
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                result = await this.SelectOrganisationDashboardStatsTransaction(db, req);
+            }
+            return result;
+        }
+
+        public async Task<OrganisationDashboardStatsRes> SelectOrganisationDashboardStatsTransaction(IDb db, OrgLocationStaffReq req)
+        {
+            var result = new OrganisationDashboardStatsRes();
+            const string query = @"
+WITH appointment_counts AS (
+    SELECT
+        COUNT(*) AS total_appointments,
+        SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'CONFIRMED' THEN 1 ELSE 0 END) AS confirmed_count,
+        SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
+        SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_count,
+        SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) NOT IN ('CONFIRMED', 'COMPLETED', 'CANCELLED') THEN 1 ELSE 0 END) AS pending_count
+    FROM appoinment
+    WHERE organisationlocationid = @orglocid
+),
+revenue_total AS (
+    SELECT COALESCE(SUM(p.amount), 0) AS total_revenue
+    FROM payment p
+    INNER JOIN appoinment a ON p.appoinmentid = a.id
+    WHERE a.organisationlocationid = @orglocid
+),
+trend AS (
+    SELECT
+        d::date AS day,
+        TRIM(TO_CHAR(d::date, 'Dy')) AS day_name,
+        COALESCE(COUNT(a.id), 0) AS appointment_count
+    FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS d
+    LEFT JOIN appoinment a
+        ON DATE(a.appoinmentdate) = d::date
+        AND a.organisationlocationid = @orglocid
+    GROUP BY d::date
+    ORDER BY d::date
+),
+revenue_weeks AS (
+    SELECT
+        CASE
+            WHEN EXTRACT(DAY FROM a.appoinmentdate) <= 7 THEN 1
+            WHEN EXTRACT(DAY FROM a.appoinmentdate) <= 14 THEN 2
+            WHEN EXTRACT(DAY FROM a.appoinmentdate) <= 21 THEN 3
+            ELSE 4
+        END AS week_num,
+        COALESCE(SUM(p.amount), 0) AS revenue
+    FROM appoinment a
+    LEFT JOIN payment p ON p.appoinmentid = a.id
+    WHERE a.organisationlocationid = @orglocid
+      AND DATE_TRUNC('month', a.appoinmentdate) = DATE_TRUNC('month', CURRENT_DATE)
+    GROUP BY week_num
+)
+SELECT
+    ac.total_appointments,
+    ac.confirmed_count,
+    ac.completed_count,
+    ac.pending_count,
+    ac.cancelled_count,
+    rt.total_revenue,
+    (
+        SELECT COALESCE(json_agg(
+            json_build_object(
+                'name', t.day_name,
+                'date', TO_CHAR(t.day, 'YYYY-MM-DD'),
+                'appointments', t.appointment_count
+            ) ORDER BY t.day
+        ), '[]'::json)
+        FROM trend t
+    ) AS trend_json,
+    (
+        SELECT COALESCE(json_agg(
+            json_build_object(
+                'name', w.week_label,
+                'revenue', COALESCE(rw.revenue, 0)
+            ) ORDER BY w.week_num
+        ), '[]'::json)
+        FROM (
+            VALUES
+                (1, 'Week 1'),
+                (2, 'Week 2'),
+                (3, 'Week 3'),
+                (4, 'Week 4')
+        ) AS w(week_num, week_label)
+        LEFT JOIN revenue_weeks rw ON rw.week_num = w.week_num
+    ) AS revenue_weeks_json
+FROM appointment_counts ac
+CROSS JOIN revenue_total rt";
+
+            var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
+            var command = queryBuilder.GetCommand(db);
+            db.AddParameter(command, "orglocid", DbTypes.Types.Long).Value = req.orglocid;
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                while (await reader.ReadAsync())
+                {
+                    result.totalappointments = reader.IsDBNull(reader.GetOrdinal("total_appointments"))
+                        ? 0
+                        : reader.GetInt32(reader.GetOrdinal("total_appointments"));
+                    result.confirmedcount = reader.IsDBNull(reader.GetOrdinal("confirmed_count"))
+                        ? 0
+                        : reader.GetInt32(reader.GetOrdinal("confirmed_count"));
+                    result.completedcount = reader.IsDBNull(reader.GetOrdinal("completed_count"))
+                        ? 0
+                        : reader.GetInt32(reader.GetOrdinal("completed_count"));
+                    result.pendingcount = reader.IsDBNull(reader.GetOrdinal("pending_count"))
+                        ? 0
+                        : reader.GetInt32(reader.GetOrdinal("pending_count"));
+                    result.cancelledcount = reader.IsDBNull(reader.GetOrdinal("cancelled_count"))
+                        ? 0
+                        : reader.GetInt32(reader.GetOrdinal("cancelled_count"));
+                    result.totalrevenue = reader.IsDBNull(reader.GetOrdinal("total_revenue"))
+                        ? 0
+                        : reader.GetDecimal(reader.GetOrdinal("total_revenue"));
+
+                    if (!reader.IsDBNull(reader.GetOrdinal("trend_json")))
+                    {
+                        var trendJson = reader.GetString(reader.GetOrdinal("trend_json"));
+                        result.trend_last_7_days = JsonConvert.DeserializeObject<List<OrganisationDashboardTrendPoint>>(trendJson)
+                            ?? new List<OrganisationDashboardTrendPoint>();
+                    }
+
+                    if (!reader.IsDBNull(reader.GetOrdinal("revenue_weeks_json")))
+                    {
+                        var revenueJson = reader.GetString(reader.GetOrdinal("revenue_weeks_json"));
+                        result.revenue_by_week_this_month = JsonConvert.DeserializeObject<List<OrganisationDashboardRevenueWeekPoint>>(revenueJson)
+                            ?? new List<OrganisationDashboardRevenueWeekPoint>();
+                    }
+
+                    result.status_breakdown = new List<OrganisationDashboardStatusPoint>
+                    {
+                        new OrganisationDashboardStatusPoint { name = "Completed", value = result.completedcount },
+                        new OrganisationDashboardStatusPoint { name = "Confirmed", value = result.confirmedcount },
+                        new OrganisationDashboardStatusPoint { name = "Pending", value = result.pendingcount },
+                        new OrganisationDashboardStatusPoint { name = "Cancelled", value = result.cancelledcount },
+                    };
+                }
+            }
+
+            return result;
+        }
+
         public async Task<UsersGenerateQRCodeRes> GenerateQRCode(long organisationid, long locationid)
         {
             UsersGenerateQRCodeRes result;
@@ -737,10 +897,188 @@ FROM appointment_counts ac";
             return result;
         }
 
-        /// <summary>
-        /// Creates a default template for a new organization location
-        /// </summary>
-     
+        static readonly HashSet<string> ReservedCustomUrlSlugs = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "www", "api", "admin", "appointza", "login", "register", "app", "mail", "support", "help",
+        };
+
+        /// <summary>Normalize slug the same way as public URL lookup (stored on organisationlocation.customurl).</summary>
+        public static string PrepareCustomUrlSlug(string? customUrl)
+        {
+            var slug = SlugHelper.ExtractCustomUrlSlug(customUrl);
+            if (!string.IsNullOrEmpty(slug))
+            {
+                return slug;
+            }
+
+            return SlugHelper.Normalize(customUrl);
+        }
+
+        public async Task<CustomUrlAvailabilityRes> CheckCustomUrlAvailability(
+            string customUrl,
+            long excludeLocationId = 0)
+        {
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            return await CheckCustomUrlAvailabilityTransaction(db, customUrl, excludeLocationId);
+        }
+
+        public async Task<CustomUrlAvailabilityRes> CheckCustomUrlAvailabilityTransaction(
+            IDb db,
+            string customUrl,
+            long excludeLocationId = 0)
+        {
+            var slug = PrepareCustomUrlSlug(customUrl);
+            if (string.IsNullOrEmpty(slug))
+            {
+                return new CustomUrlAvailabilityRes
+                {
+                    available = false,
+                    normalized_slug = "",
+                    message = "Enter a subdomain name.",
+                };
+            }
+
+            if (ReservedCustomUrlSlugs.Contains(slug))
+            {
+                return new CustomUrlAvailabilityRes
+                {
+                    available = false,
+                    normalized_slug = slug,
+                    message = "This subdomain is reserved. Please choose another name.",
+                };
+            }
+
+            var taken = await FindCustomUrlConflictTransaction(db, slug, excludeLocationId);
+            if (taken != null)
+            {
+                return new CustomUrlAvailabilityRes
+                {
+                    available = false,
+                    normalized_slug = slug,
+                    message = "This subdomain is already taken. Please choose another name.",
+                };
+            }
+
+            return new CustomUrlAvailabilityRes
+            {
+                available = true,
+                normalized_slug = slug,
+                message = "This subdomain is available.",
+            };
+        }
+
+        async Task EnsureCustomUrlAvailableTransaction(
+            IDb db,
+            OrganisationLocation organisationlocation)
+        {
+            if (string.IsNullOrWhiteSpace(organisationlocation.customurl))
+            {
+                organisationlocation.customurl = "";
+                return;
+            }
+
+            var slug = PrepareCustomUrlSlug(organisationlocation.customurl);
+            if (string.IsNullOrEmpty(slug))
+            {
+                throw new AppException(AppException.ErrorCodes.BadRequest,
+                    "Custom URL must contain letters or numbers.");
+            }
+
+            if (ReservedCustomUrlSlugs.Contains(slug))
+            {
+                throw new AppException(AppException.ErrorCodes.BadRequest,
+                    "This subdomain is reserved. Please choose another name.");
+            }
+
+            var conflict = await FindCustomUrlConflictTransaction(db, slug, organisationlocation.id);
+            if (conflict != null)
+            {
+                throw new AppException(AppException.ErrorCodes.BadRequest,
+                    "This subdomain is already taken by another location. Please choose a different name.");
+            }
+
+            organisationlocation.customurl = slug;
+        }
+
+        async Task<OrganisationLocation?> FindCustomUrlConflictTransaction(
+            IDb db,
+            string normalizedSlug,
+            long excludeLocationId)
+        {
+            const string query = @"
+                SELECT id, organisationid, name, customurl
+                FROM OrganisationLocation
+                WHERE isactive = true
+                  AND customurl IS NOT NULL
+                  AND TRIM(customurl) <> ''
+                  AND (@exclude_id <= 0 OR id <> @exclude_id)
+            ";
+
+            DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "exclude_id", DbTypes.Types.Long).Value = excludeLocationId;
+
+            using DbDataReader reader = await db.Execute(command);
+            while (await reader.ReadAsync())
+            {
+                var stored = reader["customurl"] == DBNull.Value ? "" : reader["customurl"].ToString() ?? "";
+                if (SlugHelper.CustomUrlSlugMatches(stored, normalizedSlug))
+                {
+                    return new OrganisationLocation
+                    {
+                        id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]),
+                        organisationid = reader["organisationid"] == DBNull.Value
+                            ? 0
+                            : Convert.ToInt64(reader["organisationid"]),
+                        name = reader["name"]?.ToString() ?? "",
+                        customurl = stored,
+                    };
+                }
+            }
+
+            return null;
+        }
+
+        public async Task<long> GetLocationIdByOrgLocTempId(string orgloctempid)
+        {
+            if (string.IsNullOrWhiteSpace(orgloctempid))
+            {
+                return 0;
+            }
+
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                return await GetLocationIdByOrgLocTempIdTransaction(db, orgloctempid);
+            }
+        }
+
+        public async Task<long> GetLocationIdByOrgLocTempIdTransaction(IDb db, string orgloctempid)
+        {
+            if (string.IsNullOrWhiteSpace(orgloctempid))
+            {
+                return 0;
+            }
+
+            const string query = @"
+                SELECT id
+                FROM OrganisationLocation
+                WHERE orgloctempid::text = @orgloctempid
+                  AND isactive = true
+                LIMIT 1";
+
+            using DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "orgloctempid", DbTypes.Types.String).Value = orgloctempid.Trim();
+
+            using DbDataReader reader = await db.Execute(command);
+            if (await reader.ReadAsync())
+            {
+                return reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]);
+            }
+
+            return 0;
+        }
+
         /// <summary>
         /// Updates only the templateid for a specific organisation location
         /// </summary>

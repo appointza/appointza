@@ -388,36 +388,7 @@ const EventBookings: React.FC = () => {
     confirmationStatusFilter === "all";
 
   return (
-    <OrganizationPageShell
-      title="Event bookings"
-      description="Approve or reject registrations, and manage payment and check-in for your events."
-      actions={
-        <>
-          <Button
-            variant="outline"
-            onClick={handleRefresh}
-            disabled={isRefreshing || isLoading}
-            className={cn(org.btnOutline, "w-full sm:w-auto")}
-          >
-            {isRefreshing ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
-            ) : (
-              <RefreshCw className="h-4 w-4 shrink-0" />
-            )}
-            Refresh
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleClearFilters}
-            disabled={filtersAreDefault}
-            className={cn(org.btnOutline, "w-full sm:w-auto")}
-          >
-            <X className="h-4 w-4 shrink-0" />
-            Clear filters
-          </Button>
-        </>
-      }
-    >
+    <OrganizationPageShell>
         {isLoading ? (
           <div className={org.loading}>
             <div className="text-center">
@@ -428,9 +399,9 @@ const EventBookings: React.FC = () => {
         ) : (
           <>
             {/* Filters & view mode */}
-            <div className={cn("flex flex-col gap-3", org.panelSection, "py-4 sm:py-4")}>
-              <div className="flex w-full min-w-0 flex-row items-stretch justify-end gap-2 sm:gap-2">
-                <div className="flex h-10 w-max max-w-full shrink-0 overflow-hidden rounded-2xl border border-stone-200 sm:h-11">
+            <div className="flex flex-col gap-3 border-b border-stone-100 px-4 py-3 sm:px-6 lg:px-8">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex h-10 shrink-0 overflow-hidden rounded-2xl border border-stone-200 sm:h-11">
                   {(
                     [
                       { mode: "card" as const, icon: LayoutGrid, label: "Card" },
@@ -443,17 +414,44 @@ const EventBookings: React.FC = () => {
                       type="button"
                       onClick={() => setViewMode(mode)}
                       className={cn(
-                        "inline-flex shrink-0 items-center justify-center gap-1 px-3 py-2 text-xs font-medium transition-colors sm:gap-2 sm:px-4 sm:text-sm",
+                        "inline-flex shrink-0 items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors sm:px-4 sm:text-sm",
                         i > 0 && "border-l border-stone-200",
                         viewMode === mode
                           ? "bg-gradient-coral text-white"
-                          : "bg-white text-stone-700 hover:bg-stone-50"
+                          : "bg-white text-stone-700 hover:bg-stone-50",
                       )}
                     >
-                      <Icon className="h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" aria-hidden />
-                      <span className="truncate">{label}</span>
+                      <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                      <span>{label}</span>
                     </button>
                   ))}
+                </div>
+
+                <div className="flex w-full gap-2 sm:w-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRefresh}
+                    disabled={isRefreshing || isLoading}
+                    className={cn(org.btnOutline, "h-10 flex-1 sm:flex-none")}
+                  >
+                    {isRefreshing ? (
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 shrink-0" />
+                    )}
+                    Refresh
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleClearFilters}
+                    disabled={filtersAreDefault}
+                    className={cn(org.btnOutline, "h-10 flex-1 sm:flex-none")}
+                  >
+                    <X className="h-4 w-4 shrink-0" />
+                    Clear filters
+                  </Button>
                 </div>
               </div>
 

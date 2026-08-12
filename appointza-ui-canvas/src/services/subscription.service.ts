@@ -176,20 +176,6 @@ export class SubscriptionService {
     return unwrapActionRes(resp, "GetWalletStatus");
   }
 
-  async claimMonthlyFreeCredits(organisationId?: number): Promise<CreditWalletStatusRes> {
-    const req = new OrganisationSubscriptionSelectReq();
-    if (organisationId && organisationId > 0) {
-      req.organisation_id = organisationId;
-    }
-    const postdata = new ActionReq<OrganisationSubscriptionSelectReq>();
-    postdata.item = req;
-    const resp = await this.http.post<ActionRes<CreditWalletStatusRes>>(
-      this.baseurl + "/ClaimMonthlyFreeCredits",
-      postdata,
-    );
-    return unwrapActionRes(resp, "ClaimMonthlyFreeCredits");
-  }
-
   async setBillingMode(
     mode: "subscription" | "credit_wallet",
     organisationId?: number,

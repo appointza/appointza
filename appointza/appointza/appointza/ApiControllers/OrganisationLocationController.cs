@@ -82,6 +82,29 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
+        [HttpPost("CheckCustomUrlAvailability")]
+        public async Task<ActionResult<ActionRes<CustomUrlAvailabilityRes>>> CheckCustomUrlAvailability(
+            ActionReq<CustomUrlAvailabilityReq> req)
+        {
+            if (req?.item == null || string.IsNullOrWhiteSpace(req.item.customurl))
+            {
+                return Ok(new ActionRes<CustomUrlAvailabilityRes>
+                {
+                    item = new CustomUrlAvailabilityRes
+                    {
+                        available = false,
+                        message = "Enter a subdomain name.",
+                    },
+                });
+            }
+
+            var availability = await organisationlocationService.CheckCustomUrlAvailability(
+                req.item.customurl,
+                req.item.organisationlocationid);
+
+            return Ok(new ActionRes<CustomUrlAvailabilityRes> { item = availability });
+        }
+
         [HttpPost("Insert")]
         public async Task<ActionResult<ActionRes<OrganisationLocation>>> Insert(ActionReq<OrganisationLocation> req)
         {
@@ -224,6 +247,16 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
+        [HttpPost("SelectOrganisationDashboardStats")]
+        public async Task<ActionResult<ActionRes<OrganisationDashboardStatsRes>>> SelectOrganisationDashboardStats(ActionReq<OrgLocationStaffReq> req)
+        {
+            ActionRes<OrganisationDashboardStatsRes> result = new ActionRes<OrganisationDashboardStatsRes>();
+
+            result.item = await organisationlocationService.SelectOrganisationDashboardStats(req.item);
+
+            return Ok(result);
+        }
+
         [HttpPost("GenerateQRCode")]
         public async Task<ActionResult<ActionRes<UsersGenerateQRCodeRes>>> GenerateQRCode(ActionReq<UsersGenerateQRCodeReq> req)
         {
@@ -258,67 +291,6 @@ namespace appointza.Controllers
                 item = await organisationlocationService.UpdateLocationMedia(req.item)
             };
             return Ok(result);
-        }
-
-        /// <summary>
-        /// Get location by subdomain (organisation-area-city-state)
-        /// This is used by the public booking page to fetch location details
-        /// No authentication required as it's for public access
-        /// </summary>
-        [HttpPost("LocationBySubdomain")]
-        [AllowAnonymous]
-        public async Task<ActionResult<dynamic>> LocationBySubdomain([FromBody] SubdomainLocationReq req)
-        {
-            try
-            {
-                logger.LogInformation($"🔍 Fetching location by subdomain: {req.organisation}-{req.area}-{req.city}-{req.state}");
-
-                // Use the organisation service to find by subdomain location
-                // This matches the logic in OrganisationSiteController.ResolveTemplateBySubdomain
-                var organisationDetail = await organisationService.GetOrganisationBySubdomainLocation(
-                    req.area,
-                    req.city,
-                    req.state,
-                    req.organisation);
-
-                if (organisationDetail == null || organisationDetail.organisationlocationid <= 0)
-                {
-                    logger.LogWarning($"⚠️ No location found for subdomain: {req.organisation}-{req.area}-{req.city}-{req.state}");
-                    return NotFound(new { error = "Location not found for this subdomain" });
-                }
-
-                // Now fetch the full location details
-                var locationReq = new OrganisationLocationSelectReq
-                {
-                    organisationlocationid = organisationDetail.organisationlocationid
-                };
-
-                var locations = await organisationlocationService.Select(locationReq);
-
-                if (locations == null || locations.Count == 0)
-                {
-                    logger.LogWarning($"⚠️ Location details not found for ID: {organisationDetail.organisationlocationid}");
-                    return NotFound(new { error = "Location details not found" });
-                }
-
-                var location = locations[0];
-                logger.LogInformation($"✅ Found location: {location.name} (ID: {location.id})");
-
-                return Ok(new
-                {
-                    id = location.id,
-                    organisationlocationid = location.id,
-                    name = location.name,
-                    city = location.city,
-                    state = location.state,
-                    templateid = location.templateid
-                });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error fetching location by subdomain");
-                return BadRequest(new { error = $"Error: {ex.Message}" });
-            }
         }
 
     }

@@ -18,8 +18,10 @@ import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue
 import { OrgLocationReq, OrgLocationStaffResponse, Service, Timing } from "@/models/organisationlocation.model";
 import { REFERENCETYPE } from "@/models/users.model";
 import { DayOfWeekUtil } from "@/utils/dayofweek.util";
-import { generateSubdomainSlug } from "@/utils/slug.util";
-import { encodeForUrl } from "@/utils/urlencoding.util";
+import {
+  buildOrganisationCustomUrlHost,
+  buildOrganisationPublicSiteOriginFromHost,
+} from "@/utils/orgPublicSiteUrl.util";
 
 const BookAppointment = () => {
   const { isAuthenticated } = useAuth();
@@ -47,30 +49,14 @@ const BookAppointment = () => {
   const [selectedOrganisationId, setSelectedOrganisationId] = useState<number | null>(null);
   const [selectedOrganisationLocationId, setSelectedOrganisationLocationId] = useState<number | null>(null);
 
-  // Generate slug URL from organization details (for display)
-  const generateSlugUrl = (org: OrganisationDetail): string => {
-    return generateSubdomainSlug(
-      org.organisationname || 'organization',
-      '', // no area for this page
-      org.organisationlocationcity || 'city',
-      org.organisationlocationstate || 'state'
-    );
-  };
-
-  // Get full URL for organization (properly encoded for href)
   const getOrganizationUrl = (org: OrganisationDetail): string => {
-    const slug = generateSlugUrl(org);
-    
-    // ✅ Percent-encode to ensure no raw spaces in URL
-    // Process: Character → Number → Hex → Attach %
-    const encodedSlug = encodeURIComponent(slug);
-    
-    return `${window.location.origin}/${encodedSlug}`;
+    const host = buildOrganisationCustomUrlHost({ customUrl: org.organisationlocationcustomurl });
+    if (!host) return "";
+    return buildOrganisationPublicSiteOriginFromHost(host);
   };
 
-  // Get display URL (clean, without encoding artifacts)
   const getDisplayUrl = (org: OrganisationDetail): string => {
-    return generateSlugUrl(org);
+    return buildOrganisationCustomUrlHost({ customUrl: org.organisationlocationcustomurl });
   };
 
   // Load initial data

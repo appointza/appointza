@@ -4,7 +4,13 @@ export function normalizeApiBaseUrl(url: string): string {
   return trimmed.endsWith("/api") ? trimmed : `${trimmed}/api`;
 }
 
-/** API base URL for Campusza UI → appointza server. */
+/**
+ * API base URL resolution order:
+ * 1. VITE_API_URL
+ * 2. window.APP_CONFIG.baseurl from public/config.js (config.dev.js or config.prod.js)
+ * 3. Dev fallback: local API
+ * 4. Prod fallback: same-origin /api
+ */
 export function getApiBaseUrl(): string {
   const fromEnv = import.meta.env.VITE_API_URL as string | undefined;
   if (fromEnv?.trim()) {
@@ -17,9 +23,8 @@ export function getApiBaseUrl(): string {
     return normalizeApiBaseUrl(runtimeBaseUrl.trim());
   }
 
-  // Dev: UI on :8087, server on :7117
   if (import.meta.env.DEV) {
-    return "https://localhost:7117/api";
+    return normalizeApiBaseUrl("http://localhost:5000");
   }
 
   return "/api";

@@ -7,10 +7,12 @@ namespace appointza.Services
     public class CreditWalletService
     {
         readonly IDbProvider dbprovider;
+        readonly SubscriptionPlanService subscriptionPlanService;
 
-        public CreditWalletService(IDbProvider dbprovider)
+        public CreditWalletService(IDbProvider dbprovider, SubscriptionPlanService subscriptionPlanService)
         {
             this.dbprovider = dbprovider;
+            this.subscriptionPlanService = subscriptionPlanService;
         }
 
         public async Task EnsureSchemaTransaction(IDb db)
@@ -99,11 +101,12 @@ namespace appointza.Services
 
             if (wallet != null)
             {
-                await PersistFreeMonthResetIfNeededTransaction(db, wallet);
+                await EnsureSignupGrantIfNeededTransaction(db, wallet);
                 return wallet;
             }
 
             var now = DateTime.UtcNow;
+            var signupCredits = CreditWalletCatalog.SignupFreeCredits;
             const string insert = @"
                 INSERT INTO organisation_credit_wallet (
                     organisation_id, billing_mode, wallet_credit_balance,
@@ -111,7 +114,7 @@ namespace appointza.Services
                     created_at, updated_at
                 )
                 VALUES (
-                    @organisation_id, @billing_mode, 0, 0, @wallet_free_month_key, 1,
+                    @organisation_id, @billing_mode, @wallet_credit_balance, 0, '', 1,
                     @created_at, @updated_at
                 )
                 RETURNING organisation_id, billing_mode, wallet_credit_balance,
@@ -121,22 +124,28 @@ namespace appointza.Services
             DbCommand insertCmd = db.GetCommand(insert);
             db.AddParameter(insertCmd, "organisation_id", DbTypes.Types.Long).Value = organisationId;
             db.AddParameter(insertCmd, "billing_mode", DbTypes.Types.String).Value = BillingModeCodes.CreditWallet;
-            db.AddParameter(insertCmd, "wallet_free_month_key", DbTypes.Types.String).Value =
-                CreditWalletCatalog.CurrentMonthKeyUtc();
+            db.AddParameter(insertCmd, "wallet_credit_balance", DbTypes.Types.Integer).Value = signupCredits;
             db.AddParameter(insertCmd, "created_at", DbTypes.Types.DateTime).Value = now;
             db.AddParameter(insertCmd, "updated_at", DbTypes.Types.DateTime).Value = now;
 
             using DbDataReader inserted = await db.Execute(insertCmd);
             if (await inserted.ReadAsync())
             {
-                return MapWallet(inserted);
+                wallet = MapWallet(inserted);
+                await InsertTransactionTransaction(
+                    db,
+                    organisationId,
+                    "wallet_signup_grant",
+                    signupCredits,
+                    $"Signup bonus — {signupCredits} free booking credits");
+                return wallet;
             }
 
             return new OrganisationCreditWallet
             {
                 organisation_id = organisationId,
-                billing_mode = BillingModeCodes.Subscription,
-                wallet_free_month_key = CreditWalletCatalog.CurrentMonthKeyUtc(),
+                billing_mode = BillingModeCodes.CreditWallet,
+                wallet_credit_balance = signupCredits,
                 created_at = now,
                 updated_at = now,
             };
@@ -158,69 +167,22 @@ namespace appointza.Services
 
             var wallet = await GetOrCreateTransaction(db, organisationId);
             var transactions = await SelectRecentTransactionsTransaction(db, organisationId, 12);
-            var claimedThisMonth = await HasClaimedMonthlyGrantTransaction(db, organisationId);
+            var packs = await subscriptionPlanService.SelectCreditWalletPacksTransaction(db);
+            var freePlan = await subscriptionPlanService.GetByCodeTransaction(db, SubscriptionPlanCodes.Free);
+            var signupCredits = freePlan?.free_bookings_per_month > 0
+                ? freePlan.free_bookings_per_month
+                : CreditWalletCatalog.SignupFreeCredits;
 
             return new CreditWalletStatusRes
             {
                 organisation_id = organisationId,
                 billing_mode = wallet.billing_mode,
                 wallet_credit_balance = wallet.wallet_credit_balance,
-                wallet_free_bookings_used_this_month = wallet.wallet_free_used_month,
-                wallet_free_bookings_remaining = claimedThisMonth ? 0 : CreditWalletCatalog.FreeBookingsPerMonth,
-                wallet_free_bookings_per_month = CreditWalletCatalog.FreeBookingsPerMonth,
-                monthly_free_credits_amount = CreditWalletCatalog.FreeBookingsPerMonth,
-                monthly_free_credits_claimed = claimedThisMonth,
-                can_claim_monthly_free_credits = !claimedThisMonth,
+                signup_free_credits = signupCredits,
                 credits_per_booking = wallet.credits_per_booking,
-                packs = CreditWalletCatalog.Packs.ToList(),
+                packs = packs,
                 recent_transactions = transactions,
             };
-        }
-
-        public async Task<CreditWalletStatusRes> ClaimMonthlyFreeCredits(long organisationId)
-        {
-            using IDb db = await dbprovider.GetDb();
-            await db.Connect();
-            return await ClaimMonthlyFreeCreditsTransaction(db, organisationId);
-        }
-
-        public async Task<CreditWalletStatusRes> ClaimMonthlyFreeCreditsTransaction(IDb db, long organisationId)
-        {
-            if (organisationId <= 0)
-            {
-                throw new ArgumentException("organisation_id is required", nameof(organisationId));
-            }
-
-            if (await HasClaimedMonthlyGrantTransaction(db, organisationId))
-            {
-                throw new InvalidOperationException(
-                    $"You have already claimed your {CreditWalletCatalog.FreeBookingsPerMonth} free credits this month. Come back next month.");
-            }
-
-            await GetOrCreateTransaction(db, organisationId);
-            var credits = CreditWalletCatalog.FreeBookingsPerMonth;
-            var now = DateTime.UtcNow;
-
-            const string update = @"
-                UPDATE organisation_credit_wallet
-                SET wallet_credit_balance = wallet_credit_balance + @credits,
-                    updated_at = @updated_at
-                WHERE organisation_id = @organisation_id";
-
-            DbCommand command = db.GetCommand(update);
-            db.AddParameter(command, "credits", DbTypes.Types.Integer).Value = credits;
-            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
-            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = organisationId;
-            await db.ExecuteNonQuery(command);
-
-            await InsertTransactionTransaction(
-                db,
-                organisationId,
-                "wallet_monthly_grant",
-                credits,
-                $"Monthly free credits — {credits} booking credits ({CreditWalletCatalog.CurrentMonthKeyUtc()})");
-
-            return await GetStatusTransaction(db, organisationId);
         }
 
         public async Task<CreditWalletStatusRes> SetBillingMode(long organisationId, string mode)
@@ -272,6 +234,40 @@ namespace appointza.Services
                 "Direct wallet recharge is disabled. Create a Razorpay order via CreateWalletRechargeOrder and verify payment.");
         }
 
+        public async Task GrantReferralBonusTransaction(
+            IDb db,
+            long referrerOrganisationId,
+            long referredOrganisationId,
+            int credits)
+        {
+            if (referrerOrganisationId <= 0 || credits <= 0)
+            {
+                return;
+            }
+
+            await GetOrCreateTransaction(db, referrerOrganisationId);
+
+            var now = DateTime.UtcNow;
+            const string update = @"
+                UPDATE organisation_credit_wallet
+                SET wallet_credit_balance = wallet_credit_balance + @credits,
+                    updated_at = @updated_at
+                WHERE organisation_id = @organisation_id";
+
+            DbCommand command = db.GetCommand(update);
+            db.AddParameter(command, "credits", DbTypes.Types.Integer).Value = credits;
+            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
+            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = referrerOrganisationId;
+            await db.ExecuteNonQuery(command);
+
+            await InsertTransactionTransaction(
+                db,
+                referrerOrganisationId,
+                "wallet_referral_bonus",
+                credits,
+                $"Referral reward — {credits} free booking credits (org #{referredOrganisationId} signed up)");
+        }
+
         public async Task<CreditWalletStatusRes> ApplyRechargeAfterPaymentTransaction(
             IDb db,
             long organisationId,
@@ -281,7 +277,8 @@ namespace appointza.Services
         {
             await GetOrCreateTransaction(db, organisationId);
 
-            var pack = CreditWalletCatalog.GetPack(packId);
+            var pack = await subscriptionPlanService.GetCreditWalletPackByCodeTransaction(db, packId)
+                ?? throw new ArgumentException("Unknown credit pack.");
             if (pack.credits != credits)
             {
                 credits = pack.credits;
@@ -332,7 +329,6 @@ namespace appointza.Services
             }
 
             var wallet = await GetOrCreateTransaction(db, organisationId);
-            CreditWalletCatalog.EnsureFreeMonthReset(wallet);
             var cost = Math.Max(1, wallet.credits_per_booking);
             var bookingRef = appointmentId.HasValue && appointmentId.Value > 0
                 ? $"appointment #{appointmentId}"
@@ -374,56 +370,57 @@ namespace appointza.Services
             }
 
             throw new InvalidOperationException(
-                "Insufficient booking credits. Claim your monthly free credits, recharge your wallet, or wait until next month.");
+                "Insufficient booking credits. Recharge your wallet to continue taking bookings.");
         }
 
-        static DateTime CurrentMonthStartUtc()
+        async Task EnsureSignupGrantIfNeededTransaction(IDb db, OrganisationCreditWallet wallet)
         {
+            if (await HasSignupGrantTransaction(db, wallet.organisation_id))
+            {
+                return;
+            }
+
+            var credits = CreditWalletCatalog.SignupFreeCredits;
             var now = DateTime.UtcNow;
-            return new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+            const string update = @"
+                UPDATE organisation_credit_wallet
+                SET wallet_credit_balance = wallet_credit_balance + @credits,
+                    billing_mode = @billing_mode,
+                    updated_at = @updated_at
+                WHERE organisation_id = @organisation_id";
+
+            DbCommand command = db.GetCommand(update);
+            db.AddParameter(command, "credits", DbTypes.Types.Integer).Value = credits;
+            db.AddParameter(command, "billing_mode", DbTypes.Types.String).Value = BillingModeCodes.CreditWallet;
+            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
+            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = wallet.organisation_id;
+            await db.ExecuteNonQuery(command);
+
+            await InsertTransactionTransaction(
+                db,
+                wallet.organisation_id,
+                "wallet_signup_grant",
+                credits,
+                $"Signup bonus — {credits} free booking credits");
+
+            wallet.wallet_credit_balance += credits;
+            wallet.billing_mode = BillingModeCodes.CreditWallet;
+            wallet.updated_at = now;
         }
 
-        async Task<bool> HasClaimedMonthlyGrantTransaction(IDb db, long organisationId)
+        async Task<bool> HasSignupGrantTransaction(IDb db, long organisationId)
         {
             const string query = @"
                 SELECT 1
                 FROM credit_wallet_transactions
                 WHERE organisation_id = @organisation_id
-                  AND type = 'wallet_monthly_grant'
-                  AND created_at >= @month_start
+                  AND type = 'wallet_signup_grant'
                 LIMIT 1";
 
             DbCommand command = db.GetCommand(query);
             db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = organisationId;
-            db.AddParameter(command, "month_start", DbTypes.Types.DateTime).Value = CurrentMonthStartUtc();
             using DbDataReader reader = await db.Execute(command);
             return await reader.ReadAsync();
-        }
-
-        async Task PersistFreeMonthResetIfNeededTransaction(IDb db, OrganisationCreditWallet wallet)
-        {
-            var monthKey = CreditWalletCatalog.CurrentMonthKeyUtc();
-            if (wallet.wallet_free_month_key == monthKey)
-            {
-                return;
-            }
-
-            var now = DateTime.UtcNow;
-            const string update = @"
-                UPDATE organisation_credit_wallet
-                SET wallet_free_used_month = 0,
-                    wallet_free_month_key = @wallet_free_month_key,
-                    updated_at = @updated_at
-                WHERE organisation_id = @organisation_id";
-
-            DbCommand command = db.GetCommand(update);
-            db.AddParameter(command, "wallet_free_month_key", DbTypes.Types.String).Value = monthKey;
-            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
-            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = wallet.organisation_id;
-            await db.ExecuteNonQuery(command);
-
-            wallet.wallet_free_month_key = monthKey;
-            wallet.wallet_free_used_month = 0;
         }
 
         async Task<bool> BookingCreditAlreadyChargedTransaction(
@@ -478,9 +475,6 @@ namespace appointza.Services
             var walletStatus = await GetStatusTransaction(db, organisationId);
             status.billing_mode = walletStatus.billing_mode;
             status.wallet_credit_balance = walletStatus.wallet_credit_balance;
-            status.wallet_free_bookings_used_this_month = walletStatus.wallet_free_bookings_used_this_month;
-            status.wallet_free_bookings_remaining = walletStatus.wallet_free_bookings_remaining;
-            status.wallet_free_bookings_per_month = walletStatus.wallet_free_bookings_per_month;
             status.credits_per_booking = walletStatus.credits_per_booking;
         }
 

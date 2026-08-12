@@ -298,6 +298,10 @@ namespace appointza.Utils
                         pgParameter = new NpgsqlParameter(parameterName, NpgsqlTypes.NpgsqlDbType.Double);
                         position = command.Parameters.Add(pgParameter);
                         break;
+                    case DbTypes.Types.Uuid:
+                        pgParameter = new NpgsqlParameter(parameterName, NpgsqlTypes.NpgsqlDbType.Uuid);
+                        position = command.Parameters.Add(pgParameter);
+                        break;
                     case DbTypes.Types.ByteArray:
                         pgParameter = new NpgsqlParameter(parameterName, NpgsqlTypes.NpgsqlDbType.Bytea);
                         position = command.Parameters.Add(pgParameter);

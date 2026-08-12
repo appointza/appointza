@@ -124,8 +124,8 @@ export default function TemplateVariablesCopyDialog({
             AI prompts — HTML & Blocks
           </DialogTitle>
           <DialogDescription className="text-sm leading-relaxed sm:text-base">
-            For {businessContext.organisationName || "your business"} — pick a mode, copy the prompt,
-            then paste the AI result into the editor.
+            For {businessContext.organisationName || "your business"} — pick HTML (full page) or Blocks (JSON).
+            Hospitality sites: use Rooms, Packages, Policies, Food menu & Nearby blocks/variables.
           </DialogDescription>
         </DialogHeader>
 

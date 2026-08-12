@@ -7,6 +7,14 @@ import {
 } from "@/utils/templateBookingNav.util";
 import { getServiceStartingPrice } from "@/utils/servicePricing.util";
 import { toDateOnlyString } from "@/utils/eventDate.util";
+import {
+  buildHospitalityPolicyTokens,
+  buildTemplateFoodMenu,
+  buildTemplateNearbyPlaces,
+  buildTemplatePackages,
+  buildTemplateRooms,
+  extractHospitalityFromSite,
+} from "@/utils/hospitalityTemplate.util";
 
 const replaceToken = (html: string, token: string, value: string | number | null | undefined) => {
   const safeValue = value === null || value === undefined ? "" : String(value);
@@ -339,6 +347,122 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
     }
   );
 
+  const locationId = siteData.locationdetail?.id || 0;
+  const { profile: hospitalityProfile, rooms: hospitalityRooms } = extractHospitalityFromSite(siteData);
+  const policyTokens = buildHospitalityPolicyTokens(hospitalityProfile);
+  const templateRooms = buildTemplateRooms(
+    hospitalityRooms,
+    organisationId,
+    locationId,
+    filesApiBaseUrl,
+    fallbackImageUrl,
+  );
+  const templatePackages = buildTemplatePackages(
+    hospitalityProfile?.packages ?? [],
+    organisationId,
+    locationId,
+    filesApiBaseUrl,
+  );
+  const templateFoodMenu = buildTemplateFoodMenu(hospitalityProfile?.food_menu ?? []);
+  const templateNearby = buildTemplateNearbyPlaces(hospitalityProfile?.nearby_places ?? []);
+
+  html = replaceToken(html, "hospitality.cancellation_policy", policyTokens.cancellation_policy);
+  html = replaceToken(html, "hospitality.payment_policy", policyTokens.payment_policy);
+  html = replaceToken(html, "hospitality.check_in_time", policyTokens.check_in_time);
+  html = replaceToken(html, "hospitality.check_out_time", policyTokens.check_out_time);
+  html = replaceToken(html, "organisation.cancellation_policy", policyTokens.cancellation_policy);
+  html = replaceToken(html, "organisation.payment_policy", policyTokens.payment_policy);
+  html = replaceToken(html, "organisation.check_in_time", policyTokens.check_in_time);
+  html = replaceToken(html, "organisation.check_out_time", policyTokens.check_out_time);
+
+  html = applyConditionalSection(html, "{{#hasrooms}}", "{{/hasrooms}}", templateRooms.length > 0);
+  html = applyConditionalSection(html, "{{#haspackages}}", "{{/haspackages}}", templatePackages.length > 0);
+  html = applyConditionalSection(html, "{{#hasfoodmenu}}", "{{/hasfoodmenu}}", templateFoodMenu.length > 0);
+  html = applyConditionalSection(
+    html,
+    "{{#hasnearby}}",
+    "{{/hasnearby}}",
+    templateNearby.length > 0,
+  );
+
+  html = applyLoopSection(html, "{{#rooms}}", "{{/rooms}}", templateRooms, (loopTemplate, room) => {
+    let roomHtml = loopTemplate
+      .replaceAll("{{room.id}}", room.id)
+      .replaceAll("{{room.room_number}}", room.room_number)
+      .replaceAll("{{room.room_name}}", room.room_name)
+      .replaceAll("{{room.name}}", room.name)
+      .replaceAll("{{room.type}}", room.type)
+      .replaceAll("{{room.capacity}}", String(room.capacity))
+      .replaceAll("{{room.price}}", String(room.price))
+      .replaceAll("{{room.main_photo}}", room.main_photo)
+      .replaceAll("{{room.video_url}}", room.video_url)
+      .replaceAll("{{room.status}}", room.status)
+      .replaceAll("{{room.status_label}}", room.status_label)
+      .replaceAll("{{ROOM_BOOK_URL}}", `${getUiBaseUrl()}${room.ROOM_BOOK_URL}`);
+
+    roomHtml = applyConditionalSection(
+      roomHtml,
+      "{{#if_room_available}}",
+      "{{/if_room_available}}",
+      room.is_available,
+    );
+    roomHtml = applyConditionalSection(
+      roomHtml,
+      "{{#if_room_unavailable}}",
+      "{{/if_room_unavailable}}",
+      !room.is_available,
+    );
+    return roomHtml;
+  });
+
+  html = applyLoopSection(
+    html,
+    "{{#packages}}",
+    "{{/packages}}",
+    templatePackages,
+    (loopTemplate, pkg) =>
+      loopTemplate
+        .replaceAll("{{package.id}}", pkg.id)
+        .replaceAll("{{package.name}}", pkg.name)
+        .replaceAll("{{package.price}}", pkg.price)
+        .replaceAll("{{package.description}}", pkg.description)
+        .replaceAll("{{package.badge}}", pkg.badge)
+        .replaceAll("{{package.image_url}}", pkg.image_url)
+        .replaceAll("{{package.minimum_nights}}", String(pkg.minimum_nights))
+        .replaceAll("{{package.max_guests}}", String(pkg.max_guests))
+        .replaceAll("{{package.room_type}}", pkg.room_type)
+        .replaceAll("{{package.includes}}", pkg.includes)
+        .replaceAll("{{PACKAGE_BOOK_URL}}", `${getUiBaseUrl()}${pkg.PACKAGE_BOOK_URL}`),
+  );
+
+  html = applyLoopSection(
+    html,
+    "{{#food_menu}}",
+    "{{/food_menu}}",
+    templateFoodMenu,
+    (loopTemplate, item) =>
+      loopTemplate
+        .replaceAll("{{food.meal}}", item.meal)
+        .replaceAll("{{food.title}}", item.title)
+        .replaceAll("{{food.description}}", item.description)
+        .replaceAll("{{food.cuisines}}", item.cuisines),
+  );
+
+  html = applyLoopSection(
+    html,
+    "{{#nearby_places}}",
+    "{{/nearby_places}}",
+    templateNearby,
+    (loopTemplate, place) =>
+      loopTemplate
+        .replaceAll("{{place.name}}", place.name)
+        .replaceAll("{{place.distance}}", place.distance)
+        .replaceAll("{{place.travel_time}}", place.travel_time)
+        .replaceAll("{{place.icon}}", place.icon)
+        .replaceAll("{{place.image_url}}", place.image_url)
+        .replaceAll("{{place.map_url}}", place.map_url),
+  );
+
   // Remove any unhandled handlebars tags to avoid showing raw placeholders to users.
   html = html.replace(/\{\{#[^}]+\}\}/g, "");
   html = html.replace(/\{\{\/[^}]+\}\}/g, "");
@@ -351,6 +475,10 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   );
   html = html.replace(
     /href=(["'])https?:\/\/[^"']*(\/user\/events\/\d+\/book)\1/gi,
+    'href=$1$2$1',
+  );
+  html = html.replace(
+    /href=(["'])https?:\/\/[^"']*(\/book\?[^"']*)\1/gi,
     'href=$1$2$1',
   );
 

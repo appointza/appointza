@@ -237,6 +237,122 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
     </div>
   </div>
 </section>`;
+    case "appointza-rooms":
+      return `
+<section id="rooms" class="appointza-rooms-section az-a-rooms az-a-rooms-${v}">
+  <div class="appointza-rooms-container">
+    <h2>Our rooms</h2>
+    <p class="appointza-section-sub">Choose from our carefully appointed accommodations</p>
+    <div class="appointza-rooms-grid">
+      {{#rooms}}
+      <article class="appointza-room-card">
+        <div class="appointza-room-media">
+          <img src="{{room.main_photo}}" alt="{{room.name}}" loading="lazy" />
+        </div>
+        <div class="appointza-room-body">
+          <h3>{{room.name}}</h3>
+          <p class="appointza-room-meta">{{room.type}} · {{room.capacity}} guests</p>
+          <p class="appointza-room-price">From ₹{{room.price}} <span>/ night</span></p>
+          <div class="appointza-room-footer">
+            {{#if_room_available}}
+            <a href="{{ROOM_BOOK_URL}}" class="appointza-room-button">Book this room</a>
+            {{/if_room_available}}
+            {{#if_room_unavailable}}
+            <span class="appointza-room-status">{{room.status_label}}</span>
+            {{/if_room_unavailable}}
+          </div>
+        </div>
+      </article>
+      {{/rooms}}
+    </div>
+  </div>
+</section>`;
+    case "appointza-hospitality-policies":
+      return `
+<section id="policies" class="appointza-policies-section az-a-policies az-a-policies-${v}">
+  <div class="appointza-policies-container">
+    <h2>Policies</h2>
+    <div class="appointza-policies-grid">
+      <div class="appointza-policy-box">
+        <h3>Check-in &amp; check-out</h3>
+        <p>Check-in from {{hospitality.check_in_time}} · Check-out by {{hospitality.check_out_time}}</p>
+      </div>
+      <div class="appointza-policy-box">
+        <h3>Cancellation</h3>
+        <p>{{hospitality.cancellation_policy}}</p>
+      </div>
+      <div class="appointza-policy-box">
+        <h3>Payment</h3>
+        <p>{{hospitality.payment_policy}}</p>
+      </div>
+    </div>
+  </div>
+</section>`;
+    case "appointza-hospitality-packages":
+      return `
+<section id="packages" class="appointza-packages-section az-a-pkg az-a-pkg-${v}">
+  <div class="appointza-packages-container">
+    <h2>Packages</h2>
+    <p class="appointza-section-sub">Curated experiences for every occasion</p>
+    <div class="appointza-packages-grid">
+      {{#packages}}
+      <article class="appointza-package-card">
+        <div class="appointza-package-media">
+          <img src="{{package.image_url}}" alt="{{package.name}}" loading="lazy" />
+        </div>
+        <div class="appointza-package-body">
+          <span class="appointza-package-badge">{{package.badge}}</span>
+          <h3>{{package.name}}</h3>
+          <p class="appointza-package-price">{{package.price}}</p>
+          <p class="appointza-package-desc">{{package.description}}</p>
+          <p class="appointza-package-meta">{{package.minimum_nights}} nights min · Up to {{package.max_guests}} guests</p>
+          <p class="appointza-package-includes">{{package.includes}}</p>
+          <a href="{{PACKAGE_BOOK_URL}}" class="appointza-package-button">Book package</a>
+        </div>
+      </article>
+      {{/packages}}
+    </div>
+  </div>
+</section>`;
+    case "appointza-food-menu":
+      return `
+<section id="food-menu" class="appointza-food-section az-a-food az-a-food-${v}">
+  <div class="appointza-food-container">
+    <h2>Food &amp; dining</h2>
+    <div class="appointza-food-grid">
+      {{#food_menu}}
+      <article class="appointza-food-card">
+        <span class="appointza-food-meal">{{food.meal}}</span>
+        <h3>{{food.title}}</h3>
+        <p>{{food.description}}</p>
+        <p class="appointza-food-cuisines">{{food.cuisines}}</p>
+      </article>
+      {{/food_menu}}
+    </div>
+  </div>
+</section>`;
+    case "appointza-nearby-places":
+      return `
+<section id="nearby" class="appointza-nearby-section az-a-nearby az-a-nearby-${v}">
+  <div class="appointza-nearby-container">
+    <h2>Nearby places</h2>
+    <p class="appointza-section-sub">Explore the surroundings</p>
+    <div class="appointza-nearby-grid">
+      {{#nearby_places}}
+      <article class="appointza-nearby-card">
+        <div class="appointza-nearby-media">
+          <img src="{{place.image_url}}" alt="{{place.name}}" loading="lazy" />
+        </div>
+        <div class="appointza-nearby-body">
+          <span class="appointza-nearby-icon">{{place.icon}}</span>
+          <h3>{{place.name}}</h3>
+          <p class="appointza-nearby-meta">{{place.distance}} · {{place.travel_time}}</p>
+        </div>
+      </article>
+      {{/nearby_places}}
+    </div>
+  </div>
+</section>`;
     default:
       return "";
   }
@@ -772,7 +888,12 @@ footer.az-has-block-bg > :not(.az-block-bg-overlay) { position: relative; z-inde
 .appointza-events-section h2,
 .appointza-reviews-section h2,
 .appointza-facilities-section h2,
-.appointza-location-images-section h2 { text-align: center; margin: 0 0 1.25rem; }
+.appointza-location-images-section h2,
+.appointza-rooms-section h2,
+.appointza-policies-section h2,
+.appointza-packages-section h2,
+.appointza-food-section h2,
+.appointza-nearby-section h2 { text-align: center; margin: 0 0 1.25rem; }
 .appointza-org-section h1 { font-size: clamp(2rem, 4.5vw, 3rem); }
 .appointza-location-section h2,
 .appointza-services-section h2,
@@ -780,7 +901,45 @@ footer.az-has-block-bg > :not(.az-block-bg-overlay) { position: relative; z-inde
 .appointza-events-section h2,
 .appointza-reviews-section h2,
 .appointza-facilities-section h2,
-.appointza-location-images-section h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); }
+.appointza-location-images-section h2,
+.appointza-rooms-section h2,
+.appointza-policies-section h2,
+.appointza-packages-section h2,
+.appointza-food-section h2,
+.appointza-nearby-section h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); }
+
+.appointza-section-sub { text-align: center; color: var(--az-muted); margin: -0.5rem auto 1.5rem; max-width: 40rem; }
+.appointza-rooms-grid,
+.appointza-packages-grid,
+.appointza-food-grid,
+.appointza-nearby-grid { display: grid; gap: 1.25rem; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.appointza-room-card,
+.appointza-package-card,
+.appointza-food-card,
+.appointza-nearby-card,
+.appointza-policy-box { border: 1px solid rgba(0,0,0,0.08); border-radius: 1rem; overflow: hidden; background: #fff; }
+.appointza-room-media img,
+.appointza-package-media img,
+.appointza-nearby-media img { width: 100%; height: 180px; object-fit: cover; display: block; background: #f1f5f9; }
+.appointza-room-body,
+.appointza-package-body,
+.appointza-food-card,
+.appointza-nearby-body { padding: 1rem 1.1rem 1.15rem; }
+.appointza-room-meta,
+.appointza-package-meta,
+.appointza-nearby-meta,
+.appointza-food-cuisines { color: var(--az-muted); font-size: 0.9rem; }
+.appointza-room-price,
+.appointza-package-price { font-weight: 700; margin: 0.35rem 0; }
+.appointza-room-button,
+.appointza-package-button { display: inline-block; margin-top: 0.75rem; padding: 0.55rem 1rem; border-radius: 999px; background: var(--az-primary); color: #fff; text-decoration: none; font-weight: 600; font-size: 0.9rem; }
+.appointza-room-status { display: inline-block; margin-top: 0.75rem; padding: 0.35rem 0.75rem; border-radius: 999px; background: #fef3c7; color: #92400e; font-size: 0.85rem; }
+.appointza-policies-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.appointza-policy-box { padding: 1.1rem 1.25rem; }
+.appointza-policy-box h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.appointza-food-meal,
+.appointza-package-badge,
+.appointza-nearby-icon { display: inline-block; font-size: 0.8rem; font-weight: 600; color: var(--az-primary); margin-bottom: 0.35rem; }
 
 .az-section-muted { background: linear-gradient(to bottom, rgba(220, 14%, 96%, 0.35), rgba(220, 14%, 96%, 0.15), rgba(220, 14%, 96%, 0.35)); }
 .az-v2 { background: #f8fafc; }

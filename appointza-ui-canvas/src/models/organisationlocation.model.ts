@@ -29,6 +29,7 @@ export class OrganisationLocation {
   googlelocation?: string = '';
   geolocation_url?: string = '';
   customurl?: string = '';
+  orgloctempid?: string = '';
   templateid?: number = 0;
   isverified?: boolean = false;
   isPaymentRequired?: boolean = false;
@@ -40,6 +41,7 @@ export class OrganisationLocationSelectReq {
   id: number = 0;
   organisationid: number = 0;
   organisationlocationid: number = 0;
+  orgloctempid: string = '';
 }
 
 export class OrganisationLocationDeleteReq {
@@ -114,6 +116,34 @@ export class AppointmentPaymentsummary {
   paymentsummary: PaymentSummary[] = [];
 }
 
+export class OrganisationDashboardTrendPoint {
+  name: string = '';
+  date: string = '';
+  appointments: number = 0;
+}
+
+export class OrganisationDashboardStatusPoint {
+  name: string = '';
+  value: number = 0;
+}
+
+export class OrganisationDashboardRevenueWeekPoint {
+  name: string = '';
+  revenue: number = 0;
+}
+
+export class OrganisationDashboardStats {
+  totalappointments: number = 0;
+  confirmedcount: number = 0;
+  completedcount: number = 0;
+  pendingcount: number = 0;
+  cancelledcount: number = 0;
+  totalrevenue: number = 0;
+  trend_last_7_days: OrganisationDashboardTrendPoint[] = [];
+  status_breakdown: OrganisationDashboardStatusPoint[] = [];
+  revenue_by_week_this_month: OrganisationDashboardRevenueWeekPoint[] = [];
+}
+
 export class UpdateLocationTemplateIdReq {
   organisationlocationid: number = 0;
   templateid: number = 0;
@@ -124,4 +154,15 @@ export class UpdateLocationMediaReq {
   organisationlocationid: number = 0;
   images: number[] = [];
   video_urls: string[] = [];
+}
+
+export class CustomUrlAvailabilityReq {
+  customurl: string = '';
+  organisationlocationid: number = 0;
+}
+
+export class CustomUrlAvailabilityRes {
+  available: boolean = false;
+  normalized_slug: string = '';
+  message: string = '';
 }

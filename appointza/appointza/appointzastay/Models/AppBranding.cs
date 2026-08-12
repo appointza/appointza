@@ -5,7 +5,7 @@ public static class AppBranding
     public const string Name = "AppointzaStay";
     public const string NameUpper = "APPOINTZASTAY";
     public const string Tagline = "Hospitality reimagined.";
-    public const string CustomDomainSuffix = "appointzastay.com";
+    public const string CustomDomainSuffix = "stay.appointza.com";
     public const string LogoUrl = "/images/appointza-logo.png";
 
     // Luxury Hotel SaaS theme

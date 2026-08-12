@@ -101,6 +101,9 @@ namespace appointza
             services.AddScoped<OrganisationSubscriptionService>();
             services.AddScoped<OrganisationReferralService>();
             services.AddScoped<OrganisationBillingStatsService>();
+            services.AddScoped<OrganisationHospitalityContentService>();
+            services.AddScoped<OrganisationRoomService>();
+            services.AddScoped<GuestHospitalityBookingService>();
             services.AddScoped<BookingFeeService>();
             services.AddScoped<SubscriptionTopUpService>();
             //        services.AddScoped<OrganisationServiceTimingService>();

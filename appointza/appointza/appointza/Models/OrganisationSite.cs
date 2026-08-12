@@ -1,3 +1,4 @@
+using appointza.Models.Hospitality;
 using System.Text.Json.Serialization;
 using System.Text.Json;
 
@@ -29,14 +30,15 @@ namespace appointza.Models
         public List<OrganisationServices> orgnaisatinservice { get; set; } = new List<OrganisationServices>();
         public List<OrganisationServiceTiming> OrganisationServiceTiming { get; set; } = new List<OrganisationServiceTiming>();
         public string template_html { get; set; } = "";
+        public OrganisationHospitalityProfile? hospitality_profile { get; set; }
+        public List<OrganisationRoom> hospitality_rooms { get; set; } = [];
     }
 
     public class OrganisationTemplateResolveReq
     {
-        public string area { get; set; } = "";
-        public string city { get; set; } = "";
-        public string state { get; set; } = "";
-        public string organizationName { get; set; } = "";
+        /// <summary>Stored organisationlocation.customurl slug.</summary>
+        [JsonPropertyName("customUrl")]
+        public string customUrl { get; set; } = "";
     }
 
     public class OrganisationTemplateResolveRes

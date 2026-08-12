@@ -113,26 +113,8 @@ CREATE INDEX IF NOT EXISTS idx_subscription_topups_order ON subscription_topup_p
 COMMENT ON TABLE subscription_topup_payments IS
     'Razorpay payments to settle platform booking-fee overage beyond the free monthly quota';
 
--- Seed plans (idempotent)
--- free_bookings_per_month: included bookings per calendar month before overage fees apply
-INSERT INTO subscription_plans (plan_code, project_name, display_name, monthly_price_inr, booking_fee_inr, booking_fee_percent, trial_days, free_bookings_per_month, sort_order)
-VALUES
-    ('free',       'appointza', 'Free',       0,     10, 3.000, 0,    50,   0),
-    ('starter',    'appointza', 'Starter',    1000,  20, 2.000, 0,    50,   1),
-    ('growth',     'appointza', 'Growth',     3000,  15, 1.500, 0,   200,   2),
-    ('business',   'appointza', 'Business',   5000,  10, 1.000, 0,   500,   3),
-    ('enterprise', 'appointza', 'Enterprise', 10000,  7, 0.700, 0,  1400,   4),
-    ('premium',    'appointza', 'Premium',    20000,  5, 0.500, 0,  4000,   5)
-ON CONFLICT (plan_code) DO UPDATE SET
-    project_name = EXCLUDED.project_name,
-    display_name = EXCLUDED.display_name,
-    monthly_price_inr = EXCLUDED.monthly_price_inr,
-    booking_fee_inr = EXCLUDED.booking_fee_inr,
-    booking_fee_percent = EXCLUDED.booking_fee_percent,
-    trial_days = EXCLUDED.trial_days,
-    free_bookings_per_month = EXCLUDED.free_bookings_per_month,
-    sort_order = EXCLUDED.sort_order,
-    isactive = TRUE;
+-- Plan catalog: manage rows manually in subscription_plans (API reads only; no server-side insert/upsert).
+-- One-time seed (run manually when the table is empty): see subscription_plans_seed.sql
 
 -- Retire legacy tier codes replaced by Growth / Business
 UPDATE subscription_plans SET isactive = FALSE WHERE LOWER(TRIM(plan_code)) IN ('basic', 'pro');

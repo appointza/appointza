@@ -307,32 +307,6 @@ namespace appointza.Controllers
             }
         }
 
-        [HttpPost("ClaimMonthlyFreeCredits")]
-        public async Task<ActionResult<ActionRes<CreditWalletStatusRes>>> ClaimMonthlyFreeCredits(
-            ActionReq<OrganisationSubscriptionSelectReq> req)
-        {
-            try
-            {
-                long orgId = ResolveOrgId(req?.item?.organisation_id ?? 0);
-                if (orgId <= 0)
-                {
-                    return BadRequest(new ActionRes<CreditWalletStatusRes> { error = "organisation_id is required" });
-                }
-
-                var status = await creditWalletService.ClaimMonthlyFreeCredits(orgId);
-                return Ok(new ActionRes<CreditWalletStatusRes> { item = status });
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new ActionRes<CreditWalletStatusRes> { error = ex.Message });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "ClaimMonthlyFreeCredits failed");
-                return StatusCode(500, new ActionRes<CreditWalletStatusRes> { error = ex.Message });
-            }
-        }
-
         [HttpPost("SetBillingMode")]
         public async Task<ActionResult<ActionRes<CreditWalletStatusRes>>> SetBillingMode(
             ActionReq<CreditWalletBillingModeReq> req)

@@ -2,7 +2,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -32,6 +31,7 @@ type OrgTemplateAssetsContextValue = {
   catalogId: number;
   getImageUrl: (id: number) => string;
   refresh: () => Promise<void>;
+  ensureLoaded: () => Promise<void>;
   registerFileIds: (ids: number[], names?: string[]) => Promise<void>;
   uploadFiles: (files: File[]) => Promise<number[]>;
   removeAsset: (id: number) => Promise<void>;
@@ -50,6 +50,7 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
   const [catalogVersion, setCatalogVersion] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
 
   const orgId = user?.organisationid || 0;
 
@@ -106,6 +107,7 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
         setCatalogVersion(0);
         setAssets(createEmptyAssetCatalog().assets);
       }
+      setCatalogLoaded(true);
     } catch {
       toast({ title: "Could not load assets", variant: "destructive" });
     } finally {
@@ -113,12 +115,16 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
     }
   }, [orgId, refService, toast]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const ensureLoaded = useCallback(async () => {
+    if (catalogLoaded || !orgId) return;
+    await refresh();
+  }, [catalogLoaded, orgId, refresh]);
 
   const registerFileIds = useCallback(
     async (ids: number[], names?: string[]) => {
+      if (!catalogLoaded) {
+        await refresh();
+      }
       const now = new Date().toISOString();
       const incoming: OrgTemplateAsset[] = ids
         .map((id, i) => ({
@@ -131,11 +137,14 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
       const merged = mergeAssets(assets, incoming);
       await persistCatalog(merged);
     },
-    [assets, persistCatalog],
+    [assets, catalogLoaded, persistCatalog, refresh],
   );
 
   const uploadFiles = useCallback(
     async (files: File[]) => {
+      if (!catalogLoaded) {
+        await refresh();
+      }
       const ids = await filesService.upload(files);
       if (!ids?.length) throw new Error("Upload failed");
       await registerFileIds(
@@ -144,7 +153,7 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
       );
       return ids;
     },
-    [filesService, registerFileIds],
+    [catalogLoaded, filesService, refresh, registerFileIds],
   );
 
   const removeAsset = useCallback(
@@ -163,6 +172,7 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
       catalogId,
       getImageUrl: (id: number) => filesService.getImageUrl(id),
       refresh,
+      ensureLoaded,
       registerFileIds,
       uploadFiles,
       removeAsset,
@@ -173,6 +183,7 @@ export function OrgTemplateAssetsProvider({ children }: { children: ReactNode })
       filesService,
       isLoading,
       isSaving,
+      ensureLoaded,
       refresh,
       registerFileIds,
       removeAsset,

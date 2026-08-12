@@ -60,6 +60,18 @@ export function buildBookAppointmentPath(
   return base;
 }
 
+export function buildRoomBookPath(
+  organisationId: number,
+  locationId: number,
+  roomCode: string,
+): string {
+  const params = new URLSearchParams();
+  params.set("roomId", roomCode);
+  params.set("organisationId", String(organisationId));
+  params.set("locationId", String(locationId));
+  return `/book?${params.toString()}`;
+}
+
 const MAIN_APP_ORIGIN_RESOLVER = `
 function appointzaResolveMainAppOrigin() {
   try {

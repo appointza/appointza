@@ -79,22 +79,11 @@ export class OrganisationService {
         return resp.item;
     }
 
-    async findOrganisationByLocation(area: string, city: string, state: string) {
-        let postdata: ActionReq<any> = new ActionReq<any>();
-        postdata.item = { area, city, state };
-        console.log('📤 OrganisationService.findOrganisationByLocation sending:', JSON.stringify(postdata, null, 2));
-        let resp = await this.http.post<ActionRes<OrganisationDetail>>(
-            this.baseurl + '/FindOrganisationByLocation',
-            postdata
-        );
-        return resp.item;
-    }
-
-    async getOrganisationBySubdomainLocation(area: string, city: string, state: string, organisation: string) {
-        let postdata = { area, city, state, organisation: organisation };
-        console.log('📤 OrganisationService.getOrganisationBySubdomainLocation sending:', JSON.stringify(postdata, null, 2));
+    async getOrganisationByCustomUrl(customUrl: string) {
+        let postdata = { customUrl };
+        console.log('📤 OrganisationService.getOrganisationByCustomUrl sending:', JSON.stringify(postdata, null, 2));
         let resp = await this.http.post<any>(
-            this.baseurl + '/GetOrganisationBySubdomainLocation',
+            this.baseurl + '/GetOrganisationByCustomUrl',
             postdata
         );
         return resp;

@@ -9,6 +9,7 @@ import {
   Loader2,
   RefreshCw,
   User,
+  BedDouble,
 } from "lucide-react";
 import { Calendar } from "@/components/ui/calendar";
 import { Button } from "@/components/ui/button";
@@ -32,6 +33,11 @@ import {
 import { OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
 import OrganizationPageShell from "@/components/layout/OrganizationPageShell";
 import OrganizationCalendarBoardView from "@/pages/organization/OrganizationCalendarBoardView";
+import OrganizationCalendarRoomsView from "@/pages/organization/OrganizationCalendarRoomsView";
+import { hospitalityService } from "@/services/hospitality.service";
+import { normalizeOrganisationRoom, OrganisationRoom } from "@/models/hospitality.model";
+import type { OrganisationType } from "@/models/organisation.model";
+import { getRoomAvailabilityState } from "@/utils/roomAmenities.util";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import {
@@ -50,6 +56,7 @@ type TimingSlot = AppoinmentFinal & {
 };
 
 type CalendarViewMode = "split" | "board";
+type CalendarKind = "services" | "rooms";
 
 const OrganizationCalendar = () => {
   const { toast } = useToast();
@@ -64,6 +71,10 @@ const OrganizationCalendar = () => {
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>("split");
+  const [calendarKind, setCalendarKind] = useState<CalendarKind>("services");
+  const [organisationType, setOrganisationType] = useState<OrganisationType>("service");
+  const [rooms, setRooms] = useState<OrganisationRoom[]>([]);
+  const [isLoadingRooms, setIsLoadingRooms] = useState(false);
   const [appointments, setAppointments] = useState<BookedAppoinmentRes[]>([]);
   const [timeSlots, setTimeSlots] = useState<TimingSlot[]>([]);
   const [monthOverview, setMonthOverview] = useState<CalendarDayOverview[]>([]);
@@ -75,6 +86,44 @@ const OrganizationCalendar = () => {
   const organisationLocationId = globalLocationId
     ? Number(globalLocationId)
     : user?.locationid || 0;
+
+  const showRoomsCalendar =
+    organisationType === "hospitality" || organisationType === "both";
+
+  const loadOrganisationType = useCallback(async () => {
+    if (!organizationId) return;
+    try {
+      const profile = await hospitalityService.getProfile(organizationId);
+      setOrganisationType(profile.organisation_type ?? "service");
+    } catch {
+      setOrganisationType("service");
+    }
+  }, [organizationId]);
+
+  const fetchRooms = useCallback(async () => {
+    if (!organizationId || !organisationLocationId) {
+      setRooms([]);
+      return;
+    }
+    setIsLoadingRooms(true);
+    try {
+      const items = await hospitalityService.selectRooms({
+        organisation_id: organizationId,
+        organisation_location_id: organisationLocationId,
+      });
+      setRooms(items.map((item) => normalizeOrganisationRoom(item)));
+    } catch (error) {
+      console.error("Error loading rooms for calendar", error);
+      toast({
+        title: "Error",
+        description: "Failed to load rooms",
+        variant: "destructive",
+      });
+      setRooms([]);
+    } finally {
+      setIsLoadingRooms(false);
+    }
+  }, [organizationId, organisationLocationId, toast]);
 
   const initializeLocation = useCallback(async () => {
     if (!isAuthenticated || globalLocationId || !organizationId) return;
@@ -202,12 +251,22 @@ const OrganizationCalendar = () => {
   ]);
 
   useEffect(() => {
+    void loadOrganisationType();
+  }, [loadOrganisationType]);
+
+  useEffect(() => {
     void initializeLocation();
   }, [initializeLocation]);
 
   useEffect(() => {
     void loadLocationLabel();
   }, [loadLocationLabel]);
+
+  useEffect(() => {
+    if (calendarKind === "rooms" && showRoomsCalendar) {
+      void fetchRooms();
+    }
+  }, [calendarKind, showRoomsCalendar, fetchRooms]);
 
   useEffect(() => {
     void fetchAppointments();
@@ -224,6 +283,13 @@ const OrganizationCalendar = () => {
       void fetchMonthOverview();
     }
   }, [viewMode, fetchMonthOverview, organisationLocationId]);
+
+  const handleCalendarKindChange = (kind: CalendarKind) => {
+    setCalendarKind(kind);
+    if (kind === "rooms") {
+      setViewMode("split");
+    }
+  };
 
   const handleViewModeChange = (mode: CalendarViewMode) => {
     setViewMode(mode);
@@ -285,7 +351,41 @@ const OrganizationCalendar = () => {
     [timeSlots],
   );
 
+  const roomOccupancyByDay = useMemo(() => {
+    const counts = new Map<string, number>();
+    if (!rooms.length) return counts;
+
+    const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
+    const monthEnd = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0);
+
+    for (let d = new Date(monthStart); d <= monthEnd; d.setDate(d.getDate() + 1)) {
+      const date = new Date(d);
+      const key = toDateKey(date);
+      const busy = rooms.filter((room) => {
+        const state = getRoomAvailabilityState(room, date);
+        return state !== "Available";
+      }).length;
+      if (busy > 0) counts.set(key, busy);
+    }
+    return counts;
+  }, [rooms, calendarMonth]);
+
+  const selectedDayRoomStats = useMemo(() => {
+    let available = 0;
+    let occupied = 0;
+    for (const room of rooms) {
+      const state = getRoomAvailabilityState(room, selectedDate);
+      if (state === "Available") available += 1;
+      else occupied += 1;
+    }
+    return { available, occupied };
+  }, [rooms, selectedDate]);
+
   const refreshAll = () => {
+    if (calendarKind === "rooms") {
+      void fetchRooms();
+      return;
+    }
     void fetchAppointments();
     if (viewMode === "split") {
       void fetchSlotsForDate(selectedDate);
@@ -295,17 +395,50 @@ const OrganizationCalendar = () => {
   };
 
   const isRefreshing =
-    isLoadingAppointments ||
-    (viewMode === "split" ? isLoadingSlots : isLoadingOverview);
+    calendarKind === "rooms" ?
+      isLoadingRooms
+    : isLoadingAppointments ||
+      (viewMode === "split" ? isLoadingSlots : isLoadingOverview);
 
   return (
     <OrganizationPageShell
       className="min-w-0"
       title="Calendar"
-      description="See bookings by date and which time slots are available or fully booked."
+      description={
+        calendarKind === "rooms" ?
+          "See room availability by date for the selected business location."
+        : "See bookings by date and which time slots are available or fully booked."
+      }
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <div className={cn(org.segmentGroup, "shrink-0")}>
+          {showRoomsCalendar ?
+            <div className={cn(org.segmentGroup, "shrink-0")}>
+              <button
+                type="button"
+                onClick={() => handleCalendarKindChange("services")}
+                className={cn(
+                  "inline-flex min-h-10 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
+                  calendarKind === "services" ? org.segmentActive : org.segmentInactive,
+                )}
+              >
+                <Clock className="h-4 w-4" />
+                <span className="hidden sm:inline">Services</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleCalendarKindChange("rooms")}
+                className={cn(
+                  "inline-flex min-h-10 items-center gap-1.5 px-3 text-sm font-medium transition-colors",
+                  calendarKind === "rooms" ? org.segmentActive : org.segmentInactive,
+                )}
+              >
+                <BedDouble className="h-4 w-4" />
+                <span className="hidden sm:inline">Rooms</span>
+              </button>
+            </div>
+          : null}
+          {calendarKind === "services" ?
+            <div className={cn(org.segmentGroup, "shrink-0")}>
             <button
               type="button"
               onClick={() => handleViewModeChange("split")}
@@ -329,6 +462,7 @@ const OrganizationCalendar = () => {
               <span className="hidden sm:inline">Calendar view</span>
             </button>
           </div>
+          : null}
           <Button
             type="button"
             variant="outline"
@@ -357,6 +491,52 @@ const OrganizationCalendar = () => {
             </Link>{" "}
             to view the calendar and slots for that branch.
           </p>
+        </div>
+        </div>
+      ) : calendarKind === "rooms" ? (
+        <div className={cn(org.pageSection, "pt-2 pb-8")}>
+        <div className="grid gap-6 lg:grid-cols-[minmax(280px,340px)_1fr] lg:gap-8">
+          <div className={cn(org.card, "p-4 sm:p-5")}>
+            <div className="mb-4 flex items-center gap-2 text-sm text-stone-600">
+              <BedDouble className="h-4 w-4 text-[#E85D4C]" />
+              <span>
+                {locationLabel ?
+                  <>
+                    <span className="font-medium text-appointza-navy">{locationLabel}</span>
+                    <span className="text-stone-400"> · </span>
+                  </>
+                : null}
+                {format(calendarMonth, "MMMM yyyy")}
+              </span>
+            </div>
+            <Calendar
+              mode="single"
+              selected={selectedDate}
+              onSelect={(d) => d && setSelectedDate(d)}
+              month={calendarMonth}
+              onMonthChange={setCalendarMonth}
+              className="rounded-xl border border-stone-100 p-2 pointer-events-auto"
+              modifiers={{
+                hasRoomActivity: (date) => (roomOccupancyByDay.get(toDateKey(date)) ?? 0) > 0,
+              }}
+              modifiersClassNames={{
+                hasRoomActivity:
+                  "relative after:absolute after:bottom-1 after:left-1/2 after:h-1 after:w-1 after:-translate-x-1/2 after:rounded-full after:bg-orange-500",
+              }}
+            />
+            <p className="mt-3 text-xs text-stone-500">
+              Orange dot = at least one room occupied, reserved, or unavailable that day.
+            </p>
+          </div>
+
+          <OrganizationCalendarRoomsView
+            selectedDate={selectedDate}
+            locationLabel={locationLabel}
+            rooms={rooms}
+            isLoading={isLoadingRooms}
+            availableCount={selectedDayRoomStats.available}
+            occupiedCount={selectedDayRoomStats.occupied}
+          />
         </div>
         </div>
       ) : viewMode === "board" ? (

@@ -10,6 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
@@ -26,7 +27,7 @@ import {
   Save,
   Package,
   AlertCircle,
-  ArrowRight
+  ArrowRight,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
@@ -47,6 +48,7 @@ import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
+import { onboardingStepRoute } from "@/utils/organizationOnboarding.util";
 
 const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
@@ -54,8 +56,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const organizationId = user?.organisationid || 1;
-  const { hasServices, hasTiming, isComplete, isLoading: isLoadingOnboarding } = useOnboardingStatus();
-  const inOnboarding = !embedded && !isComplete && hasServices;
+  const { hasCustomDomain, hasServices, hasWebsite, hasTiming, isComplete, isLoading: isLoadingOnboarding } = useOnboardingStatus();
+  const inOnboarding = !embedded && !isComplete && hasCustomDomain && hasServices;
 
   // State management
   const [isLoading, setIsLoading] = useState(false);
@@ -103,31 +105,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     return initialSlots;
   };
 
-  // Fetch locations
-  const fetchLocations = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      console.log('🔍 Fetching locations for organization:', organizationId);
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await locationService.select(req);
-      console.log('✅ Locations API response:', response);
-      setLocations(response || []);
-    } catch (error) {
-      console.error('❌ Error fetching locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [organizationId, toast, locationService]);
-
   // Fetch timing data for location
-  const fetchTimingData = async (locationId: number) => {
+  const fetchTimingData = useCallback(async (locationId: number) => {
     try {
       console.log('🔍 Fetching timing data for location:', locationId);
       const req = new OrganisationServiceTimingSelectReq();
@@ -153,7 +132,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
           }
         });
 
-        setCounter(response[0]?.counter || 0);
+        setCounter(Math.max(1, response[0]?.counter || 0));
         setOpenBefore(response[0]?.openbefore || 0);
       }
 
@@ -166,7 +145,39 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         variant: "destructive"
       });
     }
-  };
+  }, [organizationId, timingService, toast]);
+
+  // Fetch locations
+  const fetchLocations = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      console.log('🔍 Fetching locations for organization:', organizationId);
+      const req = new OrganisationLocationSelectReq();
+      req.organisationid = organizationId;
+      
+      const response = await locationService.select(req);
+      console.log('✅ Locations API response:', response);
+      const locs = response || [];
+      setLocations(locs);
+
+      if (locs.length === 1) {
+        const location = locs[0];
+        setSelectedLocation(location);
+        setShowTimingForm(true);
+        setShowLeaveForm(false);
+        await fetchTimingData(location.id);
+      }
+    } catch (error) {
+      console.error('❌ Error fetching locations:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch locations",
+        variant: "destructive"
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [organizationId, toast, locationService, fetchTimingData]);
 
   // Convert time string to Date
   const timeStringToDate = (timeString: string): Date => {
@@ -399,7 +410,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
       
       await queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
 
-      if (!isComplete && hasServices && !embedded) {
+      if (!isComplete && hasCustomDomain && hasServices && hasWebsite && !embedded) {
         toast({
           title: "Setup complete!",
           description: "Your business is ready — welcome to your dashboard.",
@@ -745,6 +756,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     fetchTimingData(location.id);
     setShowTimingForm(true);
     setShowLeaveForm(false);
+    setShowLeaveList(false);
   };
 
   // Handle location selection for leave
@@ -756,6 +768,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
       organisationlocationid: location.id
     }));
     fetchLeaveList(location.id);
+    setShowTimingForm(false);
+    setShowLeaveForm(false);
     setShowLeaveList(true);
   };
 
@@ -788,6 +802,43 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   }
 
   // Show message if no services exist
+  if (!hasCustomDomain) {
+    return (
+      <div className="org-page">
+        <div className="org-panel-section">
+          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-3xl border-stone-100")}>
+            <div className="border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                  <AlertCircle className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className={org.title}>Custom domain required first</h2>
+                  <p className={org.description}>Choose your public booking page address before setting hours.</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4 p-5 sm:p-6">
+              <p className="text-sm text-stone-600">
+                Pick a subdomain that ends with our default domain — for example{" "}
+                <span className="font-mono text-stone-800">mysalon.appointza.com</span> — then return here to set
+                when you&apos;re open.
+              </p>
+              <Button
+                type="button"
+                onClick={() => navigate("/organization/custom-domain")}
+                className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
+              >
+                Set custom domain
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!hasServices) {
     return (
       <div className="org-page">
@@ -825,32 +876,84 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     );
   }
 
+  if (!embedded && !isComplete && !hasWebsite) {
+    const locationId = locations[0]?.id ?? 0;
+    return (
+      <div className="org-page">
+        <div className="org-panel-section">
+          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-3xl border-stone-100")}>
+            <div className="border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+              <div className="flex items-center gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                  <AlertCircle className="h-5 w-5" />
+                </span>
+                <div>
+                  <h2 className={org.title}>Create your website first</h2>
+                  <p className={org.description}>Step 3 of setup — build your public booking page before setting hours.</p>
+                </div>
+              </div>
+            </div>
+            <div className="space-y-4 p-5 sm:p-6">
+              <p className="text-sm text-stone-600">
+                Customers need a public page to browse your services. Create and save your website, then return here
+                to set when you&apos;re open.
+              </p>
+              <Button
+                type="button"
+                onClick={() => navigate(onboardingStepRoute("website", locationId))}
+                className={cn(org.btnPrimary, "min-h-11 w-full touch-manipulation sm:w-auto")}
+              >
+                Create website
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const hasSingleLocation = locations.length === 1;
   const pageDescription = inOnboarding
-    ? "Pick a location, set open/close times for each day, then save."
-    : "Manage working hours and leave schedules for each location.";
+    ? hasSingleLocation
+      ? "Set open/close times for each day, then save."
+      : "Pick a location, set open/close times for each day, then save."
+    : hasSingleLocation
+      ? "Set working hours and leave schedules for your location."
+      : "Manage working hours and leave schedules for each location.";
+
+  const returnToSingleLocationHours = () => {
+    if (!hasSingleLocation) return;
+    const location = locations[0];
+    setSelectedLocation(location);
+    setShowTimingForm(true);
+    setShowLeaveForm(false);
+    setShowLeaveList(false);
+  };
 
   const timingContent = (
     <>
-        {!showTimingForm && !showLeaveForm && (
+        {locations.length === 0 && !showTimingForm && !showLeaveForm && !showLeaveList && (
+          <div className={cn(org.card, "rounded-3xl border-stone-100 p-8 text-center")}>
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF0EB] text-[#E85D4C]">
+              <Home className="h-6 w-6" />
+            </div>
+            <h3 className="text-lg font-semibold text-appointza-navy">No locations yet</h3>
+            <p className="mt-1 text-sm text-stone-500">
+              Add a business location in Settings before setting hours.
+            </p>
+          </div>
+        )}
+
+        {!showTimingForm && !showLeaveForm && !showLeaveList && locations.length > 1 && (
           <div className="space-y-3">
-            {inOnboarding && locations.length > 0 && (
+            {inOnboarding && (
               <p className="text-sm font-medium text-[#E85D4C]">
                 Tap <span className="font-semibold">Set hours</span> on your location to continue setup.
               </p>
             )}
-            {locations.length === 0 ? (
-              <div className={cn(org.card, "rounded-3xl border-stone-100 p-8 text-center")}>
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF0EB] text-[#E85D4C]">
-                  <Home className="h-6 w-6" />
-                </div>
-                <h3 className="text-lg font-semibold text-appointza-navy">No locations yet</h3>
-                <p className="mt-1 text-sm text-stone-500">
-                  Add a business location in Settings before setting hours.
-                </p>
-              </div>
-            ) : (
-              <div className="grid gap-3">
-                {locations.map((location) => (
+            <div className="grid gap-3">
+              {locations.map((location) => (
                   <div
                     key={location.id}
                     className={cn(
@@ -904,8 +1007,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                     </div>
                   </div>
                 ))}
-              </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -929,11 +1031,23 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                     setShowTimingForm(false);
                     setSelectedLocation(null);
                   }}
-                  className="flex-shrink-0"
+                  className={cn("flex-shrink-0", hasSingleLocation && "hidden")}
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
+              {!inOnboarding && hasSingleLocation && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleLocationSelectForLeave(locations[0])}
+                  className={cn(org.btnOutline, "mt-3 min-h-10 w-full touch-manipulation sm:w-auto")}
+                >
+                  <Calendar className="mr-2 h-4 w-4" />
+                  Book leave
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="space-y-5 p-5 sm:p-6">
             <div className="space-y-4 sm:space-y-5">
@@ -946,25 +1060,31 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <div className="space-y-2">
                       <Label htmlFor="counters" className={org.label}>Counters</Label>
-                      <Input
+                      <NumberInput
                         id="counters"
-                        type="number"
+                        min={1}
                         value={counter}
-                        onChange={(e) => setCounter(parseInt(e.target.value) || 0)}
-                        placeholder="Number of counters"
+                        onValueChange={setCounter}
+                        placeholder="e.g. 1"
                         className={cn(org.input, "h-11")}
                       />
+                      <p className="text-xs text-stone-500">
+                        How many customers can be served at the same time — e.g. 1 for a solo provider, 3 for three chairs or staff.
+                      </p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="booking-window" className={org.label}>Booking window (days)</Label>
-                      <Input
+                      <NumberInput
                         id="booking-window"
-                        type="number"
+                        min={0}
                         value={openBefore}
-                        onChange={(e) => setOpenBefore(parseInt(e.target.value) || 0)}
-                        placeholder="Days before appointment"
+                        onValueChange={setOpenBefore}
+                        placeholder="e.g. 30"
                         className={cn(org.input, "h-11")}
                       />
+                      <p className="text-xs text-stone-500">
+                        How far ahead customers can book — e.g. 30 means up to 30 days from today. Use 0 for no limit.
+                      </p>
                     </div>
                   </div>
                 </CardContent>
@@ -1080,18 +1200,23 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               ))}
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setShowTimingForm(false);
-                  setSelectedLocation(null);
-                }}
-                className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
-              >
-                Cancel
-              </Button>
+            <div className={cn(
+              "flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end",
+              hasSingleLocation && "sm:justify-end",
+            )}>
+              {!hasSingleLocation && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setShowTimingForm(false);
+                    setSelectedLocation(null);
+                  }}
+                  className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
+                >
+                  Cancel
+                </Button>
+              )}
               <Button
                 type="button"
                 onClick={saveTimingData}
@@ -1128,6 +1253,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                     setSelectedLeaveDate(null);
                     setStartTime('');
                     setEndTime('');
+                    returnToSingleLocationHours();
                   }}
                   className="flex-shrink-0"
                 >
@@ -1281,6 +1407,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   setSelectedLeaveDate(null);
                   setStartTime('');
                   setEndTime('');
+                  returnToSingleLocationHours();
                 }}
                 className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
               >
@@ -1316,6 +1443,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   size="icon"
                   onClick={() => {
                     setShowLeaveList(false);
+                    returnToSingleLocationHours();
                   }}
                   className="flex-shrink-0"
                 >
@@ -1420,7 +1548,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setShowLeaveList(false)}
+                onClick={() => {
+                  setShowLeaveList(false);
+                  returnToSingleLocationHours();
+                }}
                 className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
               >
                 Close
@@ -1453,7 +1584,9 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
           <OnboardingPageGuide
             compact
             stepId="timing"
+            hasCustomDomain={hasCustomDomain}
             hasServices={hasServices}
+            hasWebsite={hasWebsite}
             hasTiming={hasTiming}
           />
         </div>
