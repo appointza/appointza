@@ -168,7 +168,6 @@ Staff members only see menu items their **permissions** allow.
 
 ### 3.14 Integrated products (if enabled)
 
-- **Momantza:** May open an embedded booking experience for a linked product; use **Back** or your usual navigation to return.
 - **Campusza:** Staff menu for education-oriented features if your tenant uses it.
 
 ---

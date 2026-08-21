@@ -14,8 +14,7 @@ import { CreditCard, Save, Plus, Trash2, ArrowLeft, CheckCircle2, Loader2 } from
 import { environment } from "@/utils/environment";
 import { PaymentService, CreatePaymentOrderReq, VerifyPaymentReq } from "@/services/payment.service";
 import { loadScript } from "@/utils/razorpay.util";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
-import { OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
@@ -48,7 +47,10 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
   const [testingPaymentId, setTestingPaymentId] = useState<number | null>(null);
   const [togglingCredentialId, setTogglingCredentialId] = useState<number | null>(null);
   const paymentService = useMemo(() => new PaymentService(), []);
-  const locationService = useMemo(() => new OrganisationLocationService(), []);
+  const { data: organisationLocations = [] } = useOrganisationLocations({
+    organisationId: organizationId,
+    enabled: organizationId > 0,
+  });
 
   const [formData, setFormData] = useState({
     gateway_id: 1,
@@ -287,27 +289,11 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
       setTestingPaymentId(credential.id);
       
       // Get first location for the organization (required for payment order)
-      let locationId = 0;
-      try {
-        const locReq = new OrganisationLocationSelectReq();
-        locReq.organisationid = organizationId;
-        const locations = await locationService.select(locReq);
-        if (locations && locations.length > 0) {
-          locationId = locations[0].id;
-        } else {
-          toast({
-            title: "No Location Found",
-            description: "Please add at least one location to test payment",
-            variant: "destructive"
-          });
-          setTestingPaymentId(null);
-          return;
-        }
-      } catch (error) {
-        console.error('Error fetching locations:', error);
+      let locationId = organisationLocations[0]?.id || 0;
+      if (!locationId) {
         toast({
-          title: "Error",
-          description: "Failed to fetch organization locations",
+          title: "No Location Found",
+          description: "Please add at least one location to test payment",
           variant: "destructive"
         });
         setTestingPaymentId(null);
@@ -542,8 +528,8 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
         )}
 
         {/* Add/Edit Form */}
-        <Card className={settingsEmbedded.card(embedded)}>
-          <CardHeader>
+        <Card className={cn(settingsEmbedded.card(embedded), "w-full rounded-2xl border-stone-200 bg-white shadow-none")}>
+          <CardHeader className="border-b border-stone-200">
             <CardTitle className="text-lg sm:text-xl">
               {editingId ? 'Update Payment Gateway Credentials' : 'Add Payment Gateway Credentials'}
             </CardTitle>
@@ -702,8 +688,8 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
         </Card>
 
         {/* Existing Credentials List */}
-        <Card>
-          <CardHeader>
+        <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
+          <CardHeader className="border-b border-stone-200">
             <CardTitle className="text-lg sm:text-xl">Payment Gateway Credentials</CardTitle>
             <CardDescription className="max-w-3xl text-xs sm:text-sm">
               Enable <strong>Accept payments</strong> for the gateway that should charge customers at checkout. For
@@ -725,9 +711,9 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
                 {credentials.map((credential) => (
                   <div
                     key={credential.id}
-                    className="overflow-hidden rounded-xl border border-border/80 bg-muted/20 shadow-sm transition-colors hover:bg-muted/30"
+                    className="overflow-hidden rounded-xl border border-stone-200 bg-white shadow-none transition-colors hover:border-blue-200"
                   >
-                    <div className="border-b border-border/60 bg-background/80 px-4 py-4 sm:px-5 sm:py-4">
+                    <div className="border-b border-stone-200 bg-white px-4 py-4 sm:px-5 sm:py-4">
                       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="min-w-0 space-y-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -755,7 +741,7 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
                           </div>
                           <p className="text-sm text-muted-foreground">Saved payment gateway connection</p>
                         </div>
-                        <div className="flex shrink-0 items-center justify-between gap-4 rounded-lg border bg-background px-4 py-3 sm:min-w-[220px] sm:justify-between">
+                        <div className="flex shrink-0 items-center justify-between gap-4 rounded-xl border border-stone-200 bg-white px-4 py-3 sm:min-w-[220px] sm:justify-between">
                           <Label
                             htmlFor={`active-${credential.id}`}
                             className="cursor-pointer text-sm font-medium leading-none text-foreground"
@@ -777,13 +763,13 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
 
                     <div className="space-y-4 px-4 py-4 sm:px-5 sm:py-5">
                       <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2 sm:gap-4">
-                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
+                        <div className="rounded-xl border border-stone-200 bg-white px-3 py-2.5">
                           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Gateway ID</dt>
                           <dd className="mt-1 font-mono text-base font-semibold tabular-nums text-foreground">
                             {credential.gateway_id}
                           </dd>
                         </div>
-                        <div className="rounded-lg border border-border/60 bg-background px-3 py-2.5">
+                        <div className="rounded-xl border border-stone-200 bg-white px-3 py-2.5">
                           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">API key</dt>
                           <dd className="mt-1 break-all font-mono text-sm text-foreground" title={credential.api_key}>
                             {credential.api_key || '—'}
@@ -793,7 +779,7 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
                       </dl>
 
                       {credential.gateway_name === 'razorpay' && credential.is_active && (
-                        <div className="flex flex-col gap-3 rounded-lg border border-emerald-200/80 bg-emerald-50/90 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+                        <div className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
                           <div className="min-w-0 flex-1 space-y-1">
                             <p className="text-sm font-semibold text-emerald-950">Use these credentials to take payment</p>
                             <p className="text-sm leading-relaxed text-emerald-900/90">
@@ -806,7 +792,7 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
                             size="default"
                             onClick={() => handleTestPayment(credential)}
                             disabled={testingPaymentId === credential.id}
-                            className="h-10 w-full shrink-0 border-emerald-300 bg-white text-emerald-900 hover:bg-emerald-100 sm:h-10 sm:w-auto sm:min-w-[140px]"
+                            className="h-10 w-full shrink-0 border-blue-200 bg-white text-blue-700 shadow-none hover:bg-blue-50 sm:h-10 sm:w-auto sm:min-w-[140px]"
                           >
                             {testingPaymentId === credential.id ? (
                               <>
@@ -824,14 +810,14 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
                       )}
 
                       {credential.gateway_name === 'razorpay' && !credential.is_active && (
-                        <div className="rounded-lg border border-dashed border-muted-foreground/30 bg-muted/40 px-3 py-2.5 text-sm text-muted-foreground">
+                        <div className="rounded-xl border border-dashed border-stone-200 bg-white px-3 py-2.5 text-sm text-muted-foreground">
                           Turn <strong className="text-foreground">Accept payments</strong> on to use this Razorpay
                           profile for live checkout and to run a test payment.
                         </div>
                       )}
 
                       {credential.is_active && credential.gateway_name !== 'razorpay' && (
-                        <p className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                        <p className="rounded-xl border border-stone-200 bg-white px-3 py-2 text-sm text-muted-foreground">
                           This gateway is used when customers pay during booking.
                         </p>
                       )}

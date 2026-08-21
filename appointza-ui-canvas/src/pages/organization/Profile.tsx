@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,16 +13,15 @@ import {
   Trash2,
   ArrowLeft,
   LogOut,
-  RefreshCw,
-  Building2,
   Loader2,
   MapPin,
   Gift,
   Wallet,
   Copy,
+  Award,
 } from "lucide-react";
 import { org } from "@/lib/orgTheme";
-import { settingsEmbedded } from "@/lib/settingsEmbedded";
+import { settingsEmbedded, profileSettingsX } from "@/lib/settingsEmbedded";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import OrganizationPageShell from "@/components/layout/OrganizationPageShell";
 import { CreditWalletBillingPanel } from "@/components/organization/CreditWalletBillingPanel";
@@ -32,45 +31,62 @@ import StaffManagement from "@/pages/organization/StaffManagement";
 import LocationsScreen from "@/pages/organization/Locations";
 import OrganizationTemplates from "@/pages/organization/Templates";
 import PaymentSettings from "@/pages/organization/PaymentSettings";
-import ReferenceValuesPage from "@/pages/organization/ReferenceValues";
+import OrganizationLoyalty from "@/pages/organization/Loyalty";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { OrganisationService } from "@/services/organisation.service";
-import { Users, UsersSelectReq, Organisationdeletereq } from "@/models/users.model";
+import { Users, UsersSelectReq, UsersGetOtpReq, Organisationdeletereq } from "@/models/users.model";
+import OtpInput from "@/components/auth/OtpInput";
 import type { OrganisationReferralInfoRes } from "@/models/organisation.model";
 import { FilesService } from "@/services/files.service";
 import { useLocation } from "@/hooks/useLocation";
 import { useLocationList } from "@/hooks/useLocationList";
-import OrganizationSwitchModal, {
-  type SwitchableOrganization,
-} from "@/components/organization/OrganizationSwitchModal";
 import IntegrationTokenPanel from "@/components/organization/IntegrationTokenPanel";
 
 /** Horizontal scroll tabs — matches Hospitality settings tabs. */
 const profileTabTriggerClass =
-  "shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:text-stone-800 data-[state=active]:bg-gradient-coral data-[state=active]:text-white data-[state=active]:shadow-sm sm:px-4";
+  "shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:bg-blue-50 hover:text-blue-700 data-[state=active]:bg-none data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none sm:px-4";
 
-const profileTabListClass = cn(
-  org.segmentGroup,
-  "inline-flex h-auto w-full min-w-0 max-w-full gap-1 overflow-x-auto bg-white p-1 shadow-sm [scrollbar-width:thin]",
-);
+const profileTabListClass =
+  "inline-flex h-auto w-full min-w-0 max-w-full gap-1 overflow-x-auto bg-transparent p-0 shadow-none [scrollbar-width:thin]";
 
-const profileCardHeaderClass = "space-y-1.5 p-5 md:p-6";
-const profileCardContentClass = "p-5 pt-0 md:p-6 md:pt-0";
+const profileCardHeaderClass = cn(profileSettingsX, "w-full space-y-1.5 py-5 md:py-6");
+const profileCardContentClass = cn(profileSettingsX, "w-full pt-0");
 const profileCardTitleClass = "text-lg font-semibold leading-snug text-appointza-navy md:text-xl";
 const profileCardDescClass = "text-sm text-stone-500";
 
-const profileTabPanelClass = cn(
-  "m-0 focus-visible:outline-none",
-  org.pageSection,
-  "py-6 md:py-8",
-);
+const profileTabPanelClass = "m-0 mt-0 focus-visible:outline-none";
 
 const profileFieldInputClass = cn(org.input, "mt-1.5 h-11 min-h-11 md:h-10 md:min-h-10");
 
+const profileSectionDivider = "border-t border-stone-200 pt-6 md:pt-8";
+
 const profileSectionIconWrap =
-  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]";
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600";
+
+function usersProfileFromAuthUser(user: {
+  id: number;
+  username?: string;
+  firstname?: string;
+  email?: string;
+  mobile: string;
+  organisationid: number;
+  locationid: number;
+  imageid?: number;
+}): Users {
+  const next = new Users();
+  next.id = user.id || 0;
+  next.name = user.username || user.firstname || "";
+  next.email = user.email || "";
+  next.mobile = user.mobile || "";
+  next.designation = "";
+  next.organisationid = user.organisationid || 0;
+  next.locationid = user.locationid || 0;
+  next.profileimage = user.imageid || 0;
+  next.notes = "";
+  return next;
+}
 
 type ProfileSettingsTab =
   | "profile"
@@ -79,8 +95,8 @@ type ProfileSettingsTab =
   | "location"
   | "templates"
   | "payment"
+  | "loyalty"
   | "billing"
-  | "appointment-values"
   | "account";
 
 const OrganizationProfile = () => {
@@ -88,7 +104,7 @@ const OrganizationProfile = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const userId = user?.userid || user?.id || 0;
+  const userId = user?.id || 0;
   const organizationId = user?.organisationid || 0;
   
   // Check if user is staff - use from user context (already calculated correctly in AuthContext)
@@ -115,7 +131,6 @@ const OrganizationProfile = () => {
   const hasLocationManagementAccess = !isStaff || userpermission?.editandviewLocationManagement === true;
   const hasTemplatesAccess = !isStaff || userpermission?.editandviewTemplates === true;
   const hasPaymentSettingsAccess = !isStaff || userpermission?.editandviewPaymentSettings === true;
-  const hasBusinessValuesAccess = !isStaff || userpermission?.editandviewBusinessvalues === true;
 
   const accessibleTabValues = useMemo((): ProfileSettingsTab[] => {
     const list: ProfileSettingsTab[] = ["profile"];
@@ -124,8 +139,8 @@ const OrganizationProfile = () => {
     if (hasLocationManagementAccess) list.push("location");
     if (hasTemplatesAccess) list.push("templates");
     if (hasPaymentSettingsAccess) list.push("payment");
+    if (!isStaff) list.push("loyalty");
     if (!isStaff) list.push("billing");
-    if (hasBusinessValuesAccess) list.push("appointment-values");
     list.push("account");
     return list;
   }, [
@@ -134,7 +149,6 @@ const OrganizationProfile = () => {
     hasLocationManagementAccess,
     hasTemplatesAccess,
     hasPaymentSettingsAccess,
-    hasBusinessValuesAccess,
     isStaff,
   ]);
 
@@ -156,30 +170,16 @@ const OrganizationProfile = () => {
     );
   };
   
-  // Location management for staff users
   const { 
     currentLocation, 
-    isLoading: isLocationLoading, 
     getLocationDisplayName, 
     getFullAddress 
   } = useLocation();
 
-  // Location list management (automatically filtered for staff users)
   const { 
     locations: availableLocations, 
     isLoading: isLocationListLoading,
-    canAccessLocation,
-    getLocationDisplayName: getLocationDisplayNameById
   } = useLocationList();
-  
-  // Debug user context
-  console.log('🔍 User context:', user);
-  console.log('🔍 isAuthenticated:', isAuthenticated);
-  console.log('🔍 userId:', userId);
-  console.log('🔍 isStaff:', isStaff);
-  console.log('🔍 currentLocation:', currentLocation);
-  console.log('🔍 availableLocations:', availableLocations);
-  console.log('🔍 isLocationListLoading:', isLocationListLoading);
 
   // API services
   const usersService = useMemo(() => new UsersService(), []);
@@ -196,24 +196,15 @@ const OrganizationProfile = () => {
   const [isProfileImageLoading, setIsProfileImageLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [otp, setOtp] = useState('');
+  const [isSendingDeleteOtp, setIsSendingDeleteOtp] = useState(false);
+  const [deleteOtpSent, setDeleteOtpSent] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
-  const [showOrgSwitchModal, setShowOrgSwitchModal] = useState(false);
   const [referralCodeInput, setReferralCodeInput] = useState("");
   const [referralInfo, setReferralInfo] = useState<OrganisationReferralInfoRes | null>(null);
   const [referralAlreadyApplied, setReferralAlreadyApplied] = useState(false);
   const [canApplyReferralCode, setCanApplyReferralCode] = useState(true);
   const [isLoadingReferralStatus, setIsLoadingReferralStatus] = useState(false);
   const [isApplyingReferral, setIsApplyingReferral] = useState(false);
-
-  const handleOrganizationSwitch = (org: SwitchableOrganization) => {
-    if (org === "momantza") {
-      navigate("/momantza/booking");
-    } else if (org === "campusza") {
-      navigate("/campusza/staff");
-    } else if (org === "crm") {
-      navigate("/crm");
-    }
-  };
 
   // Update user_context in localStorage with latest user data
   const updateUserContext = useCallback(async (userData: Users) => {
@@ -281,16 +272,7 @@ const OrganizationProfile = () => {
       } else {
         // Fallback to user context data if API returns empty
         if (user) {
-          const fallbackProfile = new Users();
-          fallbackProfile.id = user.userid || user.id || 0;
-          fallbackProfile.name = user.username || user.firstname || '';
-          fallbackProfile.email = user.useremail || user.email || '';
-          fallbackProfile.mobile = user.usermobile || user.mobile || '';
-          fallbackProfile.designation = '';
-          fallbackProfile.organisationid = user.organisationid || 0;
-          fallbackProfile.locationid = user.organisationlocationid || user.locationid || 0;
-          fallbackProfile.profileimage = user.imageid || 0;
-          fallbackProfile.notes = '';
+          const fallbackProfile = usersProfileFromAuthUser(user);
           console.log('✅ Setting fallback profile with ID:', fallbackProfile.id);
           setProfile(fallbackProfile);
         }
@@ -298,16 +280,7 @@ const OrganizationProfile = () => {
     } catch (error) {
       // Fallback to user context data on error
       if (user) {
-        const fallbackProfile = new Users();
-        fallbackProfile.id = user.userid || user.id || 0;
-        fallbackProfile.name = user.username || user.firstname || '';
-        fallbackProfile.email = user.useremail || user.email || '';
-        fallbackProfile.mobile = user.usermobile || user.mobile || '';
-        fallbackProfile.designation = '';
-        fallbackProfile.organisationid = user.organisationid || 0;
-        fallbackProfile.locationid = user.organisationlocationid || user.locationid || 0;
-        fallbackProfile.profileimage = user.imageid || 0;
-        fallbackProfile.notes = '';
+        const fallbackProfile = usersProfileFromAuthUser(user);
         console.log('✅ Setting error fallback profile with ID:', fallbackProfile.id);
         setProfile(fallbackProfile);
       }
@@ -429,16 +402,7 @@ const OrganizationProfile = () => {
   // Immediate fallback if user context is available but profile is empty
   useEffect(() => {
     if (user && (!profile.name || profile.name === '')) {
-      const immediateProfile = new Users();
-      immediateProfile.id = user.userid || user.id || 0;
-      immediateProfile.name = user.username || user.firstname || '';
-      immediateProfile.email = user.useremail || user.email || '';
-      immediateProfile.mobile = user.usermobile || user.mobile || '';
-      immediateProfile.designation = '';
-      immediateProfile.organisationid = user.organisationid || 0;
-      immediateProfile.locationid = user.organisationlocationid || user.locationid || 0;
-      immediateProfile.profileimage = user.imageid || 0;
-      immediateProfile.notes = '';
+      const immediateProfile = usersProfileFromAuthUser(user);
       console.log('✅ Setting immediate fallback profile with ID:', immediateProfile.id);
       setProfile(immediateProfile);
     }
@@ -640,37 +604,107 @@ const OrganizationProfile = () => {
     }
   };
 
+  const deleteOtpMobile = (profile.mobile || user?.mobile || "").replace(/[\s\-()]/g, "");
+
+  const resetDeleteDialogState = () => {
+    setOtp("");
+    setDeleteOtpSent(false);
+    setIsSendingDeleteOtp(false);
+  };
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setShowDeleteDialog(open);
+    if (!open) {
+      resetDeleteDialogState();
+    }
+  };
+
+  const sendDeleteConfirmationOtp = async () => {
+    if (!deleteOtpMobile) {
+      toast({
+        title: "Mobile number required",
+        description: "Add a mobile number to your profile before deleting the organization.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSendingDeleteOtp(true);
+    try {
+      const getOtpReq = new UsersGetOtpReq();
+      getOtpReq.mobile = deleteOtpMobile;
+      await usersService.getotp(getOtpReq);
+      setDeleteOtpSent(true);
+      setOtp("");
+      toast({
+        title: "OTP sent",
+        description: `Enter the verification code sent to ${deleteOtpMobile}.`,
+      });
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { key?: string; message?: string } }; message?: string };
+      const key = err?.response?.data?.key;
+      const message = err?.response?.data?.message || err?.message || "Failed to send OTP";
+      toast({
+        title: key === "UserNotFound" ? "Account not found" : "Failed to send OTP",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingDeleteOtp(false);
+    }
+  };
+
+  const getDeleteOrganizationErrorMessage = (error: unknown) => {
+    const err = error as { response?: { data?: { key?: string; message?: string } }; message?: string };
+    const key = err?.response?.data?.key;
+    switch (key) {
+      case "OtpInvalid":
+        return "The verification code is incorrect. Request a new OTP and try again.";
+      case "OtpExpired":
+        return "The verification code has expired. Request a new OTP and try again.";
+      case "UsersNotFound":
+        return "Your account could not be found. Please sign in again.";
+      default:
+        return err?.response?.data?.message || err?.message || "Failed to delete organization";
+    }
+  };
+
   // Handle organization deletion
   const handleDeleteOrganization = async () => {
     if (!isAuthenticated || !userId || !organizationId) return;
+
+    if (!deleteOtpSent || otp.length !== 6) {
+      toast({
+        title: "Verification required",
+        description: "Send an OTP to your mobile number and enter the 6-digit code to confirm deletion.",
+        variant: "destructive",
+      });
+      return;
+    }
     
     setIsDeleting(true);
     try {
-      console.log('🗑️ Deleting organization:', organizationId);
       const req = new Organisationdeletereq();
       req.organisationid = organizationId;
       req.userid = userId;
       req.otp = otp;
 
       await usersService.DeleteOrganisationPermananet(req);
-      // Clear all localStorage data after successful deletion
       localStorage.clear();
       toast({
         title: "Organization Deleted",
         description: "Your organization has been permanently deleted.",
       });
-      // Redirect to login or home page
       window.location.href = '/login';
     } catch (error) {
       console.error('❌ Error deleting organization:', error);
       toast({
         title: "Error",
-        description: "Failed to delete organization",
+        description: getDeleteOrganizationErrorMessage(error),
         variant: "destructive"
       });
     } finally {
       setIsDeleting(false);
-      setShowDeleteDialog(false);
     }
   };
 
@@ -690,7 +724,7 @@ const OrganizationProfile = () => {
   if (isLoading) {
     return (
       <div className={cn(org.loading, "flex-col gap-3")}>
-        <Loader2 className="h-8 w-8 animate-spin text-appointza-coral" />
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         <p className="text-sm text-stone-600">Loading profile…</p>
       </div>
     );
@@ -700,7 +734,7 @@ const OrganizationProfile = () => {
     <Tabs
       value={activeTab}
       onValueChange={setActiveTab}
-      className={cn(org.page, "flex min-h-0 flex-col")}
+      className={cn(org.page, "flex h-full min-h-0 flex-col bg-white")}
     >
         {/* <header className={cn(org.pageHeader, "border-b border-stone-100/80 pb-4")}>
           <div className="flex items-center gap-3">
@@ -721,59 +755,60 @@ const OrganizationProfile = () => {
           </div>
         </header> */}
 
-        <div className={cn(org.pageSection, "pb-4 pt-0")}>
-          <TabsList className={profileTabListClass}>
-            <TabsTrigger value="profile" className={profileTabTriggerClass}>
-              Profile
-            </TabsTrigger>
-            {hasBusinessHoursAccess && (
-              <TabsTrigger value="business-hours" className={profileTabTriggerClass}>
-                Business Hours
-              </TabsTrigger>
-            )}
-            {hasStaffManagementAccess && (
-              <TabsTrigger value="staff" className={profileTabTriggerClass}>
-                Staff
-              </TabsTrigger>
-            )}
-            {hasLocationManagementAccess && (
-              <TabsTrigger value="location" className={profileTabTriggerClass}>
-                Location
-              </TabsTrigger>
-            )}
-            {hasTemplatesAccess && (
-              <TabsTrigger value="templates" className={profileTabTriggerClass}>
-                Templates
-              </TabsTrigger>
-            )}
-            {hasPaymentSettingsAccess && (
-              <TabsTrigger value="payment" className={profileTabTriggerClass}>
-                Payment Settings
-              </TabsTrigger>
-            )}
-            {!isStaff && (
-              <TabsTrigger value="billing" className={profileTabTriggerClass}>
-                <Wallet className="mr-1.5 inline h-4 w-4 shrink-0" />
-                Credit Wallet
-              </TabsTrigger>
-            )}
-            {hasBusinessValuesAccess && (
-              <TabsTrigger value="appointment-values" className={profileTabTriggerClass}>
-                Appointment Values
-              </TabsTrigger>
-            )}
-            <TabsTrigger value="account" className={profileTabTriggerClass}>
-              Account
-            </TabsTrigger>
-          </TabsList>
-        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white pt-0">
+            <Card className={cn(org.card, "w-full overflow-hidden rounded-none border-0 border-y border-stone-200 bg-white shadow-none")}>
+              <div className={cn(profileSettingsX, "border-b border-stone-200 py-4 md:py-5")}>
+                <TabsList className={profileTabListClass}>
+                <TabsTrigger value="profile" className={profileTabTriggerClass}>
+                  Profile
+                </TabsTrigger>
+                {hasBusinessHoursAccess && (
+                  <TabsTrigger value="business-hours" className={profileTabTriggerClass}>
+                    Business Hours
+                  </TabsTrigger>
+                )}
+                {hasStaffManagementAccess && (
+                  <TabsTrigger value="staff" className={profileTabTriggerClass}>
+                    Staff
+                  </TabsTrigger>
+                )}
+                {hasLocationManagementAccess && (
+                  <TabsTrigger value="location" className={profileTabTriggerClass}>
+                    Location
+                  </TabsTrigger>
+                )}
+                {hasTemplatesAccess && (
+                  <TabsTrigger value="templates" className={profileTabTriggerClass}>
+                    Templates
+                  </TabsTrigger>
+                )}
+                {hasPaymentSettingsAccess && (
+                  <TabsTrigger value="payment" className={profileTabTriggerClass}>
+                    Payment Settings
+                  </TabsTrigger>
+                )}
+                {!isStaff && (
+                  <TabsTrigger value="loyalty" className={profileTabTriggerClass}>
+                    <Award className="mr-1.5 inline h-4 w-4 shrink-0" />
+                    Loyalty
+                  </TabsTrigger>
+                )}
+                {!isStaff && (
+                  <TabsTrigger value="billing" className={profileTabTriggerClass}>
+                    <Wallet className="mr-1.5 inline h-4 w-4 shrink-0" />
+                    Credit Wallet
+                  </TabsTrigger>
+                )}
+                <TabsTrigger value="account" className={profileTabTriggerClass}>
+                  Account
+                </TabsTrigger>
+              </TabsList>
+              </div>
 
-        <TabsContent value="profile" className={profileTabPanelClass}>
-          <div className="w-full">
-        <Card className={cn(org.card, "overflow-hidden rounded-3xl")}>
-          <CardContent className="p-0">
+            <TabsContent value="profile" className={profileTabPanelClass}>
+              <div className="w-full">
             {/* Profile Photo */}
-            <div className={cn(profileCardHeaderClass, "bg-gradient-to-br from-[#FFF8F5] to-white")}>
+            <div className={cn(profileCardHeaderClass, "bg-white")}>
               <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
                 <span className={profileSectionIconWrap}>
                   <Camera className="h-5 w-5" />
@@ -787,20 +822,20 @@ const OrganizationProfile = () => {
                 <div className="relative shrink-0">
                   {showProfileImage ? (
                     isProfileImageLoading && !profileImageBlobUrl ? (
-                      <div className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-[#FFF0EB] bg-[#FFF0EB] shadow-md ring-2 ring-appointza-coral/25">
-                        <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" />
+                      <div className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-blue-100 bg-blue-50 shadow-none ring-1 ring-blue-200">
+                        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
                       </div>
                     ) : (
                       <img
                         key={profileImageBlobUrl}
                         src={profileImageBlobUrl}
                         alt="Profile"
-                        className="h-28 w-28 rounded-full border-4 border-[#FFF0EB] object-cover shadow-md ring-2 ring-appointza-coral/25"
+                        className="h-28 w-28 rounded-full border-4 border-blue-100 object-cover shadow-none ring-1 ring-blue-200"
                       />
                     )
                   ) : (
-                    <div className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-dashed border-[#FFD4CC] bg-[#FFF0EB] ring-2 ring-appointza-coral/15">
-                      <User className="h-12 w-12 text-[#E85D4C]/50" />
+                    <div className="flex h-28 w-28 items-center justify-center rounded-full border-4 border-dashed border-blue-200 bg-blue-50 ring-1 ring-blue-100">
+                      <User className="h-12 w-12 text-blue-400" />
                     </div>
                   )}
                 </div>
@@ -819,9 +854,9 @@ const OrganizationProfile = () => {
                     className={cn(org.btnOutline, "mb-2 min-h-11 w-full touch-manipulation md:w-auto")}
                   >
                     {isUploadingImage ? (
-                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#E85D4C]" />
+                      <Loader2 className="h-4 w-4 shrink-0 animate-spin text-blue-600" />
                     ) : (
-                      <Camera className="h-4 w-4 shrink-0 text-[#E85D4C]" />
+                      <Camera className="h-4 w-4 shrink-0 text-blue-600" />
                     )}
                     {isUploadingImage
                       ? "Uploading…"
@@ -835,7 +870,7 @@ const OrganizationProfile = () => {
             </div>
 
             {/* Profile Information */}
-            <div className="border-t border-stone-100">
+            <div className={profileSectionDivider}>
               <div className={profileCardHeaderClass}>
                 <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
                   <span className={profileSectionIconWrap}>
@@ -878,7 +913,7 @@ const OrganizationProfile = () => {
             </div>
 
             {!isStaff && (
-              <div className="border-t border-stone-100">
+              <div className={profileSectionDivider}>
                 <div className={profileCardHeaderClass}>
                   <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
                     <span className={profileSectionIconWrap}>
@@ -895,7 +930,7 @@ const OrganizationProfile = () => {
                 <div className={`${profileCardContentClass} space-y-6 pb-6 md:pb-8`}>
                   {isLoadingReferralStatus ? (
                     <div className="flex items-center gap-2 text-sm text-stone-500">
-                      <Loader2 className="h-4 w-4 animate-spin text-[#E85D4C]" />
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
                       Loading referral code…
                     </div>
                   ) : referralInfo?.referral_code ? (
@@ -948,7 +983,7 @@ const OrganizationProfile = () => {
                     </p>
                   )}
 
-                  <div className="border-t border-stone-100 pt-5">
+                  <div className="border-t border-stone-200 pt-5">
                     <p className="mb-3 text-sm font-medium text-appointza-navy">
                       Have a code from another business?
                     </p>
@@ -1006,7 +1041,7 @@ const OrganizationProfile = () => {
 
             {/* Location Information for Staff Users */}
             {isStaff && currentLocation && (
-              <div className="border-t border-stone-100 bg-appointza-cream/20">
+              <div className={profileSectionDivider}>
                 <div className={profileCardHeaderClass}>
                   <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
                     <span className={profileSectionIconWrap}>
@@ -1022,14 +1057,14 @@ const OrganizationProfile = () => {
                   <div className="space-y-4">
                     <div>
                       <Label className={org.label}>Location Name</Label>
-                      <div className="mt-1.5 rounded-2xl border border-stone-100 bg-[#FFF0EB]/60 p-3">
+                      <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-3">
                         <span className="font-medium text-appointza-navy">{currentLocation.name}</span>
                       </div>
                     </div>
 
                     <div>
                       <Label className={org.label}>Full Address</Label>
-                      <div className="mt-1.5 rounded-2xl border border-stone-100 bg-white p-3">
+                      <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-3">
                         <span className="text-sm text-stone-700">{getFullAddress()}</span>
                       </div>
                     </div>
@@ -1037,7 +1072,7 @@ const OrganizationProfile = () => {
                     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                       <div>
                         <Label className={org.label}>Phone</Label>
-                        <div className="mt-1.5 rounded-2xl border border-stone-100 bg-white p-3">
+                        <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-3">
                           <span className="text-sm text-stone-700">
                             {currentLocation.phone || "Not provided"}
                           </span>
@@ -1045,7 +1080,7 @@ const OrganizationProfile = () => {
                       </div>
                       <div>
                         <Label className={org.label}>Email</Label>
-                        <div className="mt-1.5 rounded-2xl border border-stone-100 bg-white p-3">
+                        <div className="mt-1.5 rounded-xl border border-stone-200 bg-white p-3">
                           <span className="text-sm text-stone-700">
                             {currentLocation.email || "Not provided"}
                           </span>
@@ -1067,7 +1102,7 @@ const OrganizationProfile = () => {
             )}
 
             {/* Available Locations */}
-            <div className="border-t border-stone-100">
+            <div className={profileSectionDivider}>
               <div className={profileCardHeaderClass}>
                 <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
                   <span className={profileSectionIconWrap}>
@@ -1076,13 +1111,13 @@ const OrganizationProfile = () => {
                   <span>Available Locations</span>
                 </CardTitle>
                 <CardDescription className={profileCardDescClass}>
-                  {isStaff ? "Your assigned location" : "All organization locations"}
+                  {isStaff ? "Your assigned location" : "Location selected on the Dashboard"}
                 </CardDescription>
               </div>
               <div className={`${profileCardContentClass} pb-6 md:pb-8`}>
                 {isLocationListLoading ? (
                   <div className="flex h-16 items-center justify-center gap-2">
-                    <Loader2 className="h-5 w-5 animate-spin text-appointza-coral" />
+                    <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
                     <span className="text-sm text-stone-600">Loading locations…</span>
                   </div>
                 ) : availableLocations.length === 0 ? (
@@ -1090,11 +1125,11 @@ const OrganizationProfile = () => {
                     No locations available
                   </div>
                 ) : (
-                  <div className="space-y-3">
+                  <div className={settingsEmbedded.list}>
                     {availableLocations.map((location) => (
                       <div
                         key={location.id}
-                        className="flex flex-col gap-3 rounded-2xl border border-stone-100 bg-appointza-cream/30 p-4 transition-colors hover:border-stone-200 hover:bg-[#FFF0EB]/40 md:flex-row md:items-center md:justify-between"
+                        className={cn(settingsEmbedded.row(true), "md:items-center md:justify-between")}
                       >
                         <div className="flex min-w-0 items-start gap-3 md:items-center">
                           <div className={profileSectionIconWrap}>
@@ -1134,32 +1169,8 @@ const OrganizationProfile = () => {
               </div>
             </div>
 
-            {/* Switch Organization */}
-            <div className="border-t border-stone-100">
-              <div className={profileCardHeaderClass}>
-                <CardTitle className={`flex items-center gap-3 ${profileCardTitleClass}`}>
-                  <span className={profileSectionIconWrap}>
-                    <Building2 className="h-5 w-5" />
-                  </span>
-                  <span>Switch Organization</span>
-                </CardTitle>
-                <CardDescription className={profileCardDescClass}>
-                  Switch to Momantza, Campusza, or CRM to access their features
-                </CardDescription>
-              </div>
-              <div className={`${profileCardContentClass} pb-6 md:pb-8`}>
-                <Button
-                  onClick={() => setShowOrgSwitchModal(true)}
-                  className={cn(org.btnOutline, "min-h-11 w-full touch-manipulation")}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4 text-[#E85D4C]" />
-                  Switch Organization
-                </Button>
-              </div>
-            </div>
-
             {/* Action buttons */}
-            <div className="border-t border-stone-100 bg-gradient-to-r from-[#FFF8F5] to-white p-4 md:p-6">
+            <div className={cn(profileSettingsX, "border-t border-stone-200 bg-white py-4 md:py-5")}>
               <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end md:gap-3">
                 <Button
                   variant="outline"
@@ -1182,73 +1193,64 @@ const OrganizationProfile = () => {
                 </Button>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        <OrganizationSwitchModal
-          open={showOrgSwitchModal}
-          onOpenChange={setShowOrgSwitchModal}
-          onSelect={handleOrganizationSwitch}
-        />
-          </div>
-        </TabsContent>
-
-          {hasBusinessHoursAccess && (
-            <TabsContent value="business-hours" className={profileTabPanelClass}>
-              {activeTab === "business-hours" ? <TimingScreen embedded /> : null}
+              </div>
             </TabsContent>
-          )}
 
-          {hasStaffManagementAccess && (
-            <TabsContent value="staff" className={profileTabPanelClass}>
-              {activeTab === "staff" ? <StaffManagement embedded /> : null}
-            </TabsContent>
-          )}
+            {hasBusinessHoursAccess && (
+              <TabsContent value="business-hours" className={profileTabPanelClass}>
+                {activeTab === "business-hours" ? <TimingScreen embedded /> : null}
+              </TabsContent>
+            )}
 
-          {hasLocationManagementAccess && (
-            <TabsContent value="location" className={profileTabPanelClass}>
-              {activeTab === "location" ? <LocationsScreen embedded /> : null}
-            </TabsContent>
-          )}
+            {hasStaffManagementAccess && (
+              <TabsContent value="staff" className={profileTabPanelClass}>
+                {activeTab === "staff" ? <StaffManagement embedded /> : null}
+              </TabsContent>
+            )}
 
-          {hasTemplatesAccess && (
-            <TabsContent value="templates" className={profileTabPanelClass}>
-              {activeTab === "templates" ? <OrganizationTemplates embedded /> : null}
-            </TabsContent>
-          )}
+            {hasLocationManagementAccess && (
+              <TabsContent value="location" className={profileTabPanelClass}>
+                {activeTab === "location" ? <LocationsScreen embedded /> : null}
+              </TabsContent>
+            )}
 
-          {hasPaymentSettingsAccess && (
-            <TabsContent value="payment" className={profileTabPanelClass}>
-              {activeTab === "payment" ? <PaymentSettings embedded /> : null}
-            </TabsContent>
-          )}
+            {hasTemplatesAccess && (
+              <TabsContent value="templates" className={profileTabPanelClass}>
+                {activeTab === "templates" ? <OrganizationTemplates embedded /> : null}
+              </TabsContent>
+            )}
 
-          {!isStaff && (
-            <TabsContent value="billing" className={profileTabPanelClass}>
-              {activeTab === "billing" ? (
-                <OrganizationPageShell embedded>
-                  <SettingsEmbeddedHeader
-                    icon={Wallet}
-                    title="Credit Wallet"
-                    description="50 free booking credits on sign-in, plus Razorpay recharge packs."
-                  />
-                  <div className={settingsEmbedded.sectionBody}>
-                    <CreditWalletBillingPanel organisationId={organizationId} />
-                  </div>
-                </OrganizationPageShell>
-              ) : null}
-            </TabsContent>
-          )}
+            {hasPaymentSettingsAccess && (
+              <TabsContent value="payment" className={profileTabPanelClass}>
+                {activeTab === "payment" ? <PaymentSettings embedded /> : null}
+              </TabsContent>
+            )}
 
-          {hasBusinessValuesAccess && (
-            <TabsContent value="appointment-values" className={profileTabPanelClass}>
-              {activeTab === "appointment-values" ? <ReferenceValuesPage embedded /> : null}
-            </TabsContent>
-          )}
+            {!isStaff && (
+              <TabsContent value="loyalty" className={profileTabPanelClass}>
+                {activeTab === "loyalty" ? <OrganizationLoyalty embedded /> : null}
+              </TabsContent>
+            )}
 
-          <TabsContent value="account" className={profileTabPanelClass}>
-            <Card className={cn(settingsEmbedded.shell)}>
-              <CardContent className="p-0">
+            {!isStaff && (
+              <TabsContent value="billing" className={profileTabPanelClass}>
+                {activeTab === "billing" ? (
+                  <OrganizationPageShell embedded>
+                    <SettingsEmbeddedHeader
+                      icon={Wallet}
+                      title="Credit Wallet"
+                      description="50 free booking credits on sign-in, plus Razorpay recharge packs."
+                    />
+                    <div className={settingsEmbedded.sectionBody}>
+                      <CreditWalletBillingPanel organisationId={organizationId} />
+                    </div>
+                  </OrganizationPageShell>
+                ) : null}
+              </TabsContent>
+            )}
+
+            <TabsContent value="account" className={profileTabPanelClass}>
+              <div>
                 <SettingsEmbeddedHeader
                   icon={User}
                   title="Account"
@@ -1263,7 +1265,7 @@ const OrganizationProfile = () => {
                       onClick={handleLogout}
                       className={cn(
                         org.btnPrimary,
-                        "h-14 min-h-14 w-full touch-manipulation rounded-2xl px-6 text-base font-semibold shadow-md",
+                        "h-14 min-h-14 w-full touch-manipulation rounded-xl bg-none bg-blue-600 px-6 text-base font-semibold shadow-none hover:bg-blue-700",
                       )}
                     >
                       <LogOut className="mr-2 h-5 w-5" />
@@ -1272,13 +1274,13 @@ const OrganizationProfile = () => {
                   </div>
                 </div>
 
-                <div className="border-t border-stone-100">
+                <div className={profileSectionDivider}>
                   <div className={cn(profileCardContentClass, "py-4 md:py-5")}>
                     <p className="text-xs leading-relaxed text-stone-400">
                       Permanently delete this organization and all associated data. This cannot be undone.
                     </p>
 
-                    <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                    <AlertDialog open={showDeleteDialog} onOpenChange={handleDeleteDialogOpenChange}>
                       <AlertDialogTrigger asChild>
                         <Button
                           variant="ghost"
@@ -1298,17 +1300,36 @@ const OrganizationProfile = () => {
                               information will be lost forever.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
-                          <div className="py-4">
-                            <Label htmlFor="otp">Enter OTP (if required)</Label>
-                            <Input
-                              id="otp"
-                              value={otp}
-                              onChange={(e) => setOtp(e.target.value)}
-                              placeholder="Enter OTP"
-                              inputMode="numeric"
-                              autoComplete="one-time-code"
-                              className="mt-1 h-11 min-h-11 text-base"
-                            />
+                          <div className="space-y-4 py-4">
+                            <p className="text-sm text-stone-500">
+                              {deleteOtpMobile
+                                ? `We will send a verification code to ${deleteOtpMobile} to confirm this action.`
+                                : "Add a mobile number to your profile before deleting the organization."}
+                            </p>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              onClick={sendDeleteConfirmationOtp}
+                              disabled={!deleteOtpMobile || isSendingDeleteOtp}
+                              className="min-h-11 w-full touch-manipulation"
+                            >
+                              {isSendingDeleteOtp ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Sending OTP...
+                                </>
+                              ) : deleteOtpSent ? (
+                                "Resend OTP"
+                              ) : (
+                                "Send OTP"
+                              )}
+                            </Button>
+                            {deleteOtpSent && (
+                              <div className="space-y-2">
+                                <Label>Enter verification code</Label>
+                                <OtpInput onChange={setOtp} onComplete={setOtp} />
+                              </div>
+                            )}
                           </div>
                           <AlertDialogFooter className="gap-2 md:gap-0">
                             <AlertDialogCancel className="min-h-11 w-full touch-manipulation md:w-auto">
@@ -1316,7 +1337,7 @@ const OrganizationProfile = () => {
                             </AlertDialogCancel>
                             <AlertDialogAction
                               onClick={handleDeleteOrganization}
-                              disabled={isDeleting}
+                              disabled={isDeleting || !deleteOtpSent || otp.length !== 6}
                               className="min-h-11 w-full touch-manipulation bg-red-600 hover:bg-red-700 md:w-auto"
                             >
                               {isDeleting ? (
@@ -1331,9 +1352,10 @@ const OrganizationProfile = () => {
                       </AlertDialog>
                   </div>
                 </div>
-              </CardContent>
+              </div>
+            </TabsContent>
             </Card>
-          </TabsContent>
+        </div>
     </Tabs>
   );
 };

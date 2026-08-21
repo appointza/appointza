@@ -189,6 +189,8 @@ export class OrganisationRoomStatusUpdateReq {
   id: number = 0;
   organisation_id: number = 0;
   status: string = "available";
+  source: string = "api";
+  notes: string = "";
 }
 
 export class OrganisationRoomIdReq {
@@ -196,14 +198,63 @@ export class OrganisationRoomIdReq {
   organisation_id: number = 0;
 }
 
+export class OrganisationRoomStatusEvent {
+  id: number = 0;
+  organisation_id: number = 0;
+  organisation_location_id: number = 0;
+  organisation_room_id: number = 0;
+  booking_id: string = "";
+  from_status: string = "";
+  to_status: string = "";
+  event_type: string = "";
+  changed_by_user_id?: number | null;
+  changed_by_name: string = "";
+  source: string = "api";
+  notes: string = "";
+  occurred_at: string = "";
+  created_at: string = "";
+}
+
+export class OrganisationRoomStatusEventSelectReq {
+  organisation_id: number = 0;
+  organisation_room_id: number = 0;
+  booking_id: string = "";
+  limit: number = 50;
+}
+
+/** Canonical stay funnel steps for admin timeline. */
+export const ROOM_STATUS_FUNNEL = [
+  { event_type: "booked", label: "Booked / Reserved", status: "reserved" },
+  { event_type: "checkin", label: "Check-in", status: "occupied" },
+  { event_type: "checkout", label: "Check-out", status: "checkout_pending" },
+  { event_type: "cleaning", label: "Cleaning", status: "cleaning" },
+  { event_type: "clean", label: "Clean / Available", status: "available" },
+] as const;
+
+export function roomStatusEventLabel(eventType: string, toStatus?: string): string {
+  const type = (eventType || "").toLowerCase();
+  const funnel = ROOM_STATUS_FUNNEL.find((s) => s.event_type === type);
+  if (funnel) return funnel.label;
+  return statusLabel(toStatus || type);
+}
+
 export class OrganisationRoomStatusBoardRes {
   organisation_id: number = 0;
   today: string = "";
   as_of: string = "";
   selected_id?: number;
+  selected_room?: OrganisationRoom | null;
   counts: Record<string, number> = {};
+  /** Server-computed chips for the as_of date — UI only renders these. */
+  status_summary: OrganisationRoomStatusSummaryItem[] = [];
   floors: OrganisationRoomStatusFloorGroup[] = [];
   rooms: OrganisationRoom[] = [];
+}
+
+export class OrganisationRoomStatusSummaryItem {
+  value: string = "";
+  label: string = "";
+  count: number = 0;
 }
 
 export class OrganisationRoomStatusFloorGroup {

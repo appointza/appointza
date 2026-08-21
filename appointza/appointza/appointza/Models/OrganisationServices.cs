@@ -50,6 +50,7 @@ public DateTime modifiedon { get; set; }
 public bool isactive { get; set; }
 public bool issuspended { get; set; }
 public long organisationid { get; set; }
+public long organisationlocationid { get; set; }
 public bool isfactory { get; set; }
 
 public decimal? rating { get; set; }
@@ -79,6 +80,20 @@ public string notes { get; set; }
     {
         public long id { get; set; }
         public long organisationid { get; set; }
+        public long organisationlocationid { get; set; }
+        /// <summary>When true, return active public services joined with organisation/location in one query.</summary>
+        public bool public_catalogue { get; set; }
+        public string search { get; set; } = "";
+        public int skip { get; set; }
+        public int take { get; set; }
+    }
+
+    public class PublicServiceCatalogueItem : OrganisationServices
+    {
+        public string organisationName { get; set; } = "";
+        public string organisationLocationCity { get; set; } = "";
+        public string organisationLocationState { get; set; } = "";
+        public long organisationImageId { get; set; }
     }
     public class OrganisationServicesDeleteReq
     {

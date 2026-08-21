@@ -20,6 +20,7 @@ export class OrganisationServices {
   isactive: boolean = false
   issuspended: boolean = false
   organisationid: number = 0
+  organisationlocationid: number = 0
   isfactory: boolean = false
   rating: number | null = null
   notes: string = ""
@@ -48,6 +49,18 @@ export class comboids{
 export class OrganisationServicesSelectReq {
   id: number = 0;
   organisationid:number =0
+  organisationlocationid: number = 0
+  public_catalogue: boolean = false
+  search: string = ""
+  skip: number = 0
+  take: number = 0
+}
+
+export class PublicServiceCatalogueItem extends OrganisationServices {
+  organisationName: string = ""
+  organisationLocationCity: string = ""
+  organisationLocationState: string = ""
+  organisationImageId: number = 0
 }
 
 export class OrganisationServicesDeleteReq {

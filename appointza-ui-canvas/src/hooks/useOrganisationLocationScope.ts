@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGlobalId } from "@/contexts/GlobalIdContext";
-import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
+import {
+  getCurrentLocationFromStorage,
+  getLocationDisplayName,
+} from "@/utils/location.util";
 
 function readStoredLocationId(): number {
   try {
@@ -18,13 +20,18 @@ function readStoredLocationId(): number {
   }
 }
 
-export function useOrganisationLocationScope(organisationId: number) {
-  const { user, isAuthenticated } = useAuth();
+/** Resolves the active organisation location from dashboard selection — no API fetch. */
+export function useOrganisationLocationScope(_organisationId: number) {
+  const { user } = useAuth();
   const { id: globalLocationId, setId: setGlobalLocationId } = useGlobalId();
-  const locationService = useMemo(() => new OrganisationLocationService(), []);
+  const [locationId, setLocationId] = useState(0);
 
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
-  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    const fromGlobal = globalLocationId ? Number(globalLocationId) : 0;
+    const fromStorage = readStoredLocationId();
+    const staffLocationId = user?.locationid && user.locationid > 0 ? user.locationid : 0;
+    setLocationId(fromGlobal > 0 ? fromGlobal : fromStorage > 0 ? fromStorage : staffLocationId);
+  }, [globalLocationId, user?.locationid]);
 
   useEffect(() => {
     const handleLocationChanged = (event: Event) => {
@@ -32,6 +39,7 @@ export function useOrganisationLocationScope(organisationId: number) {
       const nextId = Number(detail?.organizationlocationid || 0);
       if (nextId > 0) {
         setGlobalLocationId(nextId);
+        setLocationId(nextId);
       }
     };
 
@@ -39,85 +47,20 @@ export function useOrganisationLocationScope(organisationId: number) {
     return () => window.removeEventListener("organizationlocationidChanged", handleLocationChanged);
   }, [setGlobalLocationId]);
 
-  const loadLocations = useCallback(async () => {
-    if (!isAuthenticated || organisationId <= 0) {
-      setLocations([]);
-      setLoading(false);
-      return;
+  const locationLabel = useMemo(() => {
+    const stored = getCurrentLocationFromStorage();
+    if (stored?.id === locationId) {
+      const name = (stored.name || "").trim();
+      const city = (stored.city || "").trim();
+      if (name && city) return `${name} — ${city}`;
+      return name || city || getLocationDisplayName(stored);
     }
-
-    setLoading(true);
-    try {
-      const req = new OrganisationLocationSelectReq();
-      if (organisationId > 0) {
-        req.organisationid = organisationId;
-      } else if (user?.locationid && user.locationid > 0) {
-        req.organisationlocationid = user.locationid;
-      }
-
-      const response = await locationService.select(req);
-      const locs = response ?? [];
-      setLocations(locs);
-
-      if (locs.length === 0) return;
-
-      const storedId = globalLocationId
-        ? Number(globalLocationId)
-        : readStoredLocationId();
-      const staffLocationId = user?.locationid && user.locationid > 0 ? user.locationid : 0;
-      const preferredId =
-        storedId > 0 && locs.some((loc) => loc.id === storedId) ? storedId
-        : staffLocationId > 0 && locs.some((loc) => loc.id === staffLocationId) ? staffLocationId
-        : locs[0].id;
-
-      if (!globalLocationId || !locs.some((loc) => loc.id === Number(globalLocationId))) {
-        setGlobalLocationId(preferredId);
-      }
-    } catch {
-      setLocations([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [
-    globalLocationId,
-    isAuthenticated,
-    locationService,
-    organisationId,
-    setGlobalLocationId,
-    user?.locationid,
-  ]);
-
-  useEffect(() => {
-    void loadLocations();
-  }, [loadLocations]);
-
-  const locationId = useMemo(() => {
-    const fromGlobal = globalLocationId ? Number(globalLocationId) : 0;
-    if (fromGlobal > 0 && locations.some((loc) => loc.id === fromGlobal)) {
-      return fromGlobal;
-    }
-    if (locations.length === 1) return locations[0].id;
-    return 0;
-  }, [globalLocationId, locations]);
-
-  const selectedLocation = useMemo(
-    () => locations.find((loc) => loc.id === locationId) ?? null,
-    [locationId, locations],
-  );
-
-  const setLocationId = useCallback(
-    (id: number) => {
-      setGlobalLocationId(id);
-    },
-    [setGlobalLocationId],
-  );
+    return locationId > 0 ? `Location #${locationId}` : "";
+  }, [locationId]);
 
   return {
-    locations,
     locationId,
-    selectedLocation,
-    loading,
-    setLocationId,
-    reloadLocations: loadLocations,
+    locationLabel,
+    loading: false,
   };
 }

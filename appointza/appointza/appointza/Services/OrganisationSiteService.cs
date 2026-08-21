@@ -12,19 +12,25 @@ namespace appointza.Services
         RequestState requeststate;
         readonly OrganisationHospitalityContentService hospitalityContentService;
         readonly OrganisationRoomService organisationRoomService;
+        readonly OrganisationServicesService organisationservicesService;
+        readonly ReferenceValueService referenceValueService;
 
         public OrganisationSiteService(
             IDbProvider dbprovider,
             IQueryBuilderProvider querybuilderprovider,
             RequestState requeststate,
             OrganisationHospitalityContentService hospitalityContentService,
-            OrganisationRoomService organisationRoomService)
+            OrganisationRoomService organisationRoomService,
+            OrganisationServicesService organisationservicesService,
+            ReferenceValueService referenceValueService)
         {
             this.dbprovider = dbprovider;
             this.querybuilderprovider = querybuilderprovider;
             this.requeststate = requeststate;
             this.hospitalityContentService = hospitalityContentService;
             this.organisationRoomService = organisationRoomService;
+            this.organisationservicesService = organisationservicesService;
+            this.referenceValueService = referenceValueService;
         }
 
         public async Task<List<OrganisationSite>> Select(OrganisationSiteSelectReq req)
@@ -187,6 +193,7 @@ namespace appointza.Services
 
                 public async Task<List<Sitedetails>> GetSiteDetailsTransaction(IDb db, long organisationlocationid)
         {
+            await organisationservicesService.EnsureLocationColumnAsync(db);
             List<Sitedetails> result = new List<Sitedetails>();
             string query = @"
                 SELECT 
@@ -218,6 +225,8 @@ namespace appointza.Services
                   ol.notes AS location_notes,
                   ol.templateid AS templateid,
                   ol.facility_list AS location_facility_list,
+                  ol.email AS location_email,
+                  ol.whatsapp_mobile AS location_whatsapp_mobile,
 
                   -- Organisation columns
                   o.id AS organisation_id,
@@ -264,6 +273,7 @@ namespace appointza.Services
                   os.isactive AS service_isactive,
                   os.issuspended AS service_issuspended,
                   os.organisationid AS service_organisationid,
+                  os.organisationlocationid AS service_organisationlocationid,
                   os.isfactory AS service_isfactory,
                   os.notes AS service_notes,
 
@@ -292,7 +302,9 @@ namespace appointza.Services
 
                 FROM OrganisationLocation ol
                 LEFT JOIN Organisation o ON o.id = ol.organisationid
-                LEFT JOIN OrganisationServices os ON os.organisationid = ol.organisationid AND os.isactive = TRUE
+                LEFT JOIN OrganisationServices os ON os.organisationid = ol.organisationid
+                    AND os.organisationlocationid = ol.id
+                    AND os.isactive = TRUE
                 LEFT JOIN OrganisationServiceTiming ost ON ost.organisationlocationid = ol.id
                 LEFT JOIN ReferenceValue rv ON ol.templateid = rv.id
                 WHERE ol.id = @organisationlocationid
@@ -344,11 +356,14 @@ namespace appointza.Services
                                 parentid = reader["parentid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["parentid"]),
                                 isfactory = reader["location_isfactory"] == DBNull.Value ? false : Convert.ToBoolean(reader["location_isfactory"]),
                                 notes = reader["location_notes"] == DBNull.Value ? "" : reader["location_notes"].ToString(),
-                                facility_list_json = reader["location_facility_list"] == DBNull.Value ? "[]" : reader["location_facility_list"].ToString()
+                                facility_list_json = reader["location_facility_list"] == DBNull.Value ? "[]" : reader["location_facility_list"].ToString(),
+                                email = reader["location_email"] == DBNull.Value ? "" : reader["location_email"].ToString(),
+                                whatsapp_mobile = reader["location_whatsapp_mobile"] == DBNull.Value ? "" : reader["location_whatsapp_mobile"].ToString()
                             },
                             organisationdetail = null,
                             orgnaisatinservice = new List<OrganisationServices>(),
                             OrganisationServiceTiming = new List<OrganisationServiceTiming>(),
+                            facilities = new List<string>(),
                             template_html = reader["template_html"] == DBNull.Value ? "" : reader["template_html"].ToString()
                         };
                     }
@@ -447,6 +462,7 @@ namespace appointza.Services
                                 isactive = true, // Already filtered to only active services
                                 issuspended = reader["service_issuspended"] == DBNull.Value ? false : Convert.ToBoolean(reader["service_issuspended"]),
                                 organisationid = reader["service_organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["service_organisationid"]),
+                                organisationlocationid = reader["service_organisationlocationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["service_organisationlocationid"]),
                                 isfactory = reader["service_isfactory"] == DBNull.Value ? false : Convert.ToBoolean(reader["service_isfactory"]),
                                 notes = reader["service_notes"] == DBNull.Value ? "" : reader["service_notes"].ToString()
                             });
@@ -486,8 +502,83 @@ namespace appointza.Services
             }
             
             result = locationGroups.Values.ToList();
+            await LoadLocationServicesForSitesTransaction(db, result);
             await EnrichHospitalityDataTransaction(db, result);
+            await EnrichFacilitiesTransaction(db, result);
             return result;
+        }
+
+        async Task EnrichFacilitiesTransaction(IDb db, List<Sitedetails> sites)
+        {
+            foreach (var site in sites)
+            {
+                site.facilities ??= [];
+                site.facilities.Clear();
+                var facilityIds = site.locationdetail?.facility_list ?? [];
+                foreach (var id in facilityIds.Where(x => x > 0).Distinct())
+                {
+                    try
+                    {
+                        var values = await referenceValueService.SelectTransaction(db, new ReferenceValueSelectReq
+                        {
+                            id = id,
+                            referencetypeid = 0,
+                            organisationid = 0,
+                            parentid = 0,
+                        });
+                        var label = values?.FirstOrDefault()?.displaytext?.Trim();
+                        if (!string.IsNullOrWhiteSpace(label))
+                            site.facilities.Add(label);
+                    }
+                    catch
+                    {
+                        // skip unresolved facility ids
+                    }
+                }
+            }
+        }
+
+        static long CalculateDisplayPrice(OrganisationServices service)
+        {
+            if (!service.show_price)
+                return 0;
+
+            if (service.is_price_different)
+            {
+                var today = DateTime.Now.DayOfWeek;
+                return today == DayOfWeek.Saturday || today == DayOfWeek.Sunday
+                    ? service.weekend_price
+                    : service.weekday_price;
+            }
+
+            return service.weekday_price > 0 ? service.weekday_price : service.prize;
+        }
+
+        async Task LoadLocationServicesForSitesTransaction(IDb db, List<Sitedetails> sites)
+        {
+            foreach (var site in sites)
+            {
+                var orgId = site.organisationdetail?.id ?? site.locationdetail?.organisationid ?? 0;
+                var locId = site.locationdetail?.id ?? 0;
+                if (orgId <= 0 || locId <= 0)
+                {
+                    site.orgnaisatinservice = [];
+                    continue;
+                }
+
+                var services = await organisationservicesService.SelectTransaction(db, new OrganisationServicesSelectReq
+                {
+                    organisationid = orgId,
+                    organisationlocationid = locId,
+                });
+
+                foreach (var service in services)
+                {
+                    service.prize = CalculateDisplayPrice(service);
+                }
+
+                site.orgnaisatinservice = services;
+            }
         }
 
         async Task EnrichHospitalityDataTransaction(IDb db, List<Sitedetails> sites)

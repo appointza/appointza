@@ -22,6 +22,12 @@ function todayIsoLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+function addDaysIso(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + days);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const schema = z
   .object({
     roomId: z.string().optional().default(""),
@@ -53,6 +59,7 @@ type PublicRoom = {
   capacity?: { total_guests?: number; extra_beds_allowed?: number };
   pricing?: { price_per_night?: number; price_per_hour?: number };
   main_photo?: string;
+  available_for_dates?: boolean;
 };
 
 function pickRecord(value: unknown): Record<string, unknown> {
@@ -108,67 +115,17 @@ export default function RoomBookingPage() {
   } | null>(null);
 
   const scopeReady = parsed.organisationId > 0 && parsed.organisationLocationId > 0;
-
-  const { data, isLoading, error } = useQuery({
-    queryKey: [
-      "room-booking-index",
-      parsed.organisationId,
-      parsed.organisationLocationId,
-      parsed.roomId,
-      parsed.packageId,
-    ],
-    enabled: scopeReady,
-    queryFn: () =>
-      bookingService.index({
-        organisationId: parsed.organisationId,
-        organisationLocationId: parsed.organisationLocationId,
-        roomId: parsed.roomId || undefined,
-        packageId: parsed.packageId || undefined,
-        checkIn: parsed.checkIn || undefined,
-        checkOut: parsed.checkOut || undefined,
-        checkInTime: parsed.checkInTime || undefined,
-        checkOutTime: parsed.checkOutTime || undefined,
-      }),
-  });
-
-  const page = useMemo(() => pickRecord(data), [data]);
-  const organisation = useMemo(() => pickRecord(page.organisation), [page.organisation]);
-  const isHourlyBooking = pickStr(organisation, "booking_type", "bookingType").toLowerCase() === "hourly";
-  const policyCheckInTime = normalizeTime(pickStr(organisation, "check_in_time", "checkInTime"), "14:00");
-  const policyCheckOutTime = normalizeTime(pickStr(organisation, "check_out_time", "checkOutTime"), "11:00");
-
-  const rooms = useMemo(() => {
-    const raw = (page.rooms as unknown[]) ?? [];
-    return raw.map((item) => {
-      const r = pickRecord(item);
-      const cap = pickRecord(r.capacity);
-      const pricing = pickRecord(r.pricing);
-      return {
-        id: pickStr(r, "id"),
-        room_number: pickStr(r, "room_number", "roomNumber"),
-        room_name: pickStr(r, "room_name", "roomName"),
-        room_type: pickStr(r, "room_type", "roomType"),
-        capacity: {
-          total_guests: pickNum(cap, "total_guests", "totalGuests") || 2,
-          extra_beds_allowed: pickNum(cap, "extra_beds_allowed", "extraBedsAllowed"),
-        },
-        pricing: {
-          price_per_night: pickNum(pricing, "price_per_night", "pricePerNight"),
-          price_per_hour: pickNum(pricing, "price_per_hour", "pricePerHour"),
-        },
-        main_photo: pickStr(r, "main_photo", "mainPhoto"),
-      } satisfies PublicRoom;
-    });
-  }, [page.rooms]);
+  const preferredRoomId = (parsed.roomId || "").trim();
+  const preferredPackageId = (parsed.packageId || "").trim();
 
   const form = useForm<BookingForm>({
     resolver: zodResolver(schema),
     defaultValues: {
-      roomId: parsed.roomId || "",
+      roomId: "",
       checkIn: parsed.checkIn || "",
       checkOut: parsed.checkOut || "",
-      checkInTime: policyCheckInTime,
-      checkOutTime: policyCheckOutTime,
+      checkInTime: parsed.checkInTime || "14:00",
+      checkOutTime: parsed.checkOutTime || "11:00",
       guestName: "",
       guestPhone: "",
       guestEmail: "",
@@ -176,7 +133,6 @@ export default function RoomBookingPage() {
     },
   });
 
-  const hydratedRef = useRef(false);
   const roomId = form.watch("roomId");
   const checkIn = form.watch("checkIn");
   const checkOut = form.watch("checkOut");
@@ -184,33 +140,173 @@ export default function RoomBookingPage() {
   const checkOutTime = form.watch("checkOutTime");
   const persons = form.watch("persons");
 
-  const selectedRoom = rooms.find((r) => r.id === roomId) ?? null;
+  const datesReady = useMemo(() => {
+    if (!checkIn || !checkOut) return false;
+    const start = new Date(`${checkIn}T${checkInTime || "14:00"}`);
+    const end = new Date(`${checkOut}T${checkOutTime || "11:00"}`);
+    return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start;
+  }, [checkIn, checkOut, checkInTime, checkOutTime]);
+
+  // Property / policy bootstrap (no room list until dates are chosen).
+  const {
+    data: bootstrapData,
+    isLoading: bootstrapLoading,
+    error: bootstrapError,
+  } = useQuery({
+    queryKey: ["room-booking-bootstrap", parsed.organisationId, parsed.organisationLocationId],
+    enabled: scopeReady,
+    queryFn: () =>
+      bookingService.index({
+        organisationId: parsed.organisationId,
+        organisationLocationId: parsed.organisationLocationId,
+        packageId: parsed.packageId || undefined,
+      }),
+  });
+
+  // Rooms for the selected stay window only.
+  const {
+    data: availabilityData,
+    isLoading: roomsLoading,
+    error: roomsError,
+  } = useQuery({
+    queryKey: [
+      "room-booking-availability",
+      parsed.organisationId,
+      parsed.organisationLocationId,
+      checkIn,
+      checkOut,
+      checkInTime,
+      checkOutTime,
+    ],
+    enabled: scopeReady && datesReady,
+    queryFn: () =>
+      bookingService.index({
+        organisationId: parsed.organisationId,
+        organisationLocationId: parsed.organisationLocationId,
+        roomId: preferredRoomId || undefined,
+        packageId: parsed.packageId || undefined,
+        checkIn,
+        checkOut,
+        checkInTime,
+        checkOutTime,
+      }),
+  });
+
+  const page = useMemo(
+    () => pickRecord(availabilityData ?? bootstrapData),
+    [availabilityData, bootstrapData],
+  );
+  const organisation = useMemo(() => pickRecord(page.organisation), [page.organisation]);
+  const isHourlyBooking = pickStr(organisation, "booking_type", "bookingType").toLowerCase() === "hourly";
+  const policyCheckInTime = normalizeTime(pickStr(organisation, "check_in_time", "checkInTime"), "14:00");
+  const policyCheckOutTime = normalizeTime(pickStr(organisation, "check_out_time", "checkOutTime"), "11:00");
+
+  const preferredPackage = useMemo(() => {
+    if (!preferredPackageId) return null;
+    const packages = (pickRecord(bootstrapData).packages as unknown[]) ??
+      (pickRecord(organisation).packages as unknown[]) ??
+      [];
+    return (
+      packages
+        .map((item) => pickRecord(item))
+        .find((pkg) => pickStr(pkg, "id") === preferredPackageId) ?? null
+    );
+  }, [bootstrapData, organisation, preferredPackageId]);
+
+  const packageRoomType = pickStr(preferredPackage ?? {}, "room_type", "roomType").toLowerCase();
+
+  const availableRooms = useMemo(() => {
+    if (!datesReady || !availabilityData) return [];
+    const raw = (pickRecord(availabilityData).rooms as unknown[]) ?? [];
+    const mapped = raw
+      .map((item) => {
+        const r = pickRecord(item);
+        const cap = pickRecord(r.capacity);
+        const pricing = pickRecord(r.pricing);
+        const availableRaw = r.available_for_dates ?? r.availableForDates;
+        return {
+          id: pickStr(r, "id"),
+          room_number: pickStr(r, "room_number", "roomNumber"),
+          room_name: pickStr(r, "room_name", "roomName"),
+          room_type: pickStr(r, "room_type", "roomType"),
+          capacity: {
+            total_guests: pickNum(cap, "total_guests", "totalGuests") || 2,
+            extra_beds_allowed: pickNum(cap, "extra_beds_allowed", "extraBedsAllowed"),
+          },
+          pricing: {
+            price_per_night: pickNum(pricing, "price_per_night", "pricePerNight"),
+            price_per_hour: pickNum(pricing, "price_per_hour", "pricePerHour"),
+          },
+          main_photo: pickStr(r, "main_photo", "mainPhoto"),
+          available_for_dates: availableRaw === false ? false : true,
+        } satisfies PublicRoom;
+      })
+      .filter((room) => room.id && room.available_for_dates !== false);
+
+    if (!packageRoomType) return mapped;
+    const typed = mapped.filter((room) => room.room_type.toLowerCase() === packageRoomType);
+    // Never empty the list solely due to package room_type mismatch.
+    return typed.length > 0 ? typed : mapped;
+  }, [availabilityData, datesReady, packageRoomType]);
+
+  const policyHydratedRef = useRef(false);
+  const selectedRoom = availableRooms.find((r) => r.id === roomId) ?? null;
   const minBookingDate = todayIsoLocal();
   const minCheckOutDate = checkIn && checkIn >= minBookingDate ? checkIn : minBookingDate;
 
+  // Apply property check-in/out times once; leave dates empty so the guest chooses first.
   useEffect(() => {
-    if (isLoading || hydratedRef.current) return;
-    hydratedRef.current = true;
+    if (bootstrapLoading || policyHydratedRef.current) return;
+    policyHydratedRef.current = true;
+    form.setValue("checkInTime", policyCheckInTime);
+    form.setValue("checkOutTime", policyCheckOutTime);
+    if (!form.getValues("checkIn") && parsed.checkIn) {
+      form.setValue("checkIn", parsed.checkIn);
+    }
+    if (!form.getValues("checkOut") && parsed.checkOut) {
+      form.setValue("checkOut", parsed.checkOut);
+    }
+  }, [
+    bootstrapLoading,
+    policyCheckInTime,
+    policyCheckOutTime,
+    parsed.checkIn,
+    parsed.checkOut,
+    form,
+  ]);
 
-    const defaultCheckIn = pickStr(page, "check_in", "checkIn") || "";
-    const defaultCheckOut = pickStr(page, "check_out", "checkOut") || "";
-    const selectedRoomId = pickStr(page, "selected_room_id", "selectedRoomId") || parsed.roomId;
+  // When dates change, clear room until availability returns; then prefer URL room if free.
+  useEffect(() => {
+    if (!datesReady) {
+      if (roomId) form.setValue("roomId", "");
+      return;
+    }
+    if (roomsLoading) return;
 
-    form.reset({
-      roomId: selectedRoomId,
-      checkIn: defaultCheckIn,
-      checkOut: defaultCheckOut,
-      checkInTime: policyCheckInTime,
-      checkOutTime: policyCheckOutTime,
-      guestName: "",
-      guestPhone: "",
-      guestEmail: "",
-      persons: 2,
-    });
-  }, [isLoading, page, parsed.roomId, policyCheckInTime, policyCheckOutTime, form]);
+    const stillValid = availableRooms.some((r) => r.id === roomId);
+    if (roomId && stillValid) return;
+
+    const preferred =
+      preferredRoomId && availableRooms.some((r) => r.id === preferredRoomId)
+        ? preferredRoomId
+        : availableRooms[0]?.id || "";
+    form.setValue("roomId", preferred);
+  }, [datesReady, roomsLoading, availableRooms, roomId, preferredRoomId, form]);
+
+  // Keep check-out at least one night after check-in for overnight.
+  useEffect(() => {
+    if (!checkIn || isHourlyBooking) return;
+    if (!checkOut || checkOut <= checkIn) {
+      form.setValue("checkOut", addDaysIso(checkIn, 1));
+    }
+  }, [checkIn, checkOut, isHourlyBooking, form]);
 
   const refreshQuote = useCallback(async () => {
-    if (!scopeReady || !checkIn || !checkOut) return;
+    if (!scopeReady || !datesReady || !roomId) {
+      setQuote(null);
+      setQuoteError(null);
+      return;
+    }
     setQuoteLoading(true);
     setQuoteError(null);
     try {
@@ -219,9 +315,10 @@ export default function RoomBookingPage() {
         organisationLocationId: parsed.organisationLocationId,
         checkIn,
         checkOut,
-        roomId: roomId || undefined,
+        roomId,
         persons,
         extraBeds,
+        packageIds: preferredPackageId ? [preferredPackageId] : undefined,
         checkInTime,
         checkOutTime,
       });
@@ -234,6 +331,7 @@ export default function RoomBookingPage() {
     }
   }, [
     scopeReady,
+    datesReady,
     bookingService,
     parsed.organisationId,
     parsed.organisationLocationId,
@@ -242,6 +340,7 @@ export default function RoomBookingPage() {
     roomId,
     persons,
     extraBeds,
+    preferredPackageId,
     checkInTime,
     checkOutTime,
   ]);
@@ -254,8 +353,20 @@ export default function RoomBookingPage() {
   }, [refreshQuote]);
 
   const onSubmit = form.handleSubmit(async (values) => {
+    if (!datesReady) {
+      toast({
+        title: "Choose dates",
+        description: "Pick check-in and check-out before selecting a room.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!roomId) {
-      toast({ title: "Select a room", description: "Choose a room before confirming.", variant: "destructive" });
+      toast({
+        title: "Select a room",
+        description: "Choose an available room for your dates.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -274,7 +385,7 @@ export default function RoomBookingPage() {
         check_out_time: values.checkOutTime,
         persons: values.persons,
         extra_beds: extraBeds,
-        package_ids: [],
+        package_ids: preferredPackageId ? [preferredPackageId] : [],
         guest_service_ids: [],
       });
 
@@ -303,18 +414,15 @@ export default function RoomBookingPage() {
 
   if (!scopeReady) {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
-        <Card className="max-w-lg w-full">
+      <div className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
+        <Card className="w-full max-w-lg">
           <CardHeader>
             <CardTitle>Room booking</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-stone-600">
             <p>
-              Add <code className="text-xs bg-stone-100 px-1 py-0.5 rounded">organisationId</code> and{" "}
-              <code className="text-xs bg-stone-100 px-1 py-0.5 rounded">locationId</code> to the URL.
-            </p>
-            <p className="text-xs text-stone-500">
-              Example: <span className="break-all">/book?roomId=room-201&amp;organisationId=1&amp;locationId=2</span>
+              Add <code className="rounded bg-stone-100 px-1 py-0.5 text-xs">organisationId</code> and{" "}
+              <code className="rounded bg-stone-100 px-1 py-0.5 text-xs">locationId</code> to the URL.
             </p>
           </CardContent>
         </Card>
@@ -324,8 +432,8 @@ export default function RoomBookingPage() {
 
   if (confirmed) {
     return (
-      <div className="min-h-screen bg-stone-50 flex items-center justify-center p-6">
-        <Card className="max-w-lg w-full border-emerald-200">
+      <div className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
+        <Card className="w-full max-w-lg border-emerald-200">
           <CardHeader>
             <CardTitle className="text-emerald-800">Booking confirmed</CardTitle>
           </CardHeader>
@@ -338,9 +446,7 @@ export default function RoomBookingPage() {
                 Stay: {confirmed.checkIn} → {confirmed.checkOut}
               </p>
             ) : null}
-            {confirmed.total != null ? (
-              <p className="font-medium">{formatInr(confirmed.total)}</p>
-            ) : null}
+            {confirmed.total != null ? <p className="font-medium">{formatInr(confirmed.total)}</p> : null}
             <Button asChild variant="outline" className="mt-2">
               <Link to="/">Back to home</Link>
             </Button>
@@ -352,7 +458,11 @@ export default function RoomBookingPage() {
 
   const orgName = pickStr(organisation, "name") || "Property";
   const locationName = pickStr(organisation, "location_name", "locationName");
-  const requestedRoomAvailable = page.requested_room_available ?? page.requestedRoomAvailable;
+  const preferredUnavailable =
+    datesReady &&
+    !roomsLoading &&
+    !!preferredRoomId &&
+    !availableRooms.some((r) => r.id === preferredRoomId);
 
   return (
     <div className="min-h-screen bg-stone-50">
@@ -375,11 +485,11 @@ export default function RoomBookingPage() {
 
       <div className="mx-auto grid max-w-5xl gap-6 px-4 py-6 lg:grid-cols-[1.2fr_0.8fr]">
         <form onSubmit={onSubmit} className="space-y-6">
-          {isLoading ? (
+          {bootstrapLoading ? (
             <div className="flex items-center gap-2 text-sm text-stone-500">
-              <Loader2 className="h-4 w-4 animate-spin" /> Loading rooms…
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading property…
             </div>
-          ) : error ? (
+          ) : bootstrapError ? (
             <Card className="border-red-200">
               <CardContent className="pt-6 text-sm text-red-700">
                 Could not load booking details. Check organisation and location IDs.
@@ -387,57 +497,31 @@ export default function RoomBookingPage() {
             </Card>
           ) : (
             <>
-              {parsed.roomId && requestedRoomAvailable === false ? (
-                <Card className="border-amber-200 bg-amber-50">
-                  <CardContent className="pt-6 text-sm text-amber-900">
-                    Room <strong>{parsed.roomId}</strong> is not available for the default dates. Pick another room or change dates.
-                  </CardContent>
-                </Card>
-              ) : null}
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Room</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <select
-                    className={nativeSelectClass}
-                    value={roomId}
-                    onChange={(e) => form.setValue("roomId", e.target.value)}
-                  >
-                    <option value="">Select a room</option>
-                    {rooms.map((room) => (
-                      <option key={room.id} value={room.id}>
-                        Room {room.room_number}
-                        {room.room_name ? ` — ${room.room_name}` : ""} ({formatRoomTypeLabel(room.room_type)})
-                      </option>
-                    ))}
-                  </select>
-
-                  {selectedRoom ? (
-                    <div className="rounded-lg border bg-stone-50 p-3 text-sm">
-                      <p className="font-medium">
-                        Room {selectedRoom.room_number}
-                        {selectedRoom.room_name ? ` · ${selectedRoom.room_name}` : ""}
-                      </p>
-                      <p className="text-stone-500">
-                        Up to {selectedRoom.capacity?.total_guests ?? 2} guests
-                        {selectedRoom.pricing?.price_per_night ?
-                          ` · ${formatInr(selectedRoom.pricing.price_per_night)}/night`
-                        : null}
-                      </p>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
-
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">
-                    {isHourlyBooking ? "Date & time" : "Stay dates"}
+                    1. {isHourlyBooking ? "Choose date & time" : "Choose stay dates"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-3">
+                  {preferredPackageId ? (
+                    <p className="rounded-lg border border-orange-100 bg-orange-50/80 p-3 text-sm text-stone-700">
+                      Package booking
+                      {pickStr(preferredPackage ?? {}, "name")
+                        ? `: ${pickStr(preferredPackage ?? {}, "name")}`
+                        : ""}
+                      . Choose dates, then pick an available room.
+                    </p>
+                  ) : preferredRoomId ? (
+                    <p className="text-sm text-stone-500">
+                      Preferred room <strong>{preferredRoomId}</strong> will be selected if it’s free
+                      for your dates.
+                    </p>
+                  ) : (
+                    <p className="text-sm text-stone-500">
+                      Pick your dates first. We’ll then show rooms available for that stay.
+                    </p>
+                  )}
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="space-y-1.5">
                       <Label>{isHourlyBooking ? "Start date" : "Check-in"}</Label>
@@ -446,6 +530,9 @@ export default function RoomBookingPage() {
                     <div className="space-y-1.5">
                       <Label>{isHourlyBooking ? "End date" : "Check-out"}</Label>
                       <Input type="date" min={minCheckOutDate} {...form.register("checkOut")} />
+                      {form.formState.errors.checkOut ? (
+                        <p className="text-xs text-red-600">{form.formState.errors.checkOut.message}</p>
+                      ) : null}
                     </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
@@ -461,97 +548,186 @@ export default function RoomBookingPage() {
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Guests</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between rounded-lg border p-3">
-                    <div className="flex items-center gap-2">
-                      <Users className="h-4 w-4 text-stone-500" />
-                      <span className="text-sm">Guests</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => form.setValue("persons", Math.max(1, persons - 1))}
-                      >
-                        <Minus className="h-4 w-4" />
-                      </Button>
-                      <span className="w-8 text-center text-sm font-medium">{persons}</span>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={() => form.setValue("persons", persons + 1)}
-                      >
-                        <Plus className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-
-                  {(selectedRoom?.capacity?.extra_beds_allowed ?? 0) > 0 ? (
-                    <div className="flex items-center justify-between rounded-lg border p-3">
-                      <span className="text-sm">Extra beds</span>
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setExtraBeds(Math.max(0, extraBeds - 1))}
-                        >
-                          <Minus className="h-4 w-4" />
-                        </Button>
-                        <span className="w-8 text-center text-sm font-medium">{extraBeds}</span>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() =>
-                            setExtraBeds(
-                              Math.min(selectedRoom?.capacity?.extra_beds_allowed ?? 0, extraBeds + 1),
-                            )
-                          }
-                        >
-                          <Plus className="h-4 w-4" />
-                        </Button>
+              {datesReady ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">2. Select a room</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {roomsLoading ? (
+                      <div className="flex items-center gap-2 text-sm text-stone-500">
+                        <Loader2 className="h-4 w-4 animate-spin" /> Checking availability…
                       </div>
-                    </div>
-                  ) : null}
-                </CardContent>
-              </Card>
+                    ) : roomsError ? (
+                      <p className="text-sm text-red-600">Could not check room availability. Try again.</p>
+                    ) : availableRooms.length === 0 ? (
+                      <p className="text-sm text-amber-800">
+                        No rooms are available for these dates. Please choose different dates.
+                      </p>
+                    ) : (
+                      <>
+                        {preferredUnavailable ? (
+                          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                            Room <strong>{preferredRoomId}</strong> is not free for these dates. Pick
+                            another available room below.
+                          </p>
+                        ) : preferredRoomId && roomId === preferredRoomId ? (
+                          <p className="text-sm text-stone-500">
+                            Preferred room <strong>{preferredRoomId}</strong> is available for your
+                            dates.
+                          </p>
+                        ) : null}
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Guest details</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  <div className="space-y-1.5">
-                    <Label>Full name</Label>
-                    <Input {...form.register("guestName")} placeholder="Guest name" />
-                    {form.formState.errors.guestName ? (
-                      <p className="text-xs text-red-600">{form.formState.errors.guestName.message}</p>
-                    ) : null}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Phone</Label>
-                    <Input {...form.register("guestPhone")} placeholder="+91 …" />
-                    {form.formState.errors.guestPhone ? (
-                      <p className="text-xs text-red-600">{form.formState.errors.guestPhone.message}</p>
-                    ) : null}
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label>Email (optional)</Label>
-                    <Input type="email" {...form.register("guestEmail")} placeholder="you@example.com" />
-                  </div>
-                </CardContent>
-              </Card>
+                        <select
+                          className={nativeSelectClass}
+                          value={roomId}
+                          onChange={(e) => form.setValue("roomId", e.target.value)}
+                        >
+                          <option value="">Select an available room</option>
+                          {availableRooms.map((room) => (
+                            <option key={room.id} value={room.id}>
+                              Room {room.room_number}
+                              {room.room_name ? ` — ${room.room_name}` : ""} (
+                              {formatRoomTypeLabel(room.room_type)})
+                              {room.pricing?.price_per_night
+                                ? ` · ${formatInr(room.pricing.price_per_night)}/night`
+                                : ""}
+                            </option>
+                          ))}
+                        </select>
+
+                        {selectedRoom ? (
+                          <div className="rounded-lg border bg-stone-50 p-3 text-sm">
+                            <p className="font-medium">
+                              Room {selectedRoom.room_number}
+                              {selectedRoom.room_name ? ` · ${selectedRoom.room_name}` : ""}
+                            </p>
+                            <p className="text-stone-500">
+                              Up to {selectedRoom.capacity?.total_guests ?? 2} guests
+                              {selectedRoom.pricing?.price_per_night
+                                ? ` · ${formatInr(selectedRoom.pricing.price_per_night)}/night`
+                                : null}
+                            </p>
+                          </div>
+                        ) : null}
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              ) : (
+                <Card className="border-dashed">
+                  <CardContent className="pt-6 text-sm text-stone-500">
+                    Select check-in and check-out dates to see available rooms.
+                  </CardContent>
+                </Card>
+              )}
+
+              {datesReady && roomId ? (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">3. Guests</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between rounded-lg border p-3">
+                        <div className="flex items-center gap-2">
+                          <Users className="h-4 w-4 text-stone-500" />
+                          <span className="text-sm">Guests</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => form.setValue("persons", Math.max(1, persons - 1))}
+                          >
+                            <Minus className="h-4 w-4" />
+                          </Button>
+                          <span className="w-8 text-center text-sm font-medium">{persons}</span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => form.setValue("persons", persons + 1)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {(selectedRoom?.capacity?.extra_beds_allowed ?? 0) > 0 ? (
+                        <div className="flex items-center justify-between rounded-lg border p-3">
+                          <span className="text-sm">Extra beds</span>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() => setExtraBeds(Math.max(0, extraBeds - 1))}
+                            >
+                              <Minus className="h-4 w-4" />
+                            </Button>
+                            <span className="w-8 text-center text-sm font-medium">{extraBeds}</span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              className="h-8 w-8"
+                              onClick={() =>
+                                setExtraBeds(
+                                  Math.min(
+                                    selectedRoom?.capacity?.extra_beds_allowed ?? 0,
+                                    extraBeds + 1,
+                                  ),
+                                )
+                              }
+                            >
+                              <Plus className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="text-base">4. Guest details</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      <div className="space-y-1.5">
+                        <Label>Full name</Label>
+                        <Input {...form.register("guestName")} placeholder="Guest name" />
+                        {form.formState.errors.guestName ? (
+                          <p className="text-xs text-red-600">
+                            {form.formState.errors.guestName.message}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Phone</Label>
+                        <Input {...form.register("guestPhone")} placeholder="+91 …" />
+                        {form.formState.errors.guestPhone ? (
+                          <p className="text-xs text-red-600">
+                            {form.formState.errors.guestPhone.message}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Email (optional)</Label>
+                        <Input
+                          type="email"
+                          {...form.register("guestEmail")}
+                          placeholder="you@example.com"
+                        />
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              ) : null}
             </>
           )}
         </form>
@@ -562,7 +738,11 @@ export default function RoomBookingPage() {
               <CardTitle className="text-base">Price summary</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
-              {quoteLoading ? (
+              {!datesReady ? (
+                <p className="text-stone-500">Choose stay dates to continue.</p>
+              ) : !roomId ? (
+                <p className="text-stone-500">Select an available room to see pricing.</p>
+              ) : quoteLoading ? (
                 <div className="flex items-center gap-2 text-stone-500">
                   <Loader2 className="h-4 w-4 animate-spin" /> Calculating…
                 </div>
@@ -585,6 +765,12 @@ export default function RoomBookingPage() {
                       <span>{formatInr(quote.extra_guest_total ?? 0)}</span>
                     </div>
                   ) : null}
+                  {(quote.packages_total ?? 0) > 0 ? (
+                    <div className="flex justify-between">
+                      <span>Package</span>
+                      <span>{formatInr(quote.packages_total ?? 0)}</span>
+                    </div>
+                  ) : null}
                   <div className="flex justify-between border-t pt-3 text-base font-semibold">
                     <span>Total</span>
                     <span>{formatInr(quote.total ?? 0)}</span>
@@ -596,7 +782,7 @@ export default function RoomBookingPage() {
 
               <Button
                 className="w-full"
-                disabled={submitting || quoteLoading || !quote || !roomId}
+                disabled={submitting || quoteLoading || !quote || !datesReady || !roomId}
                 onClick={onSubmit}
               >
                 {submitting ? (

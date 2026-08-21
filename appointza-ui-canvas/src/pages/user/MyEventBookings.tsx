@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, lazy, Suspense } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,7 +16,6 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Calendar, Users, AlertCircle, Search, X, Trash2, Star, QrCode, Phone } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
 import { EventBookingService } from "@/services/eventbooking.service";
 import { EventBooking, EventBookingSelectReq, EventBookingDeleteReq } from "@/models/eventbooking.model";
 import { EventService } from "@/services/event.service";
@@ -27,6 +26,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { decodeEventBookingNotes } from "@/utils/eventBookingNotes.util";
 import { formatEventDateLong, compareDateOnly, todayDateOnlyString } from "@/utils/eventDate.util";
+
+const QRCodeSVG = lazy(() =>
+  import("qrcode.react").then((m) => ({ default: m.QRCodeSVG })),
+);
 
 const MyEventBookings: React.FC = () => {
   const [bookings, setBookings] = useState<EventBooking[]>([]);
@@ -40,6 +43,7 @@ const MyEventBookings: React.FC = () => {
   const [selectedPaymentStatus, setSelectedPaymentStatus] = useState<string>('all');
   const [selectedCheckInStatus, setSelectedCheckInStatus] = useState<string>('all');
   const [selectedConfirmationStatus, setSelectedConfirmationStatus] = useState<string>('all');
+  const [visibleBookingCount, setVisibleBookingCount] = useState(40);
   
   // Cancel booking state
   const [bookingToCancel, setBookingToCancel] = useState<EventBooking | null>(null);
@@ -179,6 +183,15 @@ const MyEventBookings: React.FC = () => {
 
     setFilteredBookings(filtered);
   }, [bookings, events, searchTerm, selectedEventId, selectedPaymentStatus, selectedCheckInStatus, selectedConfirmationStatus]);
+
+  useEffect(() => {
+    setVisibleBookingCount(40);
+  }, [searchTerm, selectedEventId, selectedPaymentStatus, selectedCheckInStatus, selectedConfirmationStatus]);
+
+  const visibleBookings = useMemo(
+    () => filteredBookings.slice(0, visibleBookingCount),
+    [filteredBookings, visibleBookingCount],
+  );
 
   // Clear all filters
   const clearFilters = () => {
@@ -530,134 +543,148 @@ const MyEventBookings: React.FC = () => {
                   <p className="text-sm text-zinc-500">Try adjusting your filters to see more results.</p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
-                  {filteredBookings.map((booking) => {
-                    const event = events[booking.event_id];
-                    const attendeesRaw =
-                      booking.notes ?
-                        decodeEventBookingNotes(booking.notes).attendeesText || booking.notes
-                      : null;
+                <>
+                  <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
+                    {visibleBookings.map((booking) => {
+                      const event = events[booking.event_id];
+                      const attendeesRaw =
+                        booking.notes ?
+                          decodeEventBookingNotes(booking.notes).attendeesText || booking.notes
+                        : null;
 
-                    return (
-                      <div key={booking.id} className="relative overflow-hidden rounded-[1.25rem] border border-zinc-100/90 bg-white p-5 shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,border-color] duration-300 hover:border-orange-200/45 hover:shadow-[0_18px_44px_-16px_rgba(15,23,42,0.14)] sm:p-6">
-                        <div
-                          className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
-                          aria-hidden
-                        />
-                        {booking.isactive && booking.check_in_status !== 'cancelled' && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => handleCancelBooking(booking)}
-                            className="absolute right-4 top-4 h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700"
-                            aria-label="Cancel booking"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        )}
+                      return (
+                        <div key={booking.id} className="relative overflow-hidden rounded-[1.25rem] border border-zinc-100/90 bg-white p-5 shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,border-color] duration-300 hover:border-orange-200/45 hover:shadow-[0_18px_44px_-16px_rgba(15,23,42,0.14)] sm:p-6">
+                          <div
+                            className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
+                            aria-hidden
+                          />
+                          {booking.isactive && booking.check_in_status !== 'cancelled' && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => handleCancelBooking(booking)}
+                              className="absolute right-4 top-4 h-8 w-8 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              aria-label="Cancel booking"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
 
-                        <h3 className="pr-10 font-semibold text-lg leading-tight text-gray-900">
-                          {event?.event_name ?? "Event"}
-                        </h3>
-                        <p className="mb-4 flex items-center gap-1.5 text-sm text-gray-500">
-                          <Calendar className="h-4 w-4 shrink-0" aria-hidden />
-                          {event?.event_date ? formatEventDateLong(event.event_date) : "N/A"}
-                        </p>
+                          <h3 className="pr-10 font-semibold text-lg leading-tight text-gray-900">
+                            {event?.event_name ?? "Event"}
+                          </h3>
+                          <p className="mb-4 flex items-center gap-1.5 text-sm text-gray-500">
+                            <Calendar className="h-4 w-4 shrink-0" aria-hidden />
+                            {event?.event_date ? formatEventDateLong(event.event_date) : "N/A"}
+                          </p>
 
-                        <div className="space-y-3 text-sm text-gray-800">
-                          {booking.user_mobile ? (
-                            <div className="flex items-center gap-1.5">
-                              <Phone className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                              <span className="font-semibold text-gray-900">{booking.user_mobile}</span>
+                          <div className="space-y-3 text-sm text-gray-800">
+                            {booking.user_mobile ? (
+                              <div className="flex items-center gap-1.5">
+                                <Phone className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                                <span className="font-semibold text-gray-900">{booking.user_mobile}</span>
+                              </div>
+                            ) : null}
+                            <div className="flex items-center gap-1.5 font-semibold text-gray-900">
+                              <Users className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                              {booking.number_of_people} {booking.number_of_people === 1 ? "Person" : "People"}
+                            </div>
+                            {booking.total_amount != null && booking.total_amount > 0 ? (
+                              <div>
+                                <span className="font-semibold text-gray-900">Amount:</span>{" "}
+                                ₹{booking.total_amount.toLocaleString()}
+                              </div>
+                            ) : null}
+
+                            <div className="pt-2">{cardConfirmationPill(booking.confirmation_status || "pending")}</div>
+                            <div>{cardPaymentPill(booking.payment_status)}</div>
+                            <div>{cardCheckInPill(booking.check_in_status)}</div>
+                          </div>
+
+                          {attendeesRaw && booking.number_of_people > 1 ? (
+                            <div className="mt-6 text-sm">
+                              <span className="font-semibold text-gray-900">Attendees:</span>
+                              <br />
+                              <span className="text-gray-600">{attendeesRaw}</span>
                             </div>
                           ) : null}
-                          <div className="flex items-center gap-1.5 font-semibold text-gray-900">
-                            <Users className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
-                            {booking.number_of_people} {booking.number_of_people === 1 ? "Person" : "People"}
+
+                          <div className="mt-6 text-xs text-gray-500">
+                            Booked on: {formatDate(booking.created_at)}
                           </div>
-                          {booking.total_amount != null && booking.total_amount > 0 ? (
-                            <div>
-                              <span className="font-semibold text-gray-900">Amount:</span>{" "}
-                              ₹{booking.total_amount.toLocaleString()}
-                            </div>
-                          ) : null}
 
-                          <div className="pt-2">{cardConfirmationPill(booking.confirmation_status || "pending")}</div>
-                          <div>{cardPaymentPill(booking.payment_status)}</div>
-                          <div>{cardCheckInPill(booking.check_in_status)}</div>
-                        </div>
+                          {booking.isactive && booking.check_in_status !== 'cancelled' && (() => {
+                            const eventDateStr = event?.event_date ?? null;
+                            const today = todayDateOnlyString();
+                            const canReview = Boolean(
+                              eventDateStr && compareDateOnly(eventDateStr, today) <= 0
+                            );
+                            const hasReview = hasReviewedEvent(booking.event_id);
+                            const phoneForQr = getMobileForQr(booking);
 
-                        {attendeesRaw && booking.number_of_people > 1 ? (
-                          <div className="mt-6 text-sm">
-                            <span className="font-semibold text-gray-900">Attendees:</span>
-                            <br />
-                            <span className="text-gray-600">{attendeesRaw}</span>
-                          </div>
-                        ) : null}
-
-                        <div className="mt-6 text-xs text-gray-500">
-                          Booked on: {formatDate(booking.created_at)}
-                        </div>
-
-                        {booking.isactive && booking.check_in_status !== 'cancelled' && (() => {
-                          const eventDateStr = event?.event_date ?? null;
-                          const today = todayDateOnlyString();
-                          const canReview = Boolean(
-                            eventDateStr && compareDateOnly(eventDateStr, today) <= 0
-                          );
-                          const hasReview = hasReviewedEvent(booking.event_id);
-                          const phoneForQr = getMobileForQr(booking);
-
-                          return (
-                            <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="flex h-auto w-full min-w-[140px] flex-1 items-center justify-center gap-2 rounded-2xl border-gray-300 py-3 text-sm font-medium hover:bg-gray-50 sm:flex-1"
-                                onClick={() => {
-                                  if (!phoneForQr) {
-                                    toast({
-                                      title: "No mobile number",
-                                      description:
-                                        "We could not find a mobile number for this booking. Update your profile or contact support.",
-                                      variant: "destructive",
-                                    });
-                                    return;
-                                  }
-                                  setBookingForQr(booking);
-                                }}
-                              >
-                                <QrCode className="h-4 w-4 shrink-0" aria-hidden />
-                                Show check-in QR
-                              </Button>
-                              {canReview && (
+                            return (
+                              <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                 <Button
-                                  variant={hasReview ? "outline" : "default"}
+                                  variant="outline"
                                   size="sm"
-                                  onClick={() => event && openReviewDialog(event, booking)}
-                                  disabled={hasReview}
-                                  className="flex h-auto w-full min-w-[140px] flex-1 items-center justify-center gap-2 rounded-2xl py-3 text-sm font-medium sm:flex-1"
+                                  className="flex h-auto w-full min-w-[140px] flex-1 items-center justify-center gap-2 rounded-2xl border-gray-300 py-3 text-sm font-medium hover:bg-gray-50 sm:flex-1"
+                                  onClick={() => {
+                                    if (!phoneForQr) {
+                                      toast({
+                                        title: "No mobile number",
+                                        description:
+                                          "We could not find a mobile number for this booking. Update your profile or contact support.",
+                                        variant: "destructive",
+                                      });
+                                      return;
+                                    }
+                                    setBookingForQr(booking);
+                                  }}
                                 >
-                                  {hasReview ? (
-                                    <>
-                                      <Star className="h-4 w-4 shrink-0 fill-yellow-400 text-yellow-400" />
-                                      Reviewed
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Star className="h-4 w-4 shrink-0" />
-                                      Rate &amp; Review
-                                    </>
-                                  )}
+                                  <QrCode className="h-4 w-4 shrink-0" aria-hidden />
+                                  Show check-in QR
                                 </Button>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    );
-                  })}
-                </div>
+                                {canReview && (
+                                  <Button
+                                    variant={hasReview ? "outline" : "default"}
+                                    size="sm"
+                                    onClick={() => event && openReviewDialog(event, booking)}
+                                    disabled={hasReview}
+                                    className="flex h-auto w-full min-w-[140px] flex-1 items-center justify-center gap-2 rounded-2xl py-3 text-sm font-medium sm:flex-1"
+                                  >
+                                    {hasReview ? (
+                                      <>
+                                        <Star className="h-4 w-4 shrink-0 fill-yellow-400 text-yellow-400" />
+                                        Reviewed
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Star className="h-4 w-4 shrink-0" />
+                                        Rate &amp; Review
+                                      </>
+                                    )}
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  {visibleBookings.length < filteredBookings.length ? (
+                    <div className="mt-6 flex justify-center">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-10 rounded-2xl text-sm"
+                        onClick={() => setVisibleBookingCount((n) => n + 40)}
+                      >
+                        Show more ({filteredBookings.length - visibleBookings.length} remaining)
+                      </Button>
+                    </div>
+                  ) : null}
+                </>
               )}
             </div>
           </>
@@ -792,8 +819,9 @@ const MyEventBookings: React.FC = () => {
         </Dialog>
 
         {/* Check-in QR (encodes registered mobile for scanning at venue) */}
+        {bookingForQr ? (
         <Dialog
-          open={bookingForQr !== null}
+          open
           onOpenChange={(open) => {
             if (!open) setBookingForQr(null);
           }}
@@ -815,7 +843,15 @@ const MyEventBookings: React.FC = () => {
                   {value ? (
                     <>
                       <div className="rounded-lg border bg-white p-3 shadow-sm">
-                        <QRCodeSVG value={value} size={220} level="M" includeMargin />
+                        <Suspense
+                          fallback={
+                            <div className="flex h-[220px] w-[220px] items-center justify-center">
+                              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            </div>
+                          }
+                        >
+                          <QRCodeSVG value={value} size={220} level="M" includeMargin />
+                        </Suspense>
                       </div>
                       <p className="text-sm font-mono text-center break-all text-foreground">{display}</p>
                       <p className="text-xs text-muted-foreground text-center">
@@ -837,6 +873,7 @@ const MyEventBookings: React.FC = () => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        ) : null}
     </div>
   );
 };

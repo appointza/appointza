@@ -41,7 +41,7 @@ export function PublicBrowseShell({
         <meta name="description" content={metaDescription} />
       </Helmet>
 
-      <header className="sticky top-0 z-50 border-b border-blue-50 bg-white/90 shadow-[0_8px_30px_-22px_rgba(36,76,170,0.3)] backdrop-blur-xl">
+      <header className="sticky top-0 z-50 border-b border-blue-50 bg-white shadow-[0_8px_30px_-22px_rgba(36,76,170,0.3)] md:bg-white/90 md:backdrop-blur-xl">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
           <Link to="/" className="flex items-center gap-2 shrink-0 hover:opacity-90 transition-opacity w-fit">
             <img

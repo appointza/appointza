@@ -96,8 +96,11 @@ namespace appointza.Services
             // Always filter by isactive = TRUE
             queryBuilder.AddParameter("events.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
             
-            // Always filter by is_public = TRUE (only show public events)
-            queryBuilder.AddParameter("events.is_public", "=", "is_public", true, DbTypes.Types.Boolean);
+            // Public browse passes is_public = true. Org management can pass false to include private events.
+            if (req.is_public)
+            {
+                queryBuilder.AddParameter("events.is_public", "=", "is_public", true, DbTypes.Types.Boolean);
+            }
             
             // Exclude cancelled and completed events using condition strings
             queryBuilder.AddParameter("events.status != @status_cancelled", "status_cancelled", "cancelled", DbTypes.Types.String);
@@ -123,18 +126,20 @@ namespace appointza.Services
             }
             
             // By default, hide past events. Organization management screens can request include_past = true.
+            // Compare calendar dates (start of today), not full UtcNow timestamps — otherwise today's
+            // date-only event_date (midnight) is treated as already past after 00:00 UTC.
             if (!req.include_past)
             {
-                var now = DateTime.UtcNow;
+                var today = DateTime.UtcNow.Date;
                 string dateFilterCondition = @"
                     (
-                        (events.event_date IS NOT NULL AND events.event_date >= @current_time) OR
-                        (events.from_date IS NOT NULL AND events.to_date IS NOT NULL AND events.to_date >= @current_time) OR
-                        (events.from_date IS NOT NULL AND events.to_date IS NULL AND events.from_date >= @current_time) OR
+                        (events.event_date IS NOT NULL AND events.event_date::date >= @current_date) OR
+                        (events.from_date IS NOT NULL AND events.to_date IS NOT NULL AND events.to_date::date >= @current_date) OR
+                        (events.from_date IS NOT NULL AND events.to_date IS NULL AND events.from_date::date >= @current_date) OR
                         (events.event_date IS NULL AND events.from_date IS NULL AND events.to_date IS NULL)
                     )
                 ";
-                queryBuilder.AddParameter(dateFilterCondition, "current_time", now, DbTypes.Types.DateTime);
+                queryBuilder.AddParameter(dateFilterCondition, "current_date", today, DbTypes.Types.DateTime);
             }
 
             queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "events.event_date, events.from_date");

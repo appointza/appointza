@@ -15,15 +15,12 @@ import {
 import { cn } from "@/lib/utils";
 import {
   OrganisationRoom,
-  ROOM_STATUSES,
   ROOM_TYPES,
-  statusLabel,
 } from "@/models/hospitality.model";
 import { RoomCardPreview } from "@/components/organization/RoomCardPreview";
 import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
 import {
   ROOM_AMENITY_GROUPS,
-  ROOM_STATUS_EMOJI,
   buildRoomCalendar,
   defaultRoomCode,
 } from "@/utils/roomAmenities.util";
@@ -351,30 +348,7 @@ export function RoomEditorForm({
         </div>
       </SectionCard>
 
-      <SectionCard step={6} title="Room Status">
-        <p className="text-sm text-stone-500">
-          Live status is also updated from bookings on the Room Status Board.
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {ROOM_STATUSES.map((item) => (
-            <Button
-              key={item.value}
-              type="button"
-              size="sm"
-              variant={draft.status === item.value ? "default" : "outline"}
-              className={cn(
-                "rounded-xl",
-                draft.status === item.value && "bg-gradient-coral text-white",
-              )}
-              onClick={() => patch({ status: item.value })}
-            >
-              {ROOM_STATUS_EMOJI[item.value]} {statusLabel(item.value)}
-            </Button>
-          ))}
-        </div>
-      </SectionCard>
-
-      <SectionCard step={7} title="Booking Calendar (next 7 days)">
+      <SectionCard step={6} title="Booking Calendar (next 7 days)">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
           {calendarDays.map((day) => (
             <div
@@ -388,7 +362,7 @@ export function RoomEditorForm({
         </div>
       </SectionCard>
 
-      <SectionCard step={8} title="Current Guest Stay">
+      <SectionCard step={7} title="Current Guest Stay">
         {draft.guest?.name || draft.booking?.check_in ?
           <div className="space-y-2 text-sm text-stone-700">
             {draft.guest?.name ?

@@ -32,7 +32,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
-import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
+import { OrganisationLocation } from "@/models/organisationlocation.model";
 import { 
   OrganisationServiceTiming, 
   Leavereq, 
@@ -41,13 +41,14 @@ import {
   OrganisationServiceTimingFinal
 } from "@/models/organisationservicetiming.model";
 import { LeaveDates, LeaveDatesDeleteReq } from "@/models/leavedates.model";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { OrganisationServiceTimingService } from "@/services/organisationservicetiming.service";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import { LeaveDatesService } from "@/services/leavedates.service";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
+import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
 import { onboardingStepRoute } from "@/utils/organizationOnboarding.util";
 
 const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
@@ -61,13 +62,19 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
   // State management
   const [isLoading, setIsLoading] = useState(false);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<OrganisationLocation | null>(null);
   const [showTimingForm, setShowTimingForm] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
+  const didAutoSelectLocationRef = useRef(false);
+
+  const { data: locationsData, isLoading: isLoadingLocations } = useOrganisationLocations({
+    organisationId: organizationId,
+    staffLocationId: user?.locationid || 0,
+    enabled: !!organizationId,
+  });
+  const locations = locationsData ?? [];
   
   // API services - use useMemo to prevent recreation on every render
-  const locationService = useMemo(() => new OrganisationLocationService(), []);
   const timingService = useMemo(() => new OrganisationServiceTimingService(), []);
   const leaveDatesService = useMemo(() => new LeaveDatesService(), []);
   
@@ -146,38 +153,6 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
       });
     }
   }, [organizationId, timingService, toast]);
-
-  // Fetch locations
-  const fetchLocations = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      console.log('🔍 Fetching locations for organization:', organizationId);
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await locationService.select(req);
-      console.log('✅ Locations API response:', response);
-      const locs = response || [];
-      setLocations(locs);
-
-      if (locs.length === 1) {
-        const location = locs[0];
-        setSelectedLocation(location);
-        setShowTimingForm(true);
-        setShowLeaveForm(false);
-        await fetchTimingData(location.id);
-      }
-    } catch (error) {
-      console.error('❌ Error fetching locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [organizationId, toast, locationService, fetchTimingData]);
 
   // Convert time string to Date
   const timeStringToDate = (timeString: string): Date => {
@@ -307,6 +282,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
       await Promise.all(promises);
       console.log('✅ All timing slots saved successfully');
       
+      invalidatePublicSiteCacheForLocation(selectedLocation.id);
       // Invalidate onboarding status to refresh the check
       queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
       
@@ -408,6 +384,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
       await Promise.all(promises);
       console.log('✅ All timing slots saved successfully');
       
+      invalidatePublicSiteCacheForLocation(selectedLocation.id);
       await queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
 
       if (!isComplete && hasCustomDomain && hasServices && hasWebsite && !embedded) {
@@ -775,11 +752,22 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
 
 
-  // Initialize on mount
+  // Auto-select sole location (preserve previous fetchLocations behavior)
   useEffect(() => {
-    fetchLocations();
+    if (didAutoSelectLocationRef.current) return;
+    if (locations.length !== 1) return;
+    didAutoSelectLocationRef.current = true;
+    const location = locations[0];
+    setSelectedLocation(location);
+    setShowTimingForm(true);
+    setShowLeaveForm(false);
+    void fetchTimingData(location.id);
+  }, [locations, fetchTimingData]);
+
+  // Initialize day slots on mount
+  useEffect(() => {
     setDayTimeSlots(initializeDayTimeSlots());
-  }, [fetchLocations]); // Include fetchLocations in dependencies
+  }, []);
 
   if (!isAuthenticated) {
     return (
@@ -792,10 +780,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     );
   }
 
-  if (isLoading || isLoadingOnboarding) {
+  if (isLoadingLocations || isLoading || isLoadingOnboarding) {
     return (
       <div className="flex h-64 items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" />
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
         <span className="ml-2 text-stone-600">Loading business hours…</span>
       </div>
     );
@@ -806,10 +794,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     return (
       <div className="org-page">
         <div className="org-panel-section">
-          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-3xl border-stone-100")}>
-            <div className="border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <div className="border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <AlertCircle className="h-5 w-5" />
                 </span>
                 <div>
@@ -843,10 +831,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     return (
       <div className="org-page">
         <div className="org-panel-section">
-          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-3xl border-stone-100")}>
-            <div className="border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <div className="border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <AlertCircle className="h-5 w-5" />
                 </span>
                 <div>
@@ -881,10 +869,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     return (
       <div className="org-page">
         <div className="org-panel-section">
-          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-3xl border-stone-100")}>
-            <div className="border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <div className={cn(org.card, "mx-auto max-w-2xl overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <div className="border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-center gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <AlertCircle className="h-5 w-5" />
                 </span>
                 <div>
@@ -934,8 +922,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const timingContent = (
     <>
         {locations.length === 0 && !showTimingForm && !showLeaveForm && !showLeaveList && (
-          <div className={cn(org.card, "rounded-3xl border-stone-100 p-8 text-center")}>
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#FFF0EB] text-[#E85D4C]">
+          <div className={cn(org.card, "rounded-2xl border-stone-200 bg-white p-8 text-center shadow-none")}>
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
               <Home className="h-6 w-6" />
             </div>
             <h3 className="text-lg font-semibold text-appointza-navy">No locations yet</h3>
@@ -946,25 +934,74 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         )}
 
         {!showTimingForm && !showLeaveForm && !showLeaveList && locations.length > 1 && (
-          <div className="space-y-3">
+          <div className={cn(settingsEmbedded.list, embedded && "w-full")}>
             {inOnboarding && (
-              <p className="text-sm font-medium text-[#E85D4C]">
+              <p className="text-sm font-medium text-blue-600">
                 Tap <span className="font-semibold">Set hours</span> on your location to continue setup.
               </p>
             )}
-            <div className="grid gap-3">
+            {embedded ? (
+              <div className={settingsEmbedded.listGroup}>
+                {locations.map((location) => (
+                  <div key={location.id} className={settingsEmbedded.listRow}>
+                    <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
+                        <Home className="h-5 w-5" />
+                      </span>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base font-semibold text-appointza-navy sm:text-lg">
+                          {location.name}
+                        </h3>
+                        {location.address ? (
+                          <p className="truncate text-xs text-stone-500 sm:text-sm">{location.address}</p>
+                        ) : (
+                          <p className="text-xs text-stone-400 sm:text-sm">Business location</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:shrink-0">
+                      <Button
+                        type="button"
+                        onClick={() => handleLocationSelectForTiming(location)}
+                        className={cn(
+                          inOnboarding ? org.btnPrimary : org.btnOutline,
+                          "min-h-10 w-full touch-manipulation sm:w-auto",
+                        )}
+                      >
+                        <Clock className="mr-2 h-4 w-4" />
+                        {inOnboarding ? "Set hours" : "Edit hours"}
+                      </Button>
+                      {!inOnboarding && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleLocationSelectForLeave(location)}
+                          className={cn(org.btnOutline, "min-h-10 w-full sm:w-auto")}
+                        >
+                          <Calendar className="mr-2 h-4 w-4" />
+                          Book leave
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+            <div className={cn("grid w-full gap-3")}>
               {locations.map((location) => (
                   <div
                     key={location.id}
                     className={cn(
                       org.card,
-                      "rounded-2xl border-stone-100 p-4 transition-shadow hover:shadow-md sm:p-5",
+                      "w-full rounded-xl border-stone-200 bg-white p-4 shadow-none sm:p-5",
                       inOnboarding && "ring-1 ring-[#FFD4CC]/60",
                     )}
                   >
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex min-w-0 items-center gap-3 sm:gap-4">
-                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]">
+                    <div className="flex min-w-0 flex-1 items-center gap-3 sm:gap-4">
+                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                           <Home className="h-5 w-5" />
                         </span>
                         <div className="min-w-0">
@@ -979,7 +1016,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                         </div>
                       </div>
 
-                      <div className="flex flex-col gap-2 sm:flex-row sm:shrink-0">
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:shrink-0">
                         <Button
                           type="button"
                           onClick={() => handleLocationSelectForTiming(location)}
@@ -1005,16 +1042,17 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                         )}
                       </div>
                     </div>
-                  </div>
+                    </div>
                 ))}
             </div>
+            )}
           </div>
         )}
 
         {/* Timing Form Card */}
         {showTimingForm && selectedLocation && (
-          <Card className={cn(org.card, "overflow-hidden rounded-3xl border-stone-100")}>
-            <CardHeader className="space-y-1 border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <Card className={cn(org.card, "w-full overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <CardHeader className="space-y-1 border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-start sm:items-center justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <CardTitle className="truncate text-lg font-semibold text-appointza-navy sm:text-xl">
@@ -1052,7 +1090,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
             <CardContent className="space-y-5 p-5 sm:p-6">
             <div className="space-y-4 sm:space-y-5">
               {/* Settings */}
-              <Card className={cn(org.panel, "rounded-2xl border-stone-100")}>
+              <Card className={cn(org.panel, "rounded-xl border-stone-200 bg-white shadow-none")}>
                 <CardHeader className="pb-3">
                   <CardTitle className={org.title}>Quick settings</CardTitle>
                 </CardHeader>
@@ -1091,7 +1129,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               </Card>
 
               {daysOfWeek.map((day) => (
-                <Card key={day.id} className={cn(org.panel, "rounded-2xl border-stone-100")}>
+                <Card key={day.id} className={cn(org.panel, "rounded-xl border-stone-200 bg-white shadow-none")}>
                   <CardHeader className="pb-3">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                       <CardTitle className="text-base font-semibold text-appointza-navy sm:text-lg">
@@ -1133,10 +1171,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                          {dayTimeSlots[day.id]?.map((slot) => (
                            <div
                              key={slot.localid}
-                             className="flex flex-col gap-2 rounded-xl border border-stone-100 bg-appointza-cream/30 p-3 sm:flex-row sm:items-center"
+                             className="flex flex-col gap-2 rounded-xl border border-stone-200 bg-white p-3 sm:flex-row sm:items-center"
                            >
                              <div className="flex flex-1 items-center gap-2">
-                               <Clock className="h-4 w-4 shrink-0 text-[#E85D4C]" />
+                               <Clock className="h-4 w-4 shrink-0 text-blue-600" />
                                <Input
                                  type="time"
                                  value={slot.start_time instanceof Date
@@ -1159,7 +1197,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                              <span className="text-center text-xs font-medium text-stone-400 sm:px-1">to</span>
 
                              <div className="flex flex-1 items-center gap-2">
-                               <Clock className="h-4 w-4 shrink-0 text-[#E85D4C]" />
+                               <Clock className="h-4 w-4 shrink-0 text-blue-600" />
                                <Input
                                  type="time"
                                  value={slot.end_time instanceof Date
@@ -1201,7 +1239,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
             </div>
 
             <div className={cn(
-              "flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end",
+              "flex flex-col-reverse gap-2 border-t border-stone-200 pt-5 sm:flex-row sm:justify-end",
               hasSingleLocation && "sm:justify-end",
             )}>
               {!hasSingleLocation && (
@@ -1232,8 +1270,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
         {/* Leave Form Card */}
         {showLeaveForm && selectedLocation && (
-          <Card className={cn(org.card, "overflow-hidden rounded-3xl border-stone-100")}>
-            <CardHeader className="space-y-1 border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <Card className={cn(org.card, "w-full overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <CardHeader className="space-y-1 border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4 sm:items-center">
                 <div className="min-w-0 flex-1">
                   <CardTitle className="text-lg font-semibold text-appointza-navy sm:text-xl">
@@ -1358,7 +1396,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                    <div className="space-y-2">
                      <Label className={org.label}>Start time</Label>
                      <div className="flex items-center gap-2">
-                       <Clock className="h-4 w-4 shrink-0 text-[#E85D4C]" />
+                       <Clock className="h-4 w-4 shrink-0 text-blue-600" />
                        <Input
                          type="time"
                          value={startTime}
@@ -1372,7 +1410,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                    <div className="space-y-2">
                      <Label className={org.label}>End time</Label>
                      <div className="flex items-center gap-2">
-                       <Clock className="h-4 w-4 shrink-0 text-[#E85D4C]" />
+                       <Clock className="h-4 w-4 shrink-0 text-blue-600" />
                        <Input
                          type="time"
                          value={endTime}
@@ -1396,7 +1434,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               </div>
             </div>
 
-            <div className="flex flex-col-reverse gap-2 border-t border-stone-100 pt-5 sm:flex-row sm:justify-end">
+            <div className="flex flex-col-reverse gap-2 border-t border-stone-200 pt-5 sm:flex-row sm:justify-end">
               <Button
                 type="button"
                 variant="outline"
@@ -1427,8 +1465,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         )}
 
         {showLeaveList && selectedLocation && (
-          <Card className={cn(org.card, "overflow-hidden rounded-3xl border-stone-100")}>
-            <CardHeader className="space-y-1 border-b border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white p-5 sm:p-6">
+          <Card className={cn(org.card, "w-full overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
+            <CardHeader className="space-y-1 border-b border-stone-200 bg-white p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4 sm:items-center">
                 <div className="min-w-0 flex-1">
                   <CardTitle className="text-lg font-semibold text-appointza-navy sm:text-xl">
@@ -1477,7 +1515,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
               {isLoading ? (
                 <div className="flex justify-center py-8">
-                  <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" />
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
                 </div>
               ) : leaveList.length === 0 ? (
                 <div className={cn(org.empty, "py-10")}>
@@ -1488,7 +1526,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   {leaveList.map((leave, index) => (
                     <div
                       key={leave.leaveid || index}
-                      className={cn(org.panel, "rounded-2xl p-4")}
+                      className={cn(org.panel, "rounded-xl border-stone-200 bg-white p-4 shadow-none")}
                     >
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                           <div className="min-w-0 flex-1">
@@ -1508,7 +1546,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                                   </span>
                                 )}
                                 {leave.isfullday && (
-                                  <span className="rounded-full bg-[#FFF0EB] px-2.5 py-0.5 text-xs font-medium text-[#E85D4C]">
+                                  <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-xs font-medium text-blue-700">
                                     Full day
                                   </span>
                                 )}
@@ -1544,7 +1582,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               )}
             </div>
 
-            <div className="flex justify-end border-t border-stone-100 pt-5">
+            <div className="flex justify-end border-t border-stone-200 pt-5">
               <Button
                 type="button"
                 variant="outline"

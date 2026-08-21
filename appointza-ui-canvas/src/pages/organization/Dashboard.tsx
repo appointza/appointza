@@ -1,33 +1,20 @@
-import React, { useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Link } from "react-router-dom";
-import { RefreshCw, Users, AlertCircle, Search, Phone, User, FileText, Eye, Download, MapPin, Plus, Smartphone, Copy, ExternalLink, Globe, Check } from "lucide-react";
+import { RefreshCw, Users, AlertCircle, Search, Phone, User, FileText, Eye, Download, MapPin, Plus, Smartphone, Copy, ExternalLink, Globe, Check, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
-import {
-  ResponsiveContainer,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip as RechartsTooltip,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-} from "recharts";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGlobalId } from "@/contexts/GlobalIdContext";
 import { useToast } from "@/hooks/use-toast";
 import { UserTypeUtil } from "@/utils/userType.util";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { AppoinmentService } from "@/services/appoinment.service";
+import { persistOrganisationLocationSelection } from "@/utils/organisationLocationSelection.util";
 import { FilesService } from "@/services/files.service";
 import { OrgLocationReq, OrganisationDashboardStats, OrganisationLocation } from "@/models/organisationlocation.model";
 import { BookedAppoinmentRes, SearchAppointmentByMobileReq, FileItem } from "@/models/appoinment.model";
@@ -42,17 +29,13 @@ import {
 } from "@/utils/orgPublicSiteUrl.util";
 import { normalizeCustomUrlSlug } from "@/utils/slug.util";
 
+const DashboardChartsPanel = lazy(
+  () => import("@/components/organization/DashboardChartsPanel"),
+);
+
 const EMPTY_DASHBOARD_STATS = new OrganisationDashboardStats();
 
-const STATUS_PIE_COLORS: Record<string, string> = {
-  Completed: "#10B981",
-  Confirmed: "#3B82F6",
-  Pending: "#F59E0B",
-  Cancelled: "#EF4444",
-};
-
-const CHART_CORAL = "#4F6FF7";
-const CHART_CORAL_LIGHT = "#7B4DFF";
+const CHART_CORAL_LIGHT = "#3B82F6";
 const CHART_BLUE = "#2F80ED";
 
 function MiniSparkline({
@@ -95,7 +78,7 @@ function DashboardStatCard({
   sparkValues: number[];
 }) {
   return (
-    <div className="rounded-2xl border border-white/80 bg-white p-5 shadow-[0_10px_30px_-18px_rgba(39,72,154,0.28)] transition-all hover:-translate-y-0.5 hover:shadow-[0_18px_42px_-20px_rgba(56,80,170,0.34)]">
+    <div className="rounded-2xl border border-stone-200 bg-white p-5 shadow-none">
       <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">{label}</p>
       <div className="mt-2 text-2xl font-bold tracking-tight text-appointza-navy tabular-nums sm:text-3xl">
         {children}
@@ -140,6 +123,20 @@ const OrganizationDashboard = () => {
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
   const [isFileViewerOpen, setIsFileViewerOpen] = useState(false);
   const [copiedUrlField, setCopiedUrlField] = useState<"slug" | "full" | null>(null);
+  const [chartsReady, setChartsReady] = useState(false);
+
+  useEffect(() => {
+    const win = window as Window & {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    if (typeof win.requestIdleCallback === "function") {
+      const id = win.requestIdleCallback(() => setChartsReady(true), { timeout: 1200 });
+      return () => win.cancelIdleCallback?.(id);
+    }
+    const timeoutId = window.setTimeout(() => setChartsReady(true), 200);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
 
   const globalLocationIdRef = useRef(globalLocationId);
   globalLocationIdRef.current = globalLocationId;
@@ -183,6 +180,10 @@ const OrganizationDashboard = () => {
     prevLocationIdRef.current = initialId;
     if (!globalLocationIdRef.current || Number(globalLocationIdRef.current) !== initialId) {
       setGlobalLocationId(initialId);
+    }
+    const initialLocation = locations.find((loc) => loc.id === initialId);
+    if (initialLocation) {
+      persistOrganisationLocationSelection(initialLocation);
     }
     window.setTimeout(() => {
       isInitialLoadRef.current = false;
@@ -279,6 +280,7 @@ const OrganizationDashboard = () => {
   const handleLocationChange = useCallback((value: string) => {
     const newLocationId = Number(value);
     const previousLocationId = prevLocationIdRef.current;
+    const nextLocation = locations.find((loc) => loc.id === newLocationId);
     
     console.log('🔄 Location change detected:', {
       previous: previousLocationId,
@@ -291,17 +293,17 @@ const OrganizationDashboard = () => {
     // Store location ID in global context (accessible by all components)
     setGlobalLocationId(newLocationId);
     console.log('✅ Stored location ID in GlobalIdContext:', newLocationId);
-    
-    // Always update user_context when user changes location (not on initial load)
-    if (!isInitialLoadRef.current && previousLocationId !== newLocationId) {
-      console.log('👤 User-initiated location change, updating user_context...');
+
+    if (nextLocation) {
+      persistOrganisationLocationSelection(nextLocation, {
+        refreshAuth: !isInitialLoadRef.current ? refreshAuth : undefined,
+      });
+    } else if (!isInitialLoadRef.current && previousLocationId !== newLocationId) {
       updateUserContextLocation(newLocationId);
-    } else if (isInitialLoadRef.current) {
-      console.log('📥 Initial load, skipping user_context update');
     }
     
     prevLocationIdRef.current = newLocationId;
-  }, [updateUserContextLocation, setGlobalLocationId]);
+  }, [locations, updateUserContextLocation, setGlobalLocationId, refreshAuth]);
 
   // Sync when location changes elsewhere (sidebar / other pages) after initial load
   useEffect(() => {
@@ -500,61 +502,60 @@ const OrganizationDashboard = () => {
   );
 
   return (
-    <div className={org.page}>
-        <div className={org.pageHeader}>
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div className="max-w-xl">
-              <h1 className={org.title}>
-                {greeting}, {userFirstName} 👋
-              </h1>
-              <p className={org.description}>
-                {user?.organisationlocationname
-                  ? `Here’s what’s happening at ${user.organisationlocationname} today.`
-                  : "Track appointments, revenue, and activity for your location."}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
-              <Button
-                type="button"
-                variant="outline"
-                asChild
-                className={cn(org.btnOutline, "h-10 px-4")}
-              >
-                <Link to="/organization/clients/on-spot-registration">
-                  <Smartphone className="mr-2 h-4 w-4" />
-                  Walk-in OTP
-                </Link>
-              </Button>
-              <Button
-                type="button"
-                asChild
-                className={cn(org.btnPrimary, "h-10")}
-              >
-                <Link to="/organization/appointments">
-                  <Plus className="mr-2 h-4 w-4" />
-                  New booking
-                </Link>
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={handleRefresh}
-                disabled={isLoading}
-                className="h-10 w-10 rounded-full text-stone-500 hover:bg-white/80 hover:text-appointza-navy"
-                aria-label="Refresh dashboard"
-              >
-                <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
-              </Button>
-            </div>
+    <div className={cn(org.page, "bg-white")}>
+      <div className={cn(org.pageSection, "space-y-4 pb-6 pt-0")}>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="max-w-xl">
+            <h1 className={org.title}>
+              {greeting}, {userFirstName} 👋
+            </h1>
+            <p className={org.description}>
+              {user?.organisationlocationname
+                ? `Here’s what’s happening at ${user.organisationlocationname} today.`
+                : "Track appointments, revenue, and activity for your location."}
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              asChild
+              className={cn(org.btnOutline, "h-10 border-stone-200 bg-white px-4 shadow-none")}
+            >
+              <Link to="/organization/clients/on-spot-registration">
+                <Smartphone className="mr-2 h-4 w-4" />
+                Walk-in OTP
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              asChild
+              className={cn(org.btnPrimary, "h-10 bg-none bg-blue-600 shadow-none hover:bg-blue-700")}
+            >
+              <Link to="/organization/appointments">
+                <Plus className="mr-2 h-4 w-4" />
+                New booking
+              </Link>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              onClick={handleRefresh}
+              disabled={isLoading}
+              className="h-10 w-10 rounded-xl text-stone-500 shadow-none hover:bg-blue-50 hover:text-blue-700"
+              aria-label="Refresh dashboard"
+            >
+              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+            </Button>
           </div>
         </div>
 
-        {locations.length > 0 ?
-          <div className="space-y-3 px-4 pb-4 sm:px-6 lg:px-8">
-            <div className="flex w-full flex-col items-start gap-3 rounded-2xl border border-stone-100 bg-white p-4 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.06)] sm:flex-row sm:items-center sm:gap-4">
+        {locations.length > 0 ? (
+          <div className="space-y-4">
+            <div className="flex w-full flex-col items-start gap-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-none sm:flex-row sm:items-center sm:gap-4">
               <span className="inline-flex shrink-0 items-center gap-2 text-sm font-medium text-stone-600">
-                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#FFF0EB] text-appointza-coral">
+                <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <MapPin className="h-4 w-4" aria-hidden />
                 </span>
                 Location
@@ -566,7 +567,7 @@ const OrganizationDashboard = () => {
               >
                 <SelectTrigger
                   id="location-select"
-                  className="h-10 w-full min-w-0 rounded-full border-stone-200 bg-appointza-cream/50 text-left sm:w-auto sm:min-w-[18rem] sm:max-w-xl [&>span]:line-clamp-1"
+                  className="h-10 w-full min-w-0 rounded-xl border-stone-200 bg-white text-left shadow-none sm:w-auto sm:min-w-[18rem] sm:max-w-xl [&>span]:line-clamp-1"
                 >
                   <SelectValue placeholder="Select a location" className="text-left" />
                 </SelectTrigger>
@@ -582,22 +583,27 @@ const OrganizationDashboard = () => {
                 </SelectContent>
               </Select>
               {isLoadingLocations ?
-                <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-appointza-coral" aria-hidden />
+                <RefreshCw className="h-4 w-4 shrink-0 animate-spin text-blue-600" aria-hidden />
               : null}
             </div>
 
-            <div className="flex w-full flex-col gap-3 rounded-2xl border border-stone-100 bg-white p-4 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.06)] sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <div className="flex w-full flex-col gap-3 rounded-2xl border border-stone-200 bg-white p-4 shadow-none sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="flex min-w-0 flex-1 items-start gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                   <Globe className="h-4 w-4" aria-hidden />
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-stone-600">Your booking URL</p>
-                  {publicUrlHost ? (
+                  {publicSiteUrl ? (
                     <>
-                      <p className="mt-1 break-all font-mono text-sm font-semibold text-appointza-navy">
-                        {publicUrlHost}
-                      </p>
+                      <a
+                        href={publicSiteUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="mt-1 block break-all font-mono text-sm font-semibold text-blue-700 hover:underline"
+                      >
+                        {publicSiteUrl}
+                      </a>
                       {publicUrlSlug ? (
                         <p className="mt-0.5 text-xs text-stone-500">
                           Page name: <span className="font-medium text-stone-700">{publicUrlSlug}</span>
@@ -606,20 +612,17 @@ const OrganizationDashboard = () => {
                     </>
                   ) : (
                     <p className="mt-1 text-sm text-stone-500">
-                      No custom URL yet.{" "}
-                      <Link to="/organization/custom-domain" className="font-medium text-appointza-coral hover:underline">
-                        Set your booking page address
-                      </Link>
+                      No custom URL yet. Set your booking page address — once set, it will show here.
                     </p>
                   )}
                 </div>
               </div>
-              {publicUrlHost ? (
+              {publicSiteUrl ? (
                 <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0">
                   <Button
                     type="button"
                     variant="outline"
-                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 sm:flex-none")}
+                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 border-stone-200 bg-white shadow-none sm:flex-none")}
                     onClick={() => copyPublicBookingUrl("slug")}
                   >
                     {copiedUrlField === "slug" ? (
@@ -632,7 +635,7 @@ const OrganizationDashboard = () => {
                   <Button
                     type="button"
                     variant="outline"
-                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 sm:flex-none")}
+                    className={cn(org.btnOutline, "h-10 min-w-0 flex-1 border-stone-200 bg-white shadow-none sm:flex-none")}
                     onClick={() => copyPublicBookingUrl("full")}
                   >
                     {copiedUrlField === "full" ? (
@@ -644,22 +647,30 @@ const OrganizationDashboard = () => {
                   </Button>
                   <Button
                     type="button"
-                    className={cn(org.btnPrimary, "h-10 min-w-0 flex-1 sm:flex-none")}
-                    onClick={() => publicSiteUrl && window.open(publicSiteUrl, "_blank", "noopener,noreferrer")}
+                    className={cn(org.btnPrimary, "h-10 min-w-0 flex-1 bg-none bg-blue-600 shadow-none hover:bg-blue-700 sm:flex-none")}
+                    onClick={() => window.open(publicSiteUrl, "_blank", "noopener,noreferrer")}
                   >
                     <ExternalLink className="mr-2 h-4 w-4" />
                     Open
                   </Button>
                 </div>
-              ) : null}
+              ) : (
+                <Button
+                  type="button"
+                  asChild
+                  className={cn(org.btnPrimary, "h-10 w-full bg-none bg-blue-600 shadow-none hover:bg-blue-700 sm:w-auto")}
+                >
+                  <Link to="/organization/custom-domain">Set booking page address</Link>
+                </Button>
+              )}
             </div>
           </div>
-        : null}
+        ) : null}
 
-        {UserTypeUtil.isStaff(user) ?
-          <div className="mx-4 mb-4 rounded-2xl border border-[#FFE4D6] bg-[#FFF8F5] px-4 py-4 sm:mx-6 lg:mx-8">
+        {UserTypeUtil.isStaff(user) ? (
+          <div className="rounded-2xl border border-stone-200 bg-white px-4 py-4 shadow-none">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-white text-appointza-coral shadow-sm">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600 shadow-none">
                 <Users className="h-5 w-5" aria-hidden />
               </div>
               <div className="min-w-0 text-sm leading-relaxed">
@@ -670,19 +681,19 @@ const OrganizationDashboard = () => {
               </div>
             </div>
           </div>
-        : null}
+        ) : null}
 
-        {isLoading ?
-          <div className="flex min-h-[18rem] items-center justify-center px-4">
-            <div className="rounded-2xl border border-stone-100 bg-white px-10 py-12 text-center shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)]">
-              <RefreshCw className="mx-auto mb-4 h-9 w-9 animate-spin text-appointza-coral" aria-hidden />
+        {isLoading ? (
+          <div className="flex min-h-[18rem] items-center justify-center">
+            <div className="rounded-2xl border border-stone-200 bg-white px-10 py-12 text-center shadow-none">
+              <RefreshCw className="mx-auto mb-4 h-9 w-9 animate-spin text-blue-600" aria-hidden />
               <p className="text-sm font-medium text-stone-600">Loading your dashboard…</p>
               <p className="mt-1 text-xs text-stone-400">Fetching appointments and payments</p>
             </div>
           </div>
-        : <div className="grid grid-cols-1 gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
-            <div className="min-w-0 space-y-6">
-            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
               <DashboardStatCard
                 label="Total appointments"
                 variant="coral"
@@ -713,108 +724,40 @@ const OrganizationDashboard = () => {
               </DashboardStatCard>
             </div>
 
-            <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
-                <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)] sm:p-6">
-                  <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">Trend</h3>
-                  <p className="mb-4 text-base font-semibold text-appointza-navy">Appointments · last 7 days</p>
-                  <div className="h-[200px] w-full md:h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={trendChartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F5F0EB" />
-                        <XAxis dataKey="name" tick={{ fill: "#78716c", fontSize: 12 }} />
-                        <YAxis allowDecimals={false} tick={{ fill: "#78716c", fontSize: 12 }} width={36} />
-                        <RechartsTooltip
-                          contentStyle={{ borderRadius: "12px", borderColor: "#E7E5E4" }}
-                          formatter={(v: number) => [v, "Appointments"]}
-                        />
-                        <Line
-                          type="monotone"
-                          dataKey="appointments"
-                          stroke={CHART_CORAL}
-                          strokeWidth={2}
-                          dot={{ r: 4, fill: CHART_CORAL }}
-                          activeDot={{ r: 6 }}
-                          name="Appointments"
-                        />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+            {chartsReady ? (
+            <Suspense
+              fallback={
+                <div className="flex h-[240px] items-center justify-center rounded-2xl border border-stone-200 bg-white text-sm text-stone-500">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin text-appointza-coral" />
+                  Loading charts…
                 </div>
-
-                <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)] sm:p-6">
-                  <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">Breakdown</h3>
-                  <p className="mb-4 text-base font-semibold text-appointza-navy">Appointment status</p>
-                  <div className="mx-auto h-[200px] w-full max-w-xs md:h-[240px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={statusChartData}
-                          dataKey="value"
-                          nameKey="name"
-                          cx="50%"
-                          cy="50%"
-                          innerRadius={54}
-                          outerRadius={82}
-                          paddingAngle={2}
-                        >
-                          {statusChartData.map((row) => (
-                            <Cell key={row.name} fill={STATUS_PIE_COLORS[row.name] ?? "#94a3b8"} />
-                          ))}
-                        </Pie>
-                        <RechartsTooltip
-                          formatter={(value: number) => [value, "Appointments"]}
-                          contentStyle={{ borderRadius: "12px", borderColor: "#E7E5E4" }}
-                        />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  </div>
-                  <div className="mt-3 flex flex-wrap justify-center gap-3 text-xs text-stone-600">
-                    {statusChartData.map((row) => (
-                      <span key={row.name} className="inline-flex items-center gap-1.5 rounded-full bg-appointza-cream px-2.5 py-1">
-                        <span className="h-2 w-2 rounded-full" style={{ background: STATUS_PIE_COLORS[row.name] }} />
-                        {row.name}: {row.value}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-2xl border border-stone-100 bg-white p-5 shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)] sm:p-6 lg:col-span-2">
-                  <h3 className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-stone-400">Revenue</h3>
-                  <p className="mb-4 text-base font-semibold text-appointza-navy">This month · by week</p>
-                  <div className="h-[200px] w-full md:h-[220px]">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={revenueMonthBars} margin={{ top: 8, right: 16, left: 0, bottom: 8 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#F5F0EB" vertical={false} />
-                        <XAxis dataKey="name" tick={{ fill: "#78716c", fontSize: 12 }} />
-                        <YAxis tick={{ fill: "#78716c", fontSize: 12 }} tickFormatter={(v) => `₹${v}`} width={52} />
-                        <RechartsTooltip
-                          formatter={(v: number) => [`₹${Number(v).toLocaleString("en-IN")}`, "Revenue"]}
-                          contentStyle={{ borderRadius: "12px", borderColor: "#E7E5E4" }}
-                        />
-                        <Bar dataKey="revenue" name="Revenue" fill={CHART_CORAL_LIGHT} radius={[8, 8, 0, 0]} maxBarSize={56} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+              }
+            >
+              <DashboardChartsPanel
+                trendChartData={trendChartData}
+                statusChartData={statusChartData}
+                revenueMonthBars={revenueMonthBars}
+              />
+            </Suspense>
+            ) : (
+              <div className="flex h-[240px] items-center justify-center rounded-2xl border border-stone-200 bg-white text-sm text-stone-500">
+                Preparing charts…
               </div>
-            </div>
-            {/* Top customers + WhatsApp rail — hidden for now
-            <DashboardRightRail className="xl:sticky xl:top-24 xl:self-start" />
-            */}
+            )}
           </div>
-        }
+        )}
 
         {/* Appointment search UI – set condition to `!isLoading` to show again */}
         {!isLoading ? false ? (
-          <div className="space-y-6 px-4 pb-12 sm:px-6 lg:px-8">
-        <Card className="relative overflow-hidden rounded-[1.25rem] border border-zinc-100/90 bg-white shadow-[0_2px_24px_-8px_rgba(15,23,42,0.08)]">
+          <div className="space-y-4">
+        <Card className="relative overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-none">
           <div
-            className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-orange-400/80 via-rose-400/60 to-amber-400/80"
+            className="pointer-events-none absolute inset-x-0 top-0 h-0.5 bg-blue-600"
             aria-hidden
           />
           <CardHeader className="pb-2">
             <CardTitle className="flex items-center gap-3 text-lg font-semibold text-zinc-900">
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600 ring-1 ring-orange-100/80">
+              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                 <Search className="h-5 w-5" aria-hidden />
               </span>
               Search appointments
@@ -831,14 +774,14 @@ const OrganizationDashboard = () => {
                   placeholder="Phone or name…"
                   value={searchPhone}
                   onChange={(e) => setSearchPhone(e.target.value)}
-                  className="h-11 rounded-2xl border-zinc-200 pl-10 shadow-sm focus-visible:ring-orange-500/25"
+                  className="h-11 rounded-xl border-stone-200 bg-white pl-10 shadow-none focus-visible:ring-blue-500/25"
                   onKeyPress={(e) => e.key === 'Enter' && searchAppointmentsByPhone()}
                 />
               </div>
               <Button 
                 onClick={searchAppointmentsByPhone}
                 disabled={isSearching || !searchPhone.trim()}
-                className="h-11 shrink-0 gap-2 rounded-2xl bg-gradient-to-r from-orange-500 to-rose-500 px-6 font-semibold text-white shadow-md shadow-orange-500/15 hover:opacity-[0.97]"
+                className="h-11 shrink-0 gap-2 rounded-xl bg-blue-600 px-6 font-semibold text-white shadow-none hover:bg-blue-700"
               >
                 {isSearching ? (
                   <RefreshCw className="h-4 w-4 animate-spin" />
@@ -851,7 +794,7 @@ const OrganizationDashboard = () => {
                 <Button 
                   onClick={clearSearch}
                   variant="outline"
-                  className="h-11 shrink-0 rounded-2xl border-zinc-200"
+                  className="h-11 shrink-0 rounded-xl border-stone-200 bg-white shadow-none"
                 >
                   Clear
                 </Button>
@@ -862,11 +805,11 @@ const OrganizationDashboard = () => {
 
         {/* Search Results */}
         {showSearchResults && (
-          <Card className="relative overflow-hidden rounded-[1.25rem] border border-zinc-100/90 bg-white shadow-[0_2px_24px_-8px_rgba(15,23,42,0.08)]">
+          <Card className="relative overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-none">
             <CardHeader className="pb-3">
               <CardTitle className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
-                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100/80">
+                  <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
                     <User className="h-5 w-5" aria-hidden />
                   </span>
                   <span className="text-lg font-semibold text-zinc-900">Results</span>
@@ -885,13 +828,13 @@ const OrganizationDashboard = () => {
                   {searchResults.map((appointment) => (
                     <div
                       key={appointment.id}
-                      className="rounded-2xl border border-zinc-100/90 bg-zinc-50/30 p-5 transition-colors hover:border-orange-200/40 hover:bg-white"
+                      className="rounded-2xl border border-stone-200 bg-white p-5 shadow-none"
                     >
                       <div className="space-y-4">
                         {/* Header with customer info and status */}
                         <div className="flex items-start justify-between gap-4">
                           <div className="flex min-w-0 items-center gap-3">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-orange-600 ring-1 ring-orange-100/80">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600">
                               <User className="h-6 w-6" aria-hidden />
                             </div>
                             <div className="min-w-0">
@@ -922,7 +865,7 @@ const OrganizationDashboard = () => {
                             </div>
                           </div>
                           <div className="shrink-0 text-right">
-                            <p className="text-lg font-semibold tabular-nums text-orange-600">
+                            <p className="text-lg font-semibold tabular-nums text-blue-600">
                               ₹{appointment.attributes?.servicelist?.reduce(
                                 (total, service) => total + (Number(service.serviceprice) || 0),
                                 0
@@ -933,7 +876,7 @@ const OrganizationDashboard = () => {
 
                         {/* Appointment details grid */}
                         <div className="grid grid-cols-1 gap-4 text-sm md:grid-cols-2">
-                          <div className="rounded-xl bg-white/80 p-3 ring-1 ring-zinc-100/80">
+                          <div className="rounded-xl border border-stone-200 bg-white p-3">
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Date & time</span>
                             <p className="mt-1 font-medium text-zinc-900">
                               {new Date(appointment.appoinmentdate).toLocaleDateString('en-US', {
@@ -947,7 +890,7 @@ const OrganizationDashboard = () => {
                               {appointment.fromtime?.toString().substring(0, 5)} – {appointment.totime?.toString().substring(0, 5)}
                             </p>
                           </div>
-                          <div className="rounded-xl bg-white/80 p-3 ring-1 ring-zinc-100/80">
+                          <div className="rounded-xl border border-stone-200 bg-white p-3">
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Staff</span>
                             <p className="mt-1 font-medium text-zinc-900">{appointment.staffname || 'Not assigned'}</p>
                           </div>
@@ -959,9 +902,9 @@ const OrganizationDashboard = () => {
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Services</span>
                             <div className="mt-2 space-y-2">
                               {appointment.attributes.servicelist.map((service, index) => (
-                                <div key={index} className="flex items-center justify-between gap-3 rounded-xl border border-zinc-100 bg-white px-3 py-2">
+                                <div key={index} className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-3 py-2">
                                   <span className="font-medium text-zinc-800">{service.servicename}</span>
-                                  <span className="font-semibold tabular-nums text-orange-600">₹{service.serviceprice}</span>
+                                  <span className="font-semibold tabular-nums text-blue-600">₹{service.serviceprice}</span>
                                 </div>
                               ))}
                             </div>
@@ -972,7 +915,7 @@ const OrganizationDashboard = () => {
                         {appointment.notes && (
                           <div>
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Notes</span>
-                            <p className="mt-1 rounded-xl bg-white p-3 text-sm leading-relaxed text-zinc-700 ring-1 ring-zinc-100/80">
+                            <p className="mt-1 rounded-xl border border-stone-200 bg-white p-3 text-sm leading-relaxed text-zinc-700">
                               {appointment.notes}
                             </p>
                           </div>
@@ -984,14 +927,14 @@ const OrganizationDashboard = () => {
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Tasks</span>
                             <div className="mt-2 space-y-2">
                               {appointment.tasklist.tasks.map((task, index) => (
-                                <div key={index} className="flex items-center justify-between rounded-xl border border-zinc-100 bg-white px-3 py-2">
+                                <div key={index} className="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-3 py-2">
                                   <div className="flex min-w-0 items-center gap-2">
                                     <div className={cn("h-2.5 w-2.5 shrink-0 rounded-full", task.iscompleted ? 'bg-emerald-500' : 'bg-zinc-300')} />
                                     <span className={cn("text-sm", task.iscompleted ? 'text-zinc-500 line-through' : 'text-zinc-800')}>
                                       {task.taskname}
                                     </span>
                                     {task.value && (
-                                      <span className="text-xs rounded-full bg-sky-50 px-2 py-0.5 font-medium text-sky-800 ring-1 ring-sky-100">
+                                      <span className="rounded-xl bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-800">
                                         {task.value}
                                       </span>
                                     )}
@@ -1008,7 +951,7 @@ const OrganizationDashboard = () => {
                             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Documents</span>
                             <div className="mt-2 flex flex-wrap gap-2">
                               {appointment.fileid.files.map((file, index) => (
-                                <div key={index} className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-zinc-100 bg-white p-3 transition-colors hover:border-orange-200/50">
+                                <div key={index} className="flex min-w-0 max-w-full items-center gap-2 rounded-xl border border-stone-200 bg-white p-3 shadow-none">
                                   <FileText className="h-4 w-4 shrink-0 text-zinc-400" />
                                   <span className="min-w-0 flex-1 truncate text-sm text-zinc-700">{file.filename}</span>
                                   <div className="flex shrink-0 items-center gap-0.5">
@@ -1016,10 +959,10 @@ const OrganizationDashboard = () => {
                                       size="sm"
                                       variant="ghost"
                                       onClick={() => handleFilePreview(file)}
-                                      className="h-8 w-8 p-0 rounded-lg hover:bg-orange-50"
+                                      className="h-8 w-8 rounded-lg p-0 shadow-none hover:bg-blue-50"
                                       title="Preview file"
                                     >
-                                      <Eye className="h-4 w-4 text-orange-600" />
+                                      <Eye className="h-4 w-4 text-blue-600" />
                                     </Button>
                                     <Button
                                       size="sm"
@@ -1032,7 +975,7 @@ const OrganizationDashboard = () => {
                                         link.target = '_blank';
                                         link.click();
                                       }}
-                                      className="h-8 w-8 p-0 rounded-lg hover:bg-emerald-50"
+                                      className="h-8 w-8 rounded-lg p-0 shadow-none hover:bg-blue-50"
                                       title="Download file"
                                     >
                                       <Download className="h-4 w-4 text-emerald-600" />
@@ -1106,6 +1049,7 @@ const OrganizationDashboard = () => {
           />
         )}
       </div>
+    </div>
   );
 };
 

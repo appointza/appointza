@@ -9,6 +9,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import {
@@ -37,6 +40,8 @@ export default function TemplateVariablesCopyDialog({
   const [promptMode, setPromptMode] = useState<PromptMode>("html");
   const [organisationLogoId, setOrganisationLogoId] = useState(0);
   const [organisationName, setOrganisationName] = useState("");
+  const [theme, setTheme] = useState("");
+  const [siteFor, setSiteFor] = useState("");
 
   useEffect(() => {
     if (!open || !user?.organisationid) {
@@ -74,8 +79,10 @@ export default function TemplateVariablesCopyDialog({
       locationId: locationId ?? user?.locationid ?? 0,
       locationName: locationName ?? "",
       userEmail: user?.email,
+      theme,
+      siteFor,
     }),
-    [user, organisationName, organisationLogoId, locationId, locationName],
+    [user, organisationName, organisationLogoId, locationId, locationName, theme, siteFor],
   );
 
   const aiPromptText = useMemo(
@@ -124,8 +131,9 @@ export default function TemplateVariablesCopyDialog({
             AI prompts — HTML & Blocks
           </DialogTitle>
           <DialogDescription className="text-sm leading-relaxed sm:text-base">
-            For {businessContext.organisationName || "your business"} — pick HTML (full page) or Blocks (JSON).
-            Hospitality sites: use Rooms, Packages, Policies, Food menu & Nearby blocks/variables.
+            For {businessContext.organisationName || "your business"} — pick HTML or Blocks, then set
+            theme and who the site is for. Prompts include scroll motion rules and hide empty
+            variable sections.
           </DialogDescription>
         </DialogHeader>
 
@@ -151,6 +159,37 @@ export default function TemplateVariablesCopyDialog({
               <span className="block text-[11px] text-stone-500">{tab.hint}</span>
             </button>
           ))}
+        </div>
+
+        <div className="shrink-0 space-y-3 rounded-xl border border-orange-100 bg-orange-50/50 p-3">
+          <p className="text-xs font-semibold uppercase tracking-wide text-orange-800">
+            Design briefing (added at the end of the prompt)
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="ai-prompt-theme" className="text-sm text-stone-700">
+              Theme / visual style
+            </Label>
+            <Input
+              id="ai-prompt-theme"
+              value={theme}
+              onChange={(e) => setTheme(e.target.value)}
+              placeholder="e.g. warm spa, modern clinic, luxury resort, bold gym"
+              className="h-10 rounded-xl border-stone-200 bg-white"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="ai-prompt-site-for" className="text-sm text-stone-700">
+              Who this site is for
+            </Label>
+            <Textarea
+              id="ai-prompt-site-for"
+              value={siteFor}
+              onChange={(e) => setSiteFor(e.target.value)}
+              placeholder="e.g. women booking salon appointments · families booking resort stays · athletes booking coaching"
+              rows={2}
+              className="rounded-xl border-stone-200 bg-white text-sm"
+            />
+          </div>
         </div>
 
         <p className="shrink-0 text-xs text-stone-500">

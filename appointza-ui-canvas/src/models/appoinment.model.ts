@@ -165,6 +165,8 @@ export class ClientsSelectReq {
   organisationlocationid: number = 0;
   mobilenumber: string = "";
   include_room_customers: boolean = false;
+  skip: number = 0;
+  take: number = 0;
 }
 
 export class ClientInfoRes {

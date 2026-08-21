@@ -383,11 +383,13 @@ export function getDefaultBlockData(blockType: string): Record<string, unknown> 
     "appointza-reviews": { variant: 1 },
     "appointza-facilities": { variant: 1 },
     "appointza-location-images": { variant: 1 },
+    "appointza-location-videos": { variant: 1 },
     "appointza-rooms": { variant: 1 },
     "appointza-hospitality-policies": { variant: 1 },
     "appointza-hospitality-packages": { variant: 1 },
     "appointza-food-menu": { variant: 1 },
     "appointza-nearby-places": { variant: 1 },
+    "appointza-guest-services": { variant: 1 },
   };
   return map[blockType] ? { ...map[blockType] } : { title: blockType };
 }
@@ -398,13 +400,18 @@ export function createDefaultHomePage(): TemplateBuilderPage {
     id: "home",
     name: "Booking page",
     blocks: [
-      { id: `appointza-organization-${ts}`, type: "appointza-organization", data: getDefaultBlockData("appointza-organization"), visible: true },
-      { id: `section-${ts + 1}`, type: "section", data: getDefaultBlockData("section"), visible: true },
+      { id: `hero-${ts}`, type: "hero", data: getDefaultBlockData("hero"), visible: true },
+      { id: `about-${ts + 1}`, type: "about", data: getDefaultBlockData("about"), visible: true },
       { id: `appointza-services-${ts + 2}`, type: "appointza-services", data: getDefaultBlockData("appointza-services"), visible: true },
-      { id: `cta-booking-${ts + 3}`, type: "cta-booking", data: getDefaultBlockData("cta-booking"), visible: true },
-      { id: `appointza-timings-${ts + 4}`, type: "appointza-timings", data: getDefaultBlockData("appointza-timings"), visible: true },
-      { id: `appointza-location-${ts + 5}`, type: "appointza-location", data: getDefaultBlockData("appointza-location"), visible: true },
-      { id: `footer-${ts + 6}`, type: "footer", data: getDefaultBlockData("footer"), visible: true },
+      { id: `appointza-events-${ts + 3}`, type: "appointza-events", data: getDefaultBlockData("appointza-events"), visible: true },
+      { id: `appointza-facilities-${ts + 4}`, type: "appointza-facilities", data: getDefaultBlockData("appointza-facilities"), visible: true },
+      { id: `appointza-timings-${ts + 5}`, type: "appointza-timings", data: getDefaultBlockData("appointza-timings"), visible: true },
+      { id: `appointza-location-images-${ts + 6}`, type: "appointza-location-images", data: getDefaultBlockData("appointza-location-images"), visible: true },
+      { id: `appointza-location-videos-${ts + 7}`, type: "appointza-location-videos", data: getDefaultBlockData("appointza-location-videos"), visible: true },
+      { id: `testimonials-${ts + 8}`, type: "testimonials", data: getDefaultBlockData("testimonials"), visible: true },
+      { id: `form-${ts + 9}`, type: "form", data: getDefaultBlockData("form"), visible: true },
+      { id: `appointza-location-${ts + 10}`, type: "appointza-location", data: getDefaultBlockData("appointza-location"), visible: true },
+      { id: `footer-${ts + 11}`, type: "footer", data: getDefaultBlockData("footer"), visible: true },
     ],
   };
 }

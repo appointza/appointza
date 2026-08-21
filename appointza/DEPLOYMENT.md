@@ -4,18 +4,15 @@
 
 ### Quick Build Commands
 
-**Windows (PowerShell):**
+From the **repo root** (UI + server, single output folder):
+
 ```powershell
-.\build-production.ps1
+.\build-appointza.ps1
 ```
 
-**Linux/macOS (Bash):**
-```bash
-chmod +x build-production.sh
-./build-production.sh
-```
+Output: `appointzabuild/appointzaproduction/` (`appointza.exe` + `wwwroot/` + `config.js`)
 
-**Manual Build:**
+**Manual server-only publish:**
 ```bash
 dotnet restore appointza/appointza.csproj
 dotnet build appointza/appointza.csproj -c Release
@@ -24,7 +21,7 @@ dotnet publish appointza/appointza.csproj -c Release -o ./publish --self-contain
 
 ## Build Output
 
-The production build is published to: `./publish/`
+The production build is published to: `appointzabuild/appointzaproduction/`
 
 ## Prerequisites on Target Server
 

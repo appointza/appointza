@@ -9,16 +9,18 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
-import {
-  OrganisationLocation,
-  OrganisationLocationSelectReq,
-} from "@/models/organisationlocation.model";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import { OrganisationLocation } from "@/models/organisationlocation.model";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { buildOrganisationCustomUrlHost } from "@/utils/orgPublicSiteUrl.util";
 import { getDomainName } from "@/utils/environment";
 import { normalizeCustomUrlSlug } from "@/utils/slug.util";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
+import {
+  invalidatePublicSiteCacheForLocation,
+  markPublicSiteSubdomainStale,
+} from "@/utils/publicSiteCache.util";
 
 const CustomDomainScreen = () => {
   const { toast } = useToast();
@@ -30,7 +32,11 @@ const CustomDomainScreen = () => {
 
   const locationService = useMemo(() => new OrganisationLocationService(), []);
 
-  const [isLoading, setIsLoading] = useState(true);
+  const { data: locationsData, isLoading } = useOrganisationLocations({
+    organisationId: organizationId,
+    enabled: isAuthenticated,
+  });
+
   const [isSaving, setIsSaving] = useState(false);
   const [location, setLocation] = useState<OrganisationLocation | null>(null);
   const [customUrlInput, setCustomUrlInput] = useState("");
@@ -42,45 +48,21 @@ const CustomDomainScreen = () => {
   const domainSuffix = getDomainName();
   const previewHost = buildOrganisationCustomUrlHost({ customUrl: customUrlInput });
 
-  const fetchLocation = useCallback(async () => {
-    if (!organizationId) return;
-    setIsLoading(true);
-    try {
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      const locations = await locationService.select(req);
-      const primary = locations?.[0] ?? null;
-      setLocation(primary);
-      setCustomUrlInput(normalizeCustomUrlSlug(primary?.customurl) || "");
-    } catch (error) {
-      console.error("Failed to load location for custom domain setup:", error);
-      toast({
-        title: "Error",
-        description: "Could not load your location. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [locationService, organizationId, toast]);
+  const fetchLocation = useCallback(() => {
+    const primary = locationsData?.[0] ?? null;
+    setLocation(primary);
+    setCustomUrlInput(normalizeCustomUrlSlug(primary?.customurl) || "");
+  }, [locationsData]);
 
   useEffect(() => {
-    if (isAuthenticated && organizationId) {
-      fetchLocation();
-    }
-  }, [fetchLocation, isAuthenticated, organizationId]);
+    fetchLocation();
+  }, [fetchLocation]);
 
   useEffect(() => {
     if (isLoading || !customUrlInput.trim() || !location?.id) return;
     handleSlugChange(customUrlInput);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- run once when location slug is loaded
   }, [isLoading, location?.id]);
-
-  useEffect(() => {
-    if (isComplete) {
-      navigate("/organization/dashboard", { replace: true });
-    }
-  }, [isComplete, navigate]);
 
   const handleSlugChange = (value: string) => {
     const slug = normalizeCustomUrlSlug(value);
@@ -170,14 +152,19 @@ const CustomDomainScreen = () => {
         customurl: slug,
       };
       await locationService.save(locationToSave);
+      invalidatePublicSiteCacheForLocation(location.id);
+      markPublicSiteSubdomainStale(slug);
       await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["organisation-locations"] });
 
       toast({
         title: "Custom domain saved",
         description: `Your site will be available at ${previewHost}`,
       });
 
-      navigate("/organization/services", { replace: true });
+      if (!isComplete) {
+        navigate("/organization/services", { replace: true });
+      }
     } catch (error: unknown) {
       console.error("Failed to save custom domain:", error);
       const message =
@@ -210,16 +197,18 @@ const CustomDomainScreen = () => {
 
   return (
     <div className="org-page flex min-h-[calc(100dvh-2rem)] w-full flex-col">
-      <div className="org-page-section pb-0 pt-2 sm:pt-4">
-        <OnboardingPageGuide
-          compact
-          stepId="customDomain"
-          hasCustomDomain={hasCustomDomain}
-          hasServices={hasServices}
-          hasWebsite={hasWebsite}
-          hasTiming={hasTiming}
-        />
-      </div>
+      {!hasCustomDomain ? (
+        <div className="org-page-section pb-0 pt-2 sm:pt-4">
+          <OnboardingPageGuide
+            compact
+            stepId="customDomain"
+            hasCustomDomain={hasCustomDomain}
+            hasServices={hasServices}
+            hasWebsite={hasWebsite}
+            hasTiming={hasTiming}
+          />
+        </div>
+      ) : null}
 
       <div className="org-panel-section flex flex-1 flex-col pb-8 pt-4 sm:pt-6">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col">
@@ -312,6 +301,8 @@ const CustomDomainScreen = () => {
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Saving…
                 </>
+              ) : hasCustomDomain ? (
+                "Save changes"
               ) : (
                 <>
                   Save &amp; continue

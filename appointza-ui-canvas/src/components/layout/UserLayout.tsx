@@ -32,10 +32,8 @@ const UserLayout: React.FC<UserLayoutProps> = ({ children }) => {
     return () => window.removeEventListener("user-sidebar-toggle", handler as EventListener);
   }, []);
   
-  // Hide sidebar and bottom nav for Momantza, Campusza, and CRM routes
-  const hideLayout = location.pathname.startsWith("/momantza") || 
-                     location.pathname.startsWith("/campusza") ||
-                     location.pathname.startsWith("/crm");
+  // Campusza has its own product layout.
+  const hideLayout = location.pathname.startsWith("/campusza");
   
   if (hideLayout) {
     return <>{children}</>;

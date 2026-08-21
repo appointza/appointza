@@ -9,9 +9,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Loader2, Copy, Share2, ExternalLink, MapPin, CheckCircle, AlertCircle, Wand2, PencilLine, FileText } from "lucide-react";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { ReferenceValueService } from "@/services/referencevalue.service";
-import { OrganisationLocation, OrganisationLocationSelectReq, UpdateLocationTemplateIdReq } from "@/models/organisationlocation.model";
+import { OrganisationLocation, UpdateLocationTemplateIdReq } from "@/models/organisationlocation.model";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
 import {
@@ -32,9 +33,10 @@ import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
 
 const templatesSectionIconWrap =
-  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FFF0EB] text-[#E85D4C]";
+  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600";
 
 const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
@@ -85,6 +87,12 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   const organizationId = useMemo(() => {
     return user?.organisationid || 0;
   }, [user]);
+
+  const { data: cachedLocations = [] } = useOrganisationLocations({
+    organisationId: user?.organisationid || 0,
+    staffLocationId: user?.locationid || 0,
+    enabled: isAuthenticated,
+  });
 
   // Use fetched templates from ReferenceValue service
   const availableTemplates = useMemo(() => {
@@ -141,8 +149,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         console.log('✅ Converted templates:', templates);
         
         // Set the first template as selected if none is selected
-        if (templates.length > 0 && !selectedTemplate) {
-          setSelectedTemplate(templates[0].id as TemplateType);
+        if (templates.length > 0) {
+          setSelectedTemplate((current) => current || (templates[0].id as TemplateType));
         }
       } else {
         setFetchedTemplates([]);
@@ -163,57 +171,22 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   // Fetch locations
   const fetchLocations = useCallback(async () => {
     if (!isAuthenticated) return;
-    
     setIsLoading(true);
     try {
-      const req = new OrganisationLocationSelectReq();
-      
-      // If user has organisationid, use it; otherwise use locationid (for staff users)
-      if (user?.organisationid && user.organisationid > 0) {
-        req.organisationid = user.organisationid;
-        console.log('🔍 Fetching locations for organization:', user.organisationid);
-      } else if (user?.locationid && user.locationid > 0) {
-        req.organisationlocationid = user.locationid;
-        console.log('🔍 Fetching locations for staff location:', user.locationid);
-      } else {
-        console.log('⚠️ No organization or location ID found for user');
-        setLocations([]);
-        toast({
-          title: "No Access",
-          description: "No organization or location access found.",
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      const response = await locationService.select(req);
-      console.log('✅ Locations API response:', response);
-      
+      const response = cachedLocations;
       if (response && response.length > 0) {
         setLocations(response);
         setSelectedLocationId(response[0].id);
       } else {
         setLocations([]);
-        toast({
-          title: "No Locations",
-          description: "No business locations found. Please add a location first.",
-          variant: "destructive"
-        });
       }
-    } catch (error) {
-      console.error('❌ Error fetching locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch locations",
-        variant: "destructive"
-      });
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, user, locationService, toast]);
+  }, [cachedLocations, isAuthenticated]);
 
   // Check if location already has a template using ReferenceValue service
-  const checkExistingTemplate = async (locationId: number): Promise<ReferenceValue | null> => {
+  const checkExistingTemplate = useCallback(async (locationId: number): Promise<ReferenceValue | null> => {
     try {
       const req = new ReferenceValueSelectReq();
       req.referencetypeid = 5;
@@ -230,7 +203,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
       console.error('❌ Error checking existing template:', error);
       return null;
     }
-  };
+  }, [organizationId, referenceValueService]);
 
   // Update location's templateid field using dedicated API
   const updateLocationTemplateId = async (locationId: number, templateId: string): Promise<boolean> => {
@@ -301,6 +274,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
       const success = await updateLocationTemplateId(selectedLocationId, templateId);
 
       if (success) {
+        invalidatePublicSiteCacheForLocation(selectedLocationId);
         toast({
           title: "Success",
           description: `Template ID ${templateId} has been assigned to location.`,
@@ -335,7 +309,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
       console.error('❌ Error checking location template:', error);
       setExistingTemplate(null);
     }
-  }, [organizationId, referenceValueService]);
+  }, [checkExistingTemplate, organizationId]);
 
   // Load organisation details for booking page
   const loadOrganisationDetails = useCallback(async () => {
@@ -569,7 +543,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     if (isLoadingTemplates) {
       return (
         <div className={cn(org.loading, "flex-col gap-2 py-8")}>
-          <Loader2 className="h-8 w-8 animate-spin text-appointza-coral" />
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
           <span className="text-sm text-stone-600">Loading templates…</span>
         </div>
       );
@@ -577,7 +551,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
     if (availableTemplates.length === 0) {
       return (
-        <div className="rounded-2xl border border-dashed border-stone-200 bg-appointza-cream/40 py-10 text-center text-sm text-stone-500">
+        <div className="rounded-2xl border border-dashed border-stone-200 bg-white py-10 text-center text-sm text-stone-500 shadow-none">
           <p>No templates found. Use the builder above to create one.</p>
         </div>
       );
@@ -590,8 +564,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
             key={template.id}
             className={cn(
               org.card,
-              "cursor-pointer overflow-hidden transition-all hover:border-stone-200 hover:shadow-md",
-              selectedTemplate === template.id && "ring-2 ring-[#E85D4C] ring-offset-2",
+              "cursor-pointer overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none transition-colors hover:border-blue-300 hover:shadow-none",
+              selectedTemplate === template.id && "border-blue-500 ring-2 ring-blue-500 ring-offset-2",
             )}
             onClick={() => {
               setSelectedTemplate(template.id as TemplateType);
@@ -601,7 +575,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               {template.content && template.content.includes("<!DOCTYPE html>") ? (
                 previewLoading && selectedLocationId ? (
                   <div className="flex h-full items-center justify-center">
-                    <Loader2 className="h-6 w-6 animate-spin text-appointza-coral" />
+                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
                   </div>
                 ) : (
                   <iframe
@@ -627,7 +601,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                 variant={selectedTemplate === template.id ? "default" : "outline"}
                 className={cn(
                   selectedTemplate === template.id ? org.btnPrimary : org.btnOutline,
-                  "min-h-10 w-full",
+                  "min-h-10 w-full rounded-xl border-stone-200 shadow-none",
+                  selectedTemplate === template.id && "border-blue-600 bg-blue-600 text-white hover:bg-blue-700",
                 )}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -657,7 +632,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
     if (!selectedLocationId) {
       return (
-        <div className="rounded-2xl border border-dashed border-stone-200 bg-appointza-cream/40 py-10 text-center text-sm text-stone-500">
+        <div className="rounded-2xl border border-dashed border-stone-200 bg-white py-10 text-center text-sm text-stone-500 shadow-none">
           Select a location above to preview with your real business data.
         </div>
       );
@@ -666,7 +641,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     if (previewLoading) {
       return (
         <div className={cn(org.loading, "flex-col gap-2 py-12")}>
-          <Loader2 className="h-8 w-8 animate-spin text-appointza-coral" />
+          <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
           <span className="text-sm text-stone-600">Loading preview…</span>
         </div>
       );
@@ -727,8 +702,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           </div>
         )}
 
-        <div className="space-y-6">
-          <Card className={cn(org.card, "overflow-hidden border-stone-100 bg-gradient-to-br from-[#FFF8F5] to-white")}>
+        <div className="w-full space-y-6">
+          <Card className={cn(org.card, "w-full overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none")}>
             <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between md:p-6">
               <div className="flex items-start gap-3">
                 <div className={templatesSectionIconWrap}>
@@ -746,14 +721,14 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               <div className="flex flex-wrap gap-2 md:shrink-0">
                 <Button
                   variant="outline"
-                  className={cn(org.btnOutline, "min-h-10")}
+                  className={cn(org.btnOutline, "min-h-10 rounded-xl border-stone-200 bg-white shadow-none")}
                   onClick={() => openTemplateBuilder("edit")}
                 >
-                <PencilLine className="mr-2 h-4 w-4 text-[#E85D4C]" />
+                <PencilLine className="mr-2 h-4 w-4 text-blue-600" />
                 Open AI builder
               </Button>
               <Button
-                className={cn(org.btnPrimary, "min-h-10")}
+                className={cn(org.btnPrimary, "min-h-10 rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700")}
                 onClick={() => openTemplateBuilder("new")}
               >
                 <Wand2 className="mr-2 h-4 w-4" />
@@ -763,7 +738,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
             </CardContent>
           </Card>
 
-          <Card className={cn(org.card, "border-stone-100")}>
+          <Card className={cn(org.card, "rounded-2xl border-stone-200 bg-white shadow-none")}>
             <CardHeader className="space-y-1.5">
               <CardTitle className="flex items-center gap-2 text-lg text-appointza-navy">
                 <span className={templatesSectionIconWrap}>
@@ -778,7 +753,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
             <CardContent>
               {isLoading ? (
                 <div className={cn(org.loading, "flex-col gap-2 py-8")}>
-                  <Loader2 className="h-6 w-6 animate-spin text-appointza-coral" />
+                  <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
                   <span className="text-sm text-stone-600">Loading locations…</span>
                 </div>
               ) : locations.length > 0 ? (
@@ -789,16 +764,16 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                         key={location.id}
                         className={cn(
                           org.card,
-                          "cursor-pointer transition-all hover:border-stone-200 hover:shadow-md",
+                          "cursor-pointer rounded-2xl border-stone-200 bg-white shadow-none transition-colors hover:border-blue-300 hover:shadow-none",
                           selectedLocationId === location.id &&
-                            "border-[#FFD4CC] bg-[#FFF8F5] ring-2 ring-[#E85D4C]",
+                            "border-blue-500 bg-blue-50 ring-2 ring-blue-500",
                         )}
                         onClick={() => setSelectedLocationId(location.id)}
                       >
                         <CardContent className="p-4">
                           <div className="flex items-center gap-3">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[#FFF0EB]">
-                              <MapPin className="h-5 w-5 text-[#E85D4C]" />
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50">
+                              <MapPin className="h-5 w-5 text-blue-600" />
                             </div>
                             <div className="min-w-0 flex-1">
                               <h3 className="truncate text-sm font-semibold text-appointza-navy sm:text-base">
@@ -823,7 +798,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                     <Button
                       onClick={createOrUpdateTemplate}
                       disabled={!selectedLocationId || !selectedTemplate || isCreatingTemplate}
-                      className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
+                      className={cn(org.btnPrimary, "min-h-11 w-full rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700 sm:w-auto")}
                     >
                       {isCreatingTemplate ? (
                         <>
@@ -853,7 +828,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   </p>
                   <Button
                     onClick={() => navigate("/organization/profile?tab=location")}
-                    className={cn(org.btnPrimary, "min-h-10")}
+                    className={cn(org.btnPrimary, "min-h-10 rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700")}
                   >
                     <MapPin className="mr-2 h-4 w-4" />
                     Add location
@@ -872,7 +847,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           </div>
 
           {selectedTemplate ? (
-            <Card className={cn(org.card, "border-stone-100")}>
+            <Card className={cn(org.card, "rounded-2xl border-stone-200 bg-white shadow-none")}>
               <CardHeader className="space-y-1.5">
                 <CardTitle className="text-lg text-appointza-navy sm:text-xl">
                   Live template preview
@@ -888,7 +863,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           ) : null}
 
           {selectedLocationId && selectedLocationId > 0 ? (
-            <Card className={cn(org.card, "border-stone-100")}>
+            <Card className={cn(org.card, "rounded-2xl border-stone-200 bg-white shadow-none")}>
               <CardHeader className="space-y-1.5">
                 <CardTitle className="flex items-center gap-2 text-lg text-appointza-navy sm:text-xl">
                   <span className={templatesSectionIconWrap}>
@@ -905,10 +880,10 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  <div className="rounded-2xl border border-stone-100 bg-appointza-cream/50 p-4">
+                  <div className="rounded-xl border border-stone-200 bg-white p-4 shadow-none">
                     <div className="flex items-start gap-2">
                       {isGeneratingUrl ? (
-                        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[#E85D4C]" />
+                        <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-blue-600" />
                       ) : (
                         <ExternalLink className="mt-0.5 h-4 w-4 shrink-0 text-stone-400" />
                       )}
@@ -923,7 +898,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                       onClick={copyUrlToClipboard}
                       disabled={!bookingUrl || isGeneratingUrl}
                       variant="outline"
-                      className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
+                      className={cn(org.btnOutline, "min-h-11 w-full rounded-xl border-stone-200 bg-white shadow-none sm:w-auto")}
                     >
                       <Copy className="mr-2 h-4 w-4" />
                       Copy URL
@@ -932,7 +907,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                       onClick={shareUrl}
                       disabled={!bookingUrl || isGeneratingUrl}
                       variant="outline"
-                      className={cn(org.btnOutline, "min-h-11 w-full sm:w-auto")}
+                      className={cn(org.btnOutline, "min-h-11 w-full rounded-xl border-stone-200 bg-white shadow-none sm:w-auto")}
                     >
                       <Share2 className="mr-2 h-4 w-4" />
                       Share
@@ -940,7 +915,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                     <Button
                       onClick={() => window.open(bookingUrl, "_blank")}
                       disabled={!bookingUrl || isGeneratingUrl}
-                      className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
+                      className={cn(org.btnPrimary, "min-h-11 w-full rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700 sm:w-auto")}
                     >
                       <ExternalLink className="mr-2 h-4 w-4" />
                       Preview
@@ -948,12 +923,12 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   </div>
 
                   {customUrl ? (
-                    <div className="mt-4 rounded-2xl border border-stone-100 bg-[#FFF8F5] p-4">
+                    <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-4 shadow-none">
                       <div className="mb-3 flex items-center gap-2">
-                        <ExternalLink className="h-4 w-4 text-[#E85D4C]" />
+                        <ExternalLink className="h-4 w-4 text-blue-600" />
                         <span className="text-sm font-medium text-appointza-navy">Custom booking URL</span>
                       </div>
-                      <div className="mb-3 rounded-2xl border border-stone-100 bg-white p-3">
+                      <div className="mb-3 rounded-xl border border-stone-200 bg-white p-3 shadow-none">
                         <span className="break-all font-mono text-xs text-stone-700 sm:text-sm">{customUrl}</span>
                       </div>
                       <div className="flex flex-col gap-2 sm:flex-row">
@@ -961,7 +936,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                           onClick={copyCustomUrlToClipboard}
                           disabled={!customUrl}
                           variant="outline"
-                          className={cn(org.btnOutline, "min-h-10 w-full sm:w-auto")}
+                          className={cn(org.btnOutline, "min-h-10 w-full rounded-xl border-stone-200 bg-white shadow-none sm:w-auto")}
                         >
                           <Copy className="mr-2 h-4 w-4" />
                           Copy
@@ -969,7 +944,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                         <Button
                           onClick={() => customUrlOrigin && window.open(customUrlOrigin, "_blank")}
                           disabled={!customUrlOrigin}
-                          className={cn(org.btnPrimary, "min-h-10 w-full sm:w-auto")}
+                          className={cn(org.btnPrimary, "min-h-10 w-full rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700 sm:w-auto")}
                         >
                           <ExternalLink className="mr-2 h-4 w-4" />
                           Preview
@@ -982,12 +957,12 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
             </Card>
           ) : null}
 
-          <Card className="rounded-2xl border border-emerald-200 bg-emerald-50/80">
+          <Card className="rounded-2xl border border-stone-200 bg-white shadow-none">
             <CardContent className="p-5 sm:p-6">
-              <h3 className="mb-3 text-base font-semibold text-emerald-900 sm:text-lg">
+              <h3 className="mb-3 text-base font-semibold text-appointza-navy sm:text-lg">
                 How to use your booking page
               </h3>
-              <div className="space-y-2 text-xs text-emerald-800 sm:text-sm">
+              <div className="space-y-2 text-xs text-stone-600 sm:text-sm">
                 <p>• Share the URL via email, SMS, or social media</p>
                 <p>• Print a QR code and display it at your business</p>
                 <p>• Embed the booking page on your website</p>

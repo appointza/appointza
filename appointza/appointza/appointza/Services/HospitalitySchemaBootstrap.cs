@@ -135,6 +135,33 @@ namespace appointza.Services
                     WHERE isactive = TRUE
                 """,
                 """
+                CREATE TABLE IF NOT EXISTS organisation_room_status_events (
+                    id                         BIGSERIAL PRIMARY KEY,
+                    organisation_id            BIGINT       NOT NULL,
+                    organisation_location_id   BIGINT,
+                    organisation_room_id       BIGINT       NOT NULL,
+                    booking_id                 VARCHAR(100) NOT NULL DEFAULT '',
+                    from_status                VARCHAR(30)  NOT NULL DEFAULT '',
+                    to_status                  VARCHAR(30)  NOT NULL,
+                    event_type                 VARCHAR(30)  NOT NULL,
+                    changed_by_user_id         BIGINT,
+                    changed_by_name            VARCHAR(255) NOT NULL DEFAULT '',
+                    source                     VARCHAR(40)  NOT NULL DEFAULT 'api',
+                    notes                      TEXT         NOT NULL DEFAULT '',
+                    occurred_at                TIMESTAMP    NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC'),
+                    created_at                 TIMESTAMP    NOT NULL DEFAULT (NOW() AT TIME ZONE 'UTC')
+                )
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_room_status_events_room_time
+                    ON organisation_room_status_events (organisation_room_id, occurred_at DESC)
+                """,
+                """
+                CREATE INDEX IF NOT EXISTS idx_room_status_events_org_booking
+                    ON organisation_room_status_events (organisation_id, booking_id)
+                    WHERE booking_id <> ''
+                """,
+                """
                 ALTER TABLE Organisation
                     ADD COLUMN IF NOT EXISTS organisation_type VARCHAR(30) NOT NULL DEFAULT 'service'
                 """,

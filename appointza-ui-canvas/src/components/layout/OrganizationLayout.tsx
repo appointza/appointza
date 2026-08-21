@@ -1,5 +1,5 @@
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import {
   ORG_SIDEBAR_OFFSET_CLASS,
   readOrgSidebarCollapsed,
@@ -18,9 +18,6 @@ import { org } from "@/lib/orgTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Loader2, ShieldX } from "lucide-react";
-import BillingOverdueScreen from "@/components/organization/BillingOverdueScreen";
-import { OrganisationSubscriptionStatusRes } from "@/models/subscription.model";
-import { SubscriptionService } from "@/services/subscription.service";
 import { OnboardingSetupScreen } from "@/components/onboarding/OrganizationOnboarding";
 import { isOrganizationOnboardingRoute } from "@/utils/organizationOnboarding.util";
 import { OrgTemplateAssetsProvider } from "@/contexts/OrgTemplateAssetsContext";
@@ -76,6 +73,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
       '/organization/calendar': 'editandviewAppointments',
       '/organization/event-bookings': 'editandviewEvents',
       '/organization/services': 'editandviewCreateService', // Check for service or event permission
+      '/organization/leads': 'editandviewClients',
       '/organization/clients': 'editandviewClients',
     };
     
@@ -86,6 +84,17 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
         // Services route needs either service or event permission
         return userpermission?.editandviewCreateService === true || userpermission?.editandviewCreateEvent === true;
       }
+      if (
+        route === '/organization/appointments' ||
+        route === '/organization/calendar' ||
+        route === '/organization/event-bookings'
+      ) {
+        // Bookings merges appointments + event participants
+        return (
+          userpermission?.editandviewAppointments === true ||
+          userpermission?.editandviewEvents === true
+        );
+      }
       return userpermission?.[permissionKey] === true;
     }
     
@@ -94,6 +103,16 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
       if (route.startsWith(mappedRoute)) {
         if (mappedRoute === '/organization/services') {
           return userpermission?.editandviewCreateService === true || userpermission?.editandviewCreateEvent === true;
+        }
+        if (
+          mappedRoute === '/organization/appointments' ||
+          mappedRoute === '/organization/calendar' ||
+          mappedRoute === '/organization/event-bookings'
+        ) {
+          return (
+            userpermission?.editandviewAppointments === true ||
+            userpermission?.editandviewEvents === true
+          );
         }
         return userpermission?.[permissionKey] === true;
       }
@@ -104,54 +123,6 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   };
 
   const staffHasAccess = checkRouteAccess(location.pathname);
-
-  // -----------------------------------------------------------------------
-  // Billing overdue gate
-  // Org owners (not staff) lose access to all org pages while booking-fee
-  // overage is unpaid. The gate calls /Subscription/GetStatus and refreshes
-  // after payment verification.
-  // -----------------------------------------------------------------------
-  const subscriptionService = useMemo(() => new SubscriptionService(), []);
-  const orgIdForBilling = user?.organisationid ?? 0;
-  const shouldEnforceBilling = userType === 'organization' && !isStaff && orgIdForBilling > 0;
-  const isDashboardRoute =
-    location.pathname === '/organization/dashboard' ||
-    location.pathname.startsWith('/organization/dashboard/');
-  const [billingStatus, setBillingStatus] = useState<OrganisationSubscriptionStatusRes | null>(null);
-  const [billingChecked, setBillingChecked] = useState(() => isDashboardRoute);
-
-  const refreshBillingStatus = useCallback(async () => {
-    if (!shouldEnforceBilling || isDashboardRoute) {
-      setBillingStatus(null);
-      setBillingChecked(true);
-      return;
-    }
-    try {
-      const status = await subscriptionService.getStatus(orgIdForBilling);
-      setBillingStatus(status);
-    } catch (err) {
-      console.error('Could not load subscription status', err);
-      setBillingStatus(null);
-    } finally {
-      setBillingChecked(true);
-    }
-  }, [shouldEnforceBilling, isDashboardRoute, subscriptionService, orgIdForBilling]);
-
-  useEffect(() => {
-    if (isDashboardRoute) {
-      setBillingChecked(true);
-      return;
-    }
-    void refreshBillingStatus();
-  }, [isDashboardRoute, refreshBillingStatus]);
-
-  useEffect(() => {
-    if (!shouldEnforceBilling || isDashboardRoute) return;
-    const id = window.setInterval(() => {
-      void refreshBillingStatus();
-    }, 60_000);
-    return () => window.clearInterval(id);
-  }, [shouldEnforceBilling, isDashboardRoute, refreshBillingStatus]);
 
   const handleSidebarCollapsedChange = useCallback((collapsed: boolean) => {
     setSidebarCollapsed(collapsed);
@@ -216,8 +187,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
                   // Find first accessible route or go to profile
                   const accessibleRoutes = [
                     { path: '/organization/appointments', perm: 'editandviewAppointments' },
-                    { path: '/organization/calendar', perm: 'editandviewAppointments' },
-                    { path: '/organization/event-bookings', perm: 'editandviewEvents' },
+                    { path: '/organization/appointments?kind=events', perm: 'editandviewEvents' },
                     { path: '/organization/services', perm: 'editandviewCreateService' },
                     { path: '/organization/clients', perm: 'editandviewClients' },
                     { path: '/organization/profile', perm: null }, // Profile is always accessible
@@ -271,42 +241,23 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
     }
   }
 
-  // Billing overdue lock — org owners with unpaid booking-fee overage get
-  // a payment-only screen. While the very first status request is in flight
-  // we briefly show a spinner so the dashboard never flashes before locking.
-  if (shouldEnforceBilling && !billingChecked) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="flex flex-col items-center gap-3 text-gray-500">
-          <Loader2 className="h-8 w-8 animate-spin text-orange-500" />
-          <p className="text-sm">Checking billing status…</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (
-    shouldEnforceBilling &&
-    billingStatus &&
-    Number(billingStatus.outstanding_amount_inr ?? 0) > 0
-  ) {
-    return (
-      <BillingOverdueScreen
-        status={billingStatus}
-        onPaid={() => refreshBillingStatus()}
-      />
-    );
-  }
-
   const isTemplateBuilder = location.pathname.includes("/template-builder");
   const isClientManagement = /^\/organization\/clients\/?$/.test(location.pathname);
-  const isFullBleedPage = isTemplateBuilder || isClientManagement;
+  const isClientBookPage = /^\/organization\/clients\/\d+\/book\/?$/.test(location.pathname);
+  const isLeadsPage = /^\/organization\/leads\/?$/.test(location.pathname);
+  const isProfilePage = /^\/organization\/profile\/?$/.test(location.pathname);
+  const isFullBleedPage =
+    isTemplateBuilder ||
+    isClientManagement ||
+    isClientBookPage ||
+    isLeadsPage ||
+    isProfilePage;
   const inOnboardingFlow =
     userType === "organization" && !isStaff && !isComplete && isOnboardingRoute;
 
   return (
     <OrgTemplateAssetsProvider>
-    <div className="app-shell h-dvh overflow-hidden safe-area-sides">
+    <div className="app-shell org-flat-shell h-dvh overflow-hidden safe-area-sides">
       {!inOnboardingFlow && (
         <OrganizationSidebar
           collapsed={sidebarCollapsed}
@@ -332,7 +283,10 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
             "h-full w-full max-w-none",
             inOnboardingFlow && "bg-appointza-cream",
             isFullBleedPage
-              ? "flex min-h-0 flex-col overflow-hidden p-0"
+              ? cn(
+                  "flex min-h-0 flex-col p-0",
+                  isClientBookPage ? "overflow-y-auto overscroll-contain" : "overflow-hidden",
+                )
               : "overflow-y-auto pb-4 pt-4 md:pb-6 md:pt-5 lg:pb-8 lg:pt-6",
           )}
         >
@@ -341,7 +295,13 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
               <DashboardSwitcher />
             </div>
           )}
-          <div className={cn(isFullBleedPage && "flex min-h-0 flex-1 flex-col overflow-hidden")}>
+          <div
+            className={cn(
+              isFullBleedPage &&
+                !isClientBookPage &&
+                "flex min-h-0 flex-1 flex-col overflow-hidden",
+            )}
+          >
             {children}
           </div>
         </main>

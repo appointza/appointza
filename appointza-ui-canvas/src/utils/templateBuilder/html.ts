@@ -72,16 +72,16 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       <div class="appointza-org-left">
         ${
           showLogo
-            ? `{{#organizationlogo}}<img src="{{environment.baseurl}}/api/Files/Get?id={{organisationdetail.organisationlogo}}" alt="{{organisationdetail.name}}" class="appointza-org-logo" />{{/organizationlogo}}`
+            ? `{{#organizationlogo}}<img src="{{ORGANISATION_LOGO_URL}}" alt="{{organisationdetail.name}}" class="appointza-org-logo" />{{/organizationlogo}}`
             : ""
         }
       </div>
       <div class="appointza-org-right">
         <h1>{{organisationdetail.name}}</h1>
-        <p class="appointza-org-tagline">{{organisationdetail.tagline}}</p>
-        <p class="appointza-org-notes">{{organisationdetail.notes}}</p>
-        <p class="appointza-org-email">Email: {{organizationemail}}</p>
-        ${showGst ? `{{#gstnumber}}<p class="appointza-org-gst">GST: {{organisationdetail.organisationgstnumber}}</p>{{/gstnumber}}` : ""}
+        {{#organisationtagline}}<p class="appointza-org-tagline">{{organisationdetail.tagline}}</p>{{/organisationtagline}}
+        {{#organisationnotes}}<p class="appointza-org-notes">{{organisationdetail.notes}}</p>{{/organisationnotes}}
+        {{#organisationemail}}<p class="appointza-org-email">Email: {{organisationemail}}</p>{{/organisationemail}}
+        ${showGst ? `{{#gstnumber}}<p class="appointza-org-gst">GST: {{organisationdetail.gstnumber}}</p>{{/gstnumber}}` : ""}
         <a href="{{BOOKNOWURL}}" data-appointza-book class="appointza-book-button">Book appointment</a>
       </div>
     </div>
@@ -126,6 +126,7 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
 </section>`;
     case "appointza-services":
       return `
+{{#hasservices}}
 <section id="services" class="appointza-services-section az-a-svc az-a-svc-${v}">
   <div class="appointza-services-bg"></div>
   <div class="appointza-services-container">
@@ -135,7 +136,7 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       <div class="appointza-service-card">
         {{#service_image_id}}
         <div class="appointza-service-media">
-          <img src="{{environment.baseurl}}/api/Files/Get?id={{service_image_id}}" alt="{{Servicename}}" />
+          <img src="{{SERVICE_IMAGE_URL}}" alt="{{Servicename}}" />
         </div>
         {{/service_image_id}}
         <div class="appointza-service-content">
@@ -144,15 +145,17 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
             <p class="appointza-service-price">₹{{prize}} · {{timetaken}} min</p>
           </div>
           <p>{{notes}}</p>
-          <a href="{{BOOKNOWURL}}" data-appointza-book class="appointza-service-button">Book</a>
+          <a href="{{SERVICE_BOOK_URL}}" data-appointza-book class="appointza-service-button">Book</a>
         </div>
       </div>
       {{/orgnaisatinservice}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasservices}}`;
     case "appointza-timings":
       return `
+{{#hastimings}}
 <section id="hours" class="appointza-timings-section az-a-time az-a-time-${v}">
   <div class="appointza-timings-container">
     <h2>Working hours</h2>
@@ -165,14 +168,15 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       {{/OrganisationServiceTiming}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hastimings}}`;
     case "appointza-events":
       return `
+{{#hasevents}}
 <section id="events" class="appointza-events-section az-a-evt az-a-evt-${v}">
   <div class="appointza-events-bg"></div>
   <div class="appointza-events-container">
     <h2>Events &amp; tournaments</h2>
-    {{#hasevents}}
     <div class="appointza-events-list">
       {{#events}}
       <div class="appointza-event-card">
@@ -193,11 +197,12 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       </div>
       {{/events}}
     </div>
-    {{/hasevents}}
   </div>
-</section>`;
+</section>
+{{/hasevents}}`;
     case "appointza-reviews":
       return `
+{{#hasreviews}}
 <section id="reviews" class="appointza-reviews-section az-a-rev az-a-rev-${v}">
   <div class="appointza-reviews-container">
     <h2>Customer reviews</h2>
@@ -210,9 +215,11 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       {{/reviews}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasreviews}}`;
     case "appointza-facilities":
       return `
+{{#hasfacilities}}
 <section id="amenities" class="appointza-facilities-section az-a-fac az-a-fac-${v}">
   <div class="appointza-facilities-container">
     <h2>Amenities</h2>
@@ -222,23 +229,44 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       {{/facilities}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasfacilities}}`;
     case "appointza-location-images":
       return `
+{{#haslocationimages}}
 <section id="gallery" class="appointza-location-images-section az-a-gal az-a-gal-${v}">
   <div class="appointza-location-images-container">
     <h2>Gallery</h2>
     <div class="appointza-location-images-grid">
       {{#locationimages}}
       <div class="appointza-location-image-item">
-        <img src="{{environment.baseurl}}/api/Files/Get?id={{location_image_id}}" alt="Gallery" />
+        <img src="{{LOCATION_IMAGE_URL}}" alt="Gallery" />
       </div>
       {{/locationimages}}
     </div>
   </div>
-</section>`;
+</section>
+{{/haslocationimages}}`;
+    case "appointza-location-videos":
+      return `
+{{#haslocationvideos}}
+<section id="videos" class="appointza-location-videos-section az-a-vid az-a-vid-${v}">
+  <div class="appointza-location-videos-container">
+    <h2>Videos</h2>
+    <div class="appointza-location-videos-grid">
+      {{#locationvideos}}
+      <div class="appointza-location-video-item">
+        <iframe src="{{LOCATION_VIDEO_EMBED_URL}}" title="Business video" loading="lazy" allowfullscreen></iframe>
+        <a href="{{LOCATION_VIDEO_URL}}" target="_blank" rel="noopener noreferrer">Watch video</a>
+      </div>
+      {{/locationvideos}}
+    </div>
+  </div>
+</section>
+{{/haslocationvideos}}`;
     case "appointza-rooms":
       return `
+{{#hasrooms}}
 <section id="rooms" class="appointza-rooms-section az-a-rooms az-a-rooms-${v}">
   <div class="appointza-rooms-container">
     <h2>Our rooms</h2>
@@ -254,21 +282,18 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
           <p class="appointza-room-meta">{{room.type}} · {{room.capacity}} guests</p>
           <p class="appointza-room-price">From ₹{{room.price}} <span>/ night</span></p>
           <div class="appointza-room-footer">
-            {{#if_room_available}}
-            <a href="{{ROOM_BOOK_URL}}" class="appointza-room-button">Book this room</a>
-            {{/if_room_available}}
-            {{#if_room_unavailable}}
-            <span class="appointza-room-status">{{room.status_label}}</span>
-            {{/if_room_unavailable}}
+            <a href="{{ROOM_BOOK_URL}}" class="appointza-room-button">Book now</a>
           </div>
         </div>
       </article>
       {{/rooms}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasrooms}}`;
     case "appointza-hospitality-policies":
       return `
+{{#haspolicies}}
 <section id="policies" class="appointza-policies-section az-a-policies az-a-policies-${v}">
   <div class="appointza-policies-container">
     <h2>Policies</h2>
@@ -287,9 +312,11 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       </div>
     </div>
   </div>
-</section>`;
+</section>
+{{/haspolicies}}`;
     case "appointza-hospitality-packages":
       return `
+{{#haspackages}}
 <section id="packages" class="appointza-packages-section az-a-pkg az-a-pkg-${v}">
   <div class="appointza-packages-container">
     <h2>Packages</h2>
@@ -313,9 +340,11 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       {{/packages}}
     </div>
   </div>
-</section>`;
+</section>
+{{/haspackages}}`;
     case "appointza-food-menu":
       return `
+{{#hasfoodmenu}}
 <section id="food-menu" class="appointza-food-section az-a-food az-a-food-${v}">
   <div class="appointza-food-container">
     <h2>Food &amp; dining</h2>
@@ -330,9 +359,11 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       {{/food_menu}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasfoodmenu}}`;
     case "appointza-nearby-places":
       return `
+{{#hasnearby}}
 <section id="nearby" class="appointza-nearby-section az-a-nearby az-a-nearby-${v}">
   <div class="appointza-nearby-container">
     <h2>Nearby places</h2>
@@ -347,12 +378,35 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
           <span class="appointza-nearby-icon">{{place.icon}}</span>
           <h3>{{place.name}}</h3>
           <p class="appointza-nearby-meta">{{place.distance}} · {{place.travel_time}}</p>
+          <a href="{{place.map_url}}" target="_blank" rel="noopener noreferrer">View on map</a>
         </div>
       </article>
       {{/nearby_places}}
     </div>
   </div>
-</section>`;
+</section>
+{{/hasnearby}}`;
+    case "appointza-guest-services":
+      return `
+{{#hasguestservices}}
+<section id="guest-services" class="appointza-guest-services-section az-a-guest az-a-guest-${v}">
+  <div class="appointza-guest-services-container">
+    <h2>Guest services</h2>
+    <p class="appointza-section-sub">Extras and add-ons for your stay</p>
+    <div class="appointza-guest-services-grid">
+      {{#guest_services}}
+      <article class="appointza-guest-service-card">
+        <span class="appointza-guest-service-icon">{{guest.icon}}</span>
+        <h3>{{guest.name}}</h3>
+        <p class="appointza-guest-service-price">{{guest.price}}</p>
+        <p class="appointza-guest-service-category">{{guest.category}}</p>
+        <p>{{guest.description}}</p>
+      </article>
+      {{/guest_services}}
+    </div>
+  </div>
+</section>
+{{/hasguestservices}}`;
     default:
       return "";
   }

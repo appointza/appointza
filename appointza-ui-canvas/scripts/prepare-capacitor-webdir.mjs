@@ -7,12 +7,12 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const uiRoot = path.resolve(__dirname, "..");
-const sourceDir = path.resolve(uiRoot, "..", "appointzabuild", "production", "wwwroot");
+const sourceDir = path.resolve(uiRoot, "..", "appointzabuild", "appointzaproduction", "wwwroot");
 const targetDir = path.resolve(uiRoot, "dist");
 
 if (!fs.existsSync(sourceDir)) {
   console.error(`Source build folder not found: ${sourceDir}`);
-  console.error("Run `npm run build` first to generate UI into appointzabuild/production/wwwroot.");
+  console.error("Run .\\build-appointza.ps1 or npm run build first.");
   process.exit(1);
 }
 
@@ -27,4 +27,3 @@ for (const entry of fs.readdirSync(sourceDir)) {
 console.log(`Copied web assets:`);
 console.log(`- from: ${sourceDir}`);
 console.log(`- to  : ${targetDir}`);
-

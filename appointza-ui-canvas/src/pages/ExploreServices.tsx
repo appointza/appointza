@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, MapPin, Clock, Phone, Mail, Calendar, Users, RefreshCw, Loader2, AlertCircle, ExternalLink, Building2, Briefcase } from "lucide-react";
+import { Search, MapPin, Clock, Phone, Mail, Calendar, Users, RefreshCw, Loader2, AlertCircle, ExternalLink, Building2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { OrganisationService } from "@/services/organisation.service";
@@ -77,10 +77,9 @@ const ExploreServices = () => {
   const eventService = useMemo(() => new EventService(), []);
   const organisationServicesService = useMemo(() => new OrganisationServicesService(), []);
 
-  // Tab state — allow deep link from marketing home (`Link state={{ tab: 'service' | 'event' }}`)
+  // Tab state — allow deep link from marketing home (`Link state={{ tab: 'event' }}`)
   const stateTab = (location.state as { tab?: string } | null)?.tab;
-  const initialTab =
-    stateTab === "organisation" || stateTab === "service" || stateTab === "event" ? stateTab : "organisation";
+  const initialTab = stateTab === "event" ? "event" : "organisation";
   const [activeTab, setActiveTab] = useState(initialTab);
 
   // State for organisations
@@ -453,54 +452,31 @@ const ExploreServices = () => {
     }
   };
 
-  // Load all services from all organisations
+  // Load all services from all organisations (batched parallel — avoids sequential N+1)
   const loadAllServices = useCallback(async () => {
     setIsLoadingServices(true);
     try {
       console.log('🔍 Loading all services from all organisations...');
       
-      // Get unique organisation IDs from the organisations list
-      const uniqueOrgIds = [...new Set(organisations.map(org => org.organisationid))];
-      console.log(`📋 Found ${uniqueOrgIds.length} unique organisations`);
+      console.log(`📋 Found ${organisations.length} organisation locations`);
       
-      const servicesWithOrg: ServiceWithOrg[] = [];
-      
-      // Load services for each organisation
-      for (const orgId of uniqueOrgIds) {
-        try {
-          const req = new OrganisationServicesSelectReq();
-          req.organisationid = orgId;
-          req.id = 0; // Get all services
-          
-          const services = await organisationServicesService.select(req);
-          
-          if (services && services.length > 0) {
-            // Find organisation details for this orgId
-            const orgDetails = organisations.find(org => org.organisationid === orgId);
-            
-            // Filter only active services
-            const activeServices = services.filter(service => service.isactive);
-            
-            // Map services with organisation information
-            activeServices.forEach(service => {
-              servicesWithOrg.push({
-                ...service,
-                organisationName: orgDetails?.organisationname || 'Unknown Organisation',
-                organisationLocationId: orgDetails?.organisationlocationid || 0,
-                organisationLocationCity: orgDetails?.organisationlocationcity || '',
-                organisationLocationState: orgDetails?.organisationlocationstate || '',
-                organisationImageId: orgDetails?.organisationimageid || 0
-              });
-            });
-          }
-        } catch (error) {
-          console.error(`❌ Error loading services for organisation ${orgId}:`, error);
-        }
-      }
+      const req = new OrganisationServicesSelectReq();
+      req.public_catalogue = true;
+      req.take = 300;
+      req.skip = 0;
+      const catalogue = await organisationServicesService.selectPublicCatalogue(req);
+      const servicesWithOrg = (catalogue || []).map((service) => ({
+        ...service,
+        organisationName: service.organisationName || "Unknown Organisation",
+        organisationLocationId: service.organisationlocationid || 0,
+        organisationLocationCity: service.organisationLocationCity || "",
+        organisationLocationState: service.organisationLocationState || "",
+        organisationImageId: service.organisationImageId || 0,
+      }));
       
       setAllServices(servicesWithOrg);
       setFilteredServices(servicesWithOrg);
-      console.log(`✅ Loaded ${servicesWithOrg.length} services from ${uniqueOrgIds.length} organisations`);
+      console.log(`✅ Loaded ${servicesWithOrg.length} services from ${organisations.length} locations`);
     } catch (error) {
       console.error('❌ Error loading all services:', error);
       setAllServices([]);
@@ -513,7 +489,7 @@ const ExploreServices = () => {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [organisations, organisationServicesService, toast]);
+  }, [organisationServicesService, toast]);
 
   // Load event images
   const loadEventImages = useCallback(async (eventsList: Event[]) => {
@@ -743,15 +719,6 @@ const ExploreServices = () => {
     loadReferenceTypes();
   }, [loadInitialData, loadReferenceTypes]);
 
-  // Load services only when service tab is clicked
-  useEffect(() => {
-    if (activeTab === 'service' && !loadedTabs.has('service') && organisations.length > 0) {
-      console.log('🔍 Service tab clicked, loading services...');
-      loadAllServices();
-      setLoadedTabs(prev => new Set([...prev, 'service']));
-    }
-  }, [activeTab, loadedTabs, organisations.length, loadAllServices]);
-
   // Load events only when event tab is clicked
   useEffect(() => {
     if (activeTab === 'event' && !loadedTabs.has('event')) {
@@ -802,10 +769,6 @@ const ExploreServices = () => {
             <TabsTrigger value="organisation" className={cn(exploreTabTriggerClass)}>
               <Building2 className="h-4 w-4 shrink-0" />
               <span className="truncate">Organisation</span>
-            </TabsTrigger>
-            <TabsTrigger value="service" className={cn(exploreTabTriggerClass)}>
-              <Briefcase className="h-4 w-4 shrink-0" />
-              <span className="truncate">Service</span>
             </TabsTrigger>
             <TabsTrigger value="event" className={cn(exploreTabTriggerClass)}>
               <Calendar className="h-4 w-4 shrink-0" />

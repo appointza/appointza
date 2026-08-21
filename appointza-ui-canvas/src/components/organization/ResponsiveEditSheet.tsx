@@ -29,6 +29,7 @@ type ResponsiveEditSheetProps = {
   onOpenChange: (open: boolean) => void;
   title: string;
   subtitle?: string;
+  errorMessage?: string;
   isEdit?: boolean;
   saving?: boolean;
   deleting?: boolean;
@@ -95,13 +96,23 @@ function EditSheetHeader({
 function EditSheetBody({
   children,
   headerProps,
+  errorMessage,
 }: {
   children: React.ReactNode;
+  errorMessage?: string;
   headerProps: Omit<ResponsiveEditSheetProps, "open" | "onOpenChange" | "children">;
 }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       <EditSheetHeader {...headerProps} />
+      {errorMessage ? (
+        <div
+          className="mx-4 mt-3 shrink-0 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:mx-6"
+          role="alert"
+        >
+          {errorMessage}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-6">{children}</div>
     </div>
   );
@@ -112,6 +123,7 @@ export function ResponsiveEditSheet({
   onOpenChange,
   title,
   subtitle,
+  errorMessage,
   isEdit = false,
   saving = false,
   deleting = false,
@@ -163,7 +175,9 @@ export function ResponsiveEditSheet({
             : null}
           </DrawerHeader>
           {srTitle}
-          <EditSheetBody headerProps={headerProps}>{children}</EditSheetBody>
+          <EditSheetBody headerProps={headerProps} errorMessage={errorMessage}>
+            {children}
+          </EditSheetBody>
         </DrawerContent>
       </Drawer>
     );
@@ -183,7 +197,9 @@ export function ResponsiveEditSheet({
           : null}
         </SheetHeader>
         {srTitle}
-        <EditSheetBody headerProps={headerProps}>{children}</EditSheetBody>
+        <EditSheetBody headerProps={headerProps} errorMessage={errorMessage}>
+          {children}
+        </EditSheetBody>
       </SheetContent>
     </Sheet>
   );

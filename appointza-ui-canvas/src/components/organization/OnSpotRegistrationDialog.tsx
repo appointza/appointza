@@ -125,6 +125,7 @@ const OnSpotRegistrationDialog = ({
     try {
       const req = new OrganisationServicesSelectReq();
       req.organisationid = organisationId;
+      req.organisationlocationid = organisationLocationId;
       req.id = 0;
       const response = await organisationServicesService.select(req);
       setServices((response || []).filter((s) => s.isactive));
@@ -132,7 +133,7 @@ const OnSpotRegistrationDialog = ({
       console.error("Error loading services:", error);
       setServices([]);
     }
-  }, [organisationId, organisationServicesService]);
+  }, [organisationId, organisationLocationId, organisationServicesService]);
 
   const loadTimeSlots = useCallback(async () => {
     if (organisationId === 0 || organisationLocationId === 0) return;

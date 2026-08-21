@@ -34,6 +34,14 @@ namespace appointza.Controllers
 
             return Ok(result);
         }
+
+        [HttpPost("SelectPublicCatalogue")]
+        public async Task<ActionResult<ActionRes<List<PublicServiceCatalogueItem>>>> SelectPublicCatalogue(ActionReq<OrganisationServicesSelectReq> req)
+        {
+            ActionRes<List<PublicServiceCatalogueItem>> result = new ActionRes<List<PublicServiceCatalogueItem>>();
+            result.item = await organisationservicesService.SelectPublicCatalogue(req?.item ?? new OrganisationServicesSelectReq());
+            return Ok(result);
+        }
         [HttpPost("Insert")]
         public async Task<ActionResult<ActionRes<OrganisationServices>>> Insert(ActionReq<OrganisationServices> req)
         {

@@ -4,27 +4,64 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { PublicBrowseShell } from "@/components/layout/PublicBrowseShell";
-import { TURF_DIRECTORY_DATA_URL, type TurfVenue } from "@/models/turfDirectory.model";
+import { TURF_DIRECTORY_CITY_URL, TURF_DIRECTORY_INDEX_URL, type TurfVenue } from "@/models/turfDirectory.model";
 import { cn } from "@/lib/utils";
 
 const TurfDirectoryPage = () => {
+  const [cityIndex, setCityIndex] = useState<{ city: string; file: string; count: number }[]>([]);
   const [venues, setVenues] = useState<TurfVenue[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
   const [constituencyFilter, setConstituencyFilter] = useState("");
+  const [visibleCount, setVisibleCount] = useState(36);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
 
   useEffect(() => {
     let cancelled = false;
-
-    const load = async () => {
+    (async () => {
       try {
         setLoading(true);
-        const response = await fetch(TURF_DIRECTORY_DATA_URL);
-        if (!response.ok) {
-          throw new Error(`Failed to load turf directory (${response.status})`);
+        const response = await fetch(TURF_DIRECTORY_INDEX_URL);
+        if (!response.ok) throw new Error(`Failed to load turf directory (${response.status})`);
+        const data = (await response.json()) as { city: string; file: string; count: number }[];
+        if (!cancelled) {
+          setCityIndex(Array.isArray(data) ? data : []);
+          setError("");
         }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(loadError instanceof Error ? loadError.message : "Failed to load directory");
+          setCityIndex([]);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!cityFilter) {
+      setVenues([]);
+      return;
+    }
+    const entry = cityIndex.find((c) => c.city === cityFilter);
+    if (!entry) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(TURF_DIRECTORY_CITY_URL(entry.file));
+        if (!response.ok) throw new Error(`Failed to load ${cityFilter} venues`);
         const data = (await response.json()) as TurfVenue[];
         if (!cancelled) {
           setVenues(Array.isArray(data) ? data : []);
@@ -32,29 +69,19 @@ const TurfDirectoryPage = () => {
         }
       } catch (loadError) {
         if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "Failed to load directory");
+          setError(loadError instanceof Error ? loadError.message : "Failed to load city venues");
           setVenues([]);
         }
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       }
-    };
-
-    load();
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [cityFilter, cityIndex]);
 
-  const cities = useMemo(() => {
-    const values = new Set<string>();
-    venues.forEach((v) => {
-      if (v.City?.trim()) values.add(v.City.trim());
-    });
-    return Array.from(values).sort((a, b) => a.localeCompare(b));
-  }, [venues]);
+  const cities = useMemo(() => cityIndex.map((c) => c.city), [cityIndex]);
 
   const constituencies = useMemo(() => {
     const values = new Set<string>();
@@ -65,12 +92,10 @@ const TurfDirectoryPage = () => {
   }, [venues]);
 
   const filtered = useMemo(() => {
-    const q = searchTerm.trim().toLowerCase();
+    const q = debouncedSearch.toLowerCase();
     return venues.filter((venue) => {
-      if (cityFilter && venue.City !== cityFilter) return false;
       if (constituencyFilter && venue.Constituency !== constituencyFilter) return false;
       if (!q) return true;
-
       const haystack = [
         venue.Name,
         venue.Category,
@@ -81,10 +106,18 @@ const TurfDirectoryPage = () => {
       ]
         .join(" ")
         .toLowerCase();
-
       return haystack.includes(q);
     });
-  }, [venues, searchTerm, cityFilter, constituencyFilter]);
+  }, [venues, debouncedSearch, constituencyFilter]);
+
+  const visibleVenues = useMemo(
+    () => filtered.slice(0, visibleCount),
+    [filtered, visibleCount],
+  );
+
+  useEffect(() => {
+    setVisibleCount(36);
+  }, [searchTerm, cityFilter, constituencyFilter]);
 
   const clearFilters = () => {
     setSearchTerm("");
@@ -160,8 +193,18 @@ const TurfDirectoryPage = () => {
 
           <div className="md:col-span-4 flex flex-wrap items-center justify-between gap-3">
             <p className="text-sm text-zinc-600">
-              Showing <span className="font-semibold text-zinc-900">{filtered.length}</span> of{" "}
-              <span className="font-semibold text-zinc-900">{venues.length}</span> venues
+              Showing{" "}
+              <span className="font-semibold text-zinc-900">
+                {Math.min(visibleVenues.length, filtered.length)}
+              </span>{" "}
+              of <span className="font-semibold text-zinc-900">{filtered.length}</span> matching
+              venues
+              {venues.length !== filtered.length ? (
+                <>
+                  {" "}
+                  (<span className="font-semibold text-zinc-900">{venues.length}</span> total)
+                </>
+              ) : null}
             </p>
             {(searchTerm || cityFilter || constituencyFilter) && (
               <Button type="button" variant="outline" size="sm" onClick={clearFilters}>
@@ -181,75 +224,89 @@ const TurfDirectoryPage = () => {
         ) : filtered.length === 0 ? (
           <div className="rounded-2xl border border-zinc-200 bg-white p-10 text-center text-zinc-600">
             No venues match your filters.
+            {!cityFilter ? " Choose a city to load venues." : ""}
           </div>
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-            {filtered.map((venue, index) => (
-              <article
-                key={`${venue.Name}-${venue.Address}-${index}`}
-                className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition-shadow hover:shadow-md"
-              >
-                {venue.ImageURL ? (
-                  <img
-                    src={venue.ImageURL}
-                    alt={venue.Name}
-                    className="h-44 w-full object-cover bg-zinc-100"
-                    loading="lazy"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="flex h-44 items-center justify-center bg-zinc-100 text-sm text-zinc-500">
-                    No image
-                  </div>
-                )}
+          <>
+            <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+              {visibleVenues.map((venue, index) => (
+                <article
+                  key={`${venue.Name}-${venue.Address}-${index}`}
+                  className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-sm transition-shadow hover:shadow-md"
+                >
+                  {venue.ImageURL ? (
+                    <img
+                      src={venue.ImageURL}
+                      alt={venue.Name}
+                      className="h-44 w-full object-cover bg-zinc-100"
+                      loading="lazy"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="flex h-44 items-center justify-center bg-zinc-100 text-sm text-zinc-500">
+                      No image
+                    </div>
+                  )}
 
-                <div className="space-y-3 p-5">
-                  <div>
-                    <h2 className="text-lg font-semibold text-zinc-900">{venue.Name}</h2>
-                    {venue.Category ? (
-                      <p className="text-sm font-medium text-orange-600">{venue.Category}</p>
+                  <div className="space-y-3 p-5">
+                    <div>
+                      <h2 className="text-lg font-semibold text-zinc-900">{venue.Name}</h2>
+                      {venue.Category ? (
+                        <p className="text-sm font-medium text-orange-600">{venue.Category}</p>
+                      ) : null}
+                    </div>
+
+                    <p className="flex items-start gap-2 text-sm text-zinc-600">
+                      <MapPin className="mt-0.5 size-4 shrink-0 text-zinc-400" aria-hidden />
+                      <span>
+                        {venue.Address || `${venue.City}, ${venue.State}`}
+                      </span>
+                    </p>
+
+                    <p className="text-xs text-zinc-500">
+                      {venue.City}
+                      {venue.Constituency ? ` • ${venue.Constituency}` : ""}
+                      {venue.State ? ` • ${venue.State}` : ""}
+                    </p>
+
+                    {venue.Phone ? (
+                      <p className="flex items-center gap-2 text-sm text-zinc-700">
+                        <Phone className="size-4 text-zinc-400" aria-hidden />
+                        <a href={`tel:${venue.Phone.replace(/\s/g, "")}`} className="hover:text-orange-600">
+                          {venue.Phone}
+                        </a>
+                      </p>
+                    ) : null}
+
+                    {venue.MapURL ? (
+                      <a
+                        href={venue.MapURL}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={cn(
+                          "inline-flex items-center gap-1.5 text-sm font-semibold text-orange-600 hover:text-orange-700",
+                        )}
+                      >
+                        Open in Maps
+                        <ExternalLink className="size-3.5" aria-hidden />
+                      </a>
                     ) : null}
                   </div>
-
-                  <p className="flex items-start gap-2 text-sm text-zinc-600">
-                    <MapPin className="mt-0.5 size-4 shrink-0 text-zinc-400" aria-hidden />
-                    <span>
-                      {venue.Address || `${venue.City}, ${venue.State}`}
-                    </span>
-                  </p>
-
-                  <p className="text-xs text-zinc-500">
-                    {venue.City}
-                    {venue.Constituency ? ` • ${venue.Constituency}` : ""}
-                    {venue.State ? ` • ${venue.State}` : ""}
-                  </p>
-
-                  {venue.Phone ? (
-                    <p className="flex items-center gap-2 text-sm text-zinc-700">
-                      <Phone className="size-4 text-zinc-400" aria-hidden />
-                      <a href={`tel:${venue.Phone.replace(/\s/g, "")}`} className="hover:text-orange-600">
-                        {venue.Phone}
-                      </a>
-                    </p>
-                  ) : null}
-
-                  {venue.MapURL ? (
-                    <a
-                      href={venue.MapURL}
-                      target="_blank"
-                      rel="noreferrer"
-                      className={cn(
-                        "inline-flex items-center gap-1.5 text-sm font-semibold text-orange-600 hover:text-orange-700",
-                      )}
-                    >
-                      Open in Maps
-                      <ExternalLink className="size-3.5" aria-hidden />
-                    </a>
-                  ) : null}
-                </div>
-              </article>
-            ))}
-          </div>
+                </article>
+              ))}
+            </div>
+            {visibleVenues.length < filtered.length ? (
+              <div className="mt-6 flex justify-center">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setVisibleCount((n) => n + 36)}
+                >
+                  Show more ({filtered.length - visibleVenues.length} remaining)
+                </Button>
+              </div>
+            ) : null}
+          </>
         )}
       </div>
     </PublicBrowseShell>

@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { pushNotificationService } from '@/services/pushnotification.service';
 import { useAuth } from '@/contexts/AuthContext';
 
-export const usePushNotifications = () => {
+export const usePushNotifications = (options?: { enabled?: boolean }) => {
+  const enabled = options?.enabled !== false;
   const [isInitialized, setIsInitialized] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,10 +31,14 @@ export const usePushNotifications = () => {
     }
   }, [isInitialized, pushToken]);
 
-  // Initialize once on mount
+  // Initialize once on mount (skip on public booking pages)
   useEffect(() => {
+    if (!enabled) {
+      setIsLoading(false);
+      return;
+    }
     void initialize();
-  }, [initialize]);
+  }, [enabled, initialize]);
 
   // Sync token to server once per login session (not on every screen)
   useEffect(() => {

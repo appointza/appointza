@@ -14,6 +14,8 @@
     pincode: string = "";
     customurl: string = "";
     whatsapp_mobile: string = "";
+    email: string = "";
+    facility_list: number[] = [];
     orgloctempid: string = "";
     templateid: number = 0;
     version: number = 0;
@@ -74,6 +76,7 @@
     isactive: boolean = false;
     issuspended: boolean = false;
     organisationid: number = 0;
+    organisationlocationid: number = 0;
     isfactory: boolean = false;
     notes: string = "";
   }
@@ -107,6 +110,8 @@
     template_html: string = "";
     hospitality_profile?: import("./hospitality.model").OrganisationHospitalityProfile | null;
     hospitality_rooms?: import("./hospitality.model").OrganisationRoom[];
+    /** Resolved amenity labels for {{#facilities}} loops */
+    facilities?: string[];
   }
   
   export class SiteDetailsSelectReq {

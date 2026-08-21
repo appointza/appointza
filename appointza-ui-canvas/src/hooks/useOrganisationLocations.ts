@@ -7,7 +7,8 @@ export const organisationLocationsQueryKey = (
   staffLocationId: number,
 ) => ['organisation-locations', organisationId, staffLocationId] as const;
 
-async function fetchOrganisationLocations(
+/** Shared fetcher — also used by onboarding so Location/Select hits one React Query cache. */
+export async function fetchOrganisationLocations(
   organisationId: number,
   staffLocationId: number,
 ): Promise<OrganisationLocation[]> {

@@ -27,13 +27,24 @@ $apiExe = Join-Path $root "appointzabuild\appointzaproduction\appointza.exe"
 if (-not (Test-Path $apiExe)) {
     $apiExe = Join-Path $root "appointzabuild\production\appointza.exe"
 }
-$serverProj = Join-Path $root "appointza\appointza\appointza.csproj"
+function Resolve-ServerProjectPath {
+    param([string]$RepoRoot)
+    $candidates = @(
+        (Join-Path $RepoRoot "appointza\appointza\appointza\appointza.csproj"),
+        (Join-Path $RepoRoot "appointza\appointza\appointza.csproj")
+    )
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+    return (Join-Path $RepoRoot "appointza\appointza\appointza\appointza.csproj")
+}
+
+$serverProj = Resolve-ServerProjectPath -RepoRoot $root
 
 $uis = @(
     @{ Name = "Webzys";    Folder = "Webzys";             Port = 8081 },
     @{ Name = "Appointza"; Folder = "appointza-ui-canvas"; Port = 8083 },
-    @{ Name = "Campusza";  Folder = "campusza";            Port = 8087 },
-    @{ Name = "Stay";      Folder = "appointzastay";       Port = 8088 }
+    @{ Name = "Campusza";  Folder = "campusza";            Port = 8087 }
 )
 
 function Start-NpmDev([string]$Name, [string]$Folder, [int]$Port) {

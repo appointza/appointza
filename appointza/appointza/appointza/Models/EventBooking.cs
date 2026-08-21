@@ -17,6 +17,8 @@ namespace appointza.Models
         public bool isactive { get; set; } = true;
         public string user_name { get; set; } = ""; // User's name from users table
         public string user_mobile { get; set; } = ""; // User's mobile number from users table
+        /// <summary>Populated when selecting by organisation (JOIN events).</summary>
+        public string event_name { get; set; } = "";
     }
     
     public class EventBookingSelectReq
@@ -24,9 +26,15 @@ namespace appointza.Models
         public long id { get; set; }
         public long event_id { get; set; }
         public long user_id { get; set; }
+        public int organisation_id { get; set; }
+        public int organisation_location_id { get; set; }
         public string payment_status { get; set; } = "";
         public string check_in_status { get; set; } = "";
         public string confirmation_status { get; set; } = "";
+        public string search { get; set; } = "";
+        /// <summary>0 = return all rows. When take &gt; 0, apply OFFSET skip LIMIT take.</summary>
+        public int skip { get; set; }
+        public int take { get; set; }
     }
     
     public class EventBookingDeleteReq

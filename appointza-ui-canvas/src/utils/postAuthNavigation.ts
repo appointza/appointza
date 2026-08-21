@@ -21,7 +21,7 @@ export function resolvePostLoginPath(userType: "user" | "organization", from?: s
   const isAuthScreens =
     normalized === "/login" || normalized === "/register" || normalized === "/otp";
 
-  /** Registration used to aim customers at the old CRM home — treat like default. */
+  /** Treat the retired user dashboard path like the default customer destination. */
   const isLegacyUserHome = userType === "user" && normalized === LEGACY_USER_HOME;
 
   if (!isBlank && !isAuthScreens && !isLegacyUserHome) {

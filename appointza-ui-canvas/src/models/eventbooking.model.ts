@@ -14,15 +14,21 @@ export class EventBooking {
   isactive: boolean = true;
   user_name: string = ""; // User's name from users table
   user_mobile: string = ""; // User's mobile number from users table
+  event_name: string = ""; // Populated when selecting by organisation
 }
 
 export class EventBookingSelectReq {
   id: number = 0;
   event_id: number = 0;
   user_id: number = 0;
+  organisation_id: number = 0;
+  organisation_location_id: number = 0;
   payment_status: string = "";
   check_in_status: string = "";
   confirmation_status: string = "";
+  search: string = "";
+  skip: number = 0;
+  take: number = 0;
 }
 
 export class EventBookingDeleteReq {

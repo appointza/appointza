@@ -6,22 +6,15 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Clock, Loader2, Search } from "lucide-react";
 import { OrganisationService } from "@/services/organisation.service";
-import { OrganisationServicesService } from "@/services/organisationservices.service";
 import { ReferenceValueService } from "@/services/referencevalue.service";
 import { FilesService } from "@/services/files.service";
 import { OrganisationDetail, OrganisationSelectReq } from "@/models/organisation.model";
-import { OrganisationServices, OrganisationServicesSelectReq } from "@/models/organisationservices.model";
+import { PublicServiceCatalogueItem } from "@/models/organisationservices.model";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
 import { REFERENCETYPE } from "@/models/users.model";
 import { PublicBrowseShell } from "@/components/layout/PublicBrowseShell";
 import { useToast } from "@/hooks/use-toast";
-
-interface ServiceWithOrg extends OrganisationServices {
-  organisationName: string;
-  organisationLocationId: number;
-  organisationLocationCity: string;
-  organisationLocationState: string;
-}
+import { usePublicServiceCatalogue } from "@/hooks/usePublicServiceCatalogue";
 
 /** Active services — same catalogue & filter behaviour as Explore → Service tab. */
 const PublicBrowseServicesPage: React.FC = () => {
@@ -38,13 +31,39 @@ const PublicBrowseServicesPage: React.FC = () => {
     }
   };
   const organisationService = useMemo(() => new OrganisationService(), []);
-  const organisationServicesService = useMemo(() => new OrganisationServicesService(), []);
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
   const filesService = useMemo(() => new FilesService(), []);
 
   const [organisations, setOrganisations] = useState<OrganisationDetail[]>([]);
-  const [services, setServices] = useState<ServiceWithOrg[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedServicePrimaryType, setSelectedServicePrimaryType] = useState<number | null>(null);
+  const [selectedServiceSecondaryType, setSelectedServiceSecondaryType] = useState<number | null>(null);
+  const [primaryBusinessTypes, setPrimaryBusinessTypes] = useState<ReferenceValue[]>([]);
+  const [secondaryBusinessTypes, setSecondaryBusinessTypes] = useState<ReferenceValue[]>([]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [searchTerm]);
+
+  const {
+    data: cataloguePages,
+    isLoading: catalogueLoading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = usePublicServiceCatalogue({ search: debouncedSearch });
+
+  const services = useMemo(
+    () =>
+      (cataloguePages?.pages.flat() ?? []).map((item: PublicServiceCatalogueItem) => ({
+        ...item,
+        organisationLocationId: item.organisationlocationid,
+      })),
+    [cataloguePages],
+  );
+  const loading = catalogueLoading && services.length === 0;
 
   const serviceCardImageUrls = useMemo(() => {
     const map: Record<string, string> = {};
@@ -54,12 +73,6 @@ const PublicBrowseServicesPage: React.FC = () => {
     }
     return map;
   }, [services, filesService]);
-
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedServicePrimaryType, setSelectedServicePrimaryType] = useState<number | null>(null);
-  const [selectedServiceSecondaryType, setSelectedServiceSecondaryType] = useState<number | null>(null);
-  const [primaryBusinessTypes, setPrimaryBusinessTypes] = useState<ReferenceValue[]>([]);
-  const [secondaryBusinessTypes, setSecondaryBusinessTypes] = useState<ReferenceValue[]>([]);
 
   const loadReferenceTypes = useCallback(async () => {
     try {
@@ -120,84 +133,24 @@ const PublicBrowseServicesPage: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-
-    const loadServicesForOrgs = async (orgs: OrganisationDetail[]) => {
-      const out: ServiceWithOrg[] = [];
-      const uniqueOrgIds = [...new Set(orgs.map((o) => o.organisationid))];
-
-      for (const orgId of uniqueOrgIds) {
-        try {
-          const req = new OrganisationServicesSelectReq();
-          req.organisationid = orgId;
-          req.id = 0;
-          const list = await organisationServicesService.select(req);
-          if (!list?.length) continue;
-          const orgDetails = orgs.find((o) => o.organisationid === orgId);
-          list
-            .filter((s) => s.isactive)
-            .forEach((service) => {
-              out.push({
-                ...service,
-                organisationName: orgDetails?.organisationname || "Business",
-                organisationLocationId: orgDetails?.organisationlocationid || 0,
-                organisationLocationCity: orgDetails?.organisationlocationcity || "",
-                organisationLocationState: orgDetails?.organisationlocationstate || "",
-              });
-            });
-        } catch {
-          /* skip org */
-        }
-      }
-      return out;
-    };
-
     (async () => {
       try {
-        setLoading(true);
         const req = new OrganisationSelectReq();
         const response = await organisationService.selectOrganisationDetail(req);
         if (cancelled) return;
         const orgs = Array.isArray(response) ? response.filter((o) => o.organisationlocationid > 0) : [];
         setOrganisations(orgs);
-        if (!orgs.length) {
-          setServices([]);
-          return;
-        }
-        const all = await loadServicesForOrgs(orgs);
-        if (!cancelled) setServices(all);
       } catch {
-        if (!cancelled) {
-          setOrganisations([]);
-          setServices([]);
-          toast({
-            title: "Could not load services",
-            description: "Try again shortly.",
-            variant: "destructive",
-          });
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) setOrganisations([]);
       }
     })();
-
     return () => {
       cancelled = true;
     };
-  }, [organisationService, organisationServicesService, toast]);
+  }, [organisationService]);
 
   const filtered = useMemo(() => {
     let list = [...services];
-    const q = searchTerm.trim().toLowerCase();
-    if (q) {
-      list = list.filter(
-        (s) =>
-          s.Servicename.toLowerCase().includes(q) ||
-          s.organisationName.toLowerCase().includes(q) ||
-          s.organisationLocationCity.toLowerCase().includes(q) ||
-          s.organisationLocationState.toLowerCase().includes(q) ||
-          (s.notes && s.notes.toLowerCase().includes(q))
-      );
-    }
     if (selectedServicePrimaryType) {
       list = list.filter((s) => {
         const org = organisations.find((o) => o.organisationid === s.organisationid);
@@ -211,13 +164,7 @@ const PublicBrowseServicesPage: React.FC = () => {
       });
     }
     return list;
-  }, [
-    services,
-    searchTerm,
-    organisations,
-    selectedServicePrimaryType,
-    selectedServiceSecondaryType,
-  ]);
+  }, [services, organisations, selectedServicePrimaryType, selectedServiceSecondaryType]);
 
   const hasActiveFilters =
     !!(searchTerm.trim() || selectedServicePrimaryType || selectedServiceSecondaryType);
@@ -430,6 +377,19 @@ const PublicBrowseServicesPage: React.FC = () => {
                   );
                 })}
               </div>
+              {hasNextPage ? (
+                <div className="mt-6 flex justify-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-2xl"
+                    disabled={isFetchingNextPage}
+                    onClick={() => void fetchNextPage()}
+                  >
+                    {isFetchingNextPage ? "Loading…" : "Show more services"}
+                  </Button>
+                </div>
+              ) : null}
             </>
           )}
           </div>

@@ -1,10 +1,10 @@
-
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { OrganisationServices, OrganisationServicesSelectReq, OrganisationServicesDeleteReq } from '@/models/organisationservices.model';
 import { useToast } from '@/hooks/use-toast';
 import { OrganisationServicesService } from '@/services/organisationservices.service';
+import { invalidatePublicSiteCacheForLocation } from '@/utils/publicSiteCache.util';
 
-export const useOrganizationServices = (organizationId?: number) => {
+export const useOrganizationServices = (organizationId?: number, locationId?: number) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const service = new OrganisationServicesService();
@@ -15,30 +15,34 @@ export const useOrganizationServices = (organizationId?: number) => {
     error,
     refetch
   } = useQuery({
-    queryKey: ['organization-services', organizationId],
+    queryKey: ['organization-services', organizationId, locationId],
     queryFn: async () => {
       if (!organizationId) return [];
       
-      console.log('🔍 Fetching services for organization:', organizationId);
       const req = new OrganisationServicesSelectReq();
       req.organisationid = organizationId;
+      if (locationId && locationId > 0) {
+        req.organisationlocationid = locationId;
+      }
       
       const response = await service.select(req);
-      console.log('✅ Services API response:', response);
       return response || [];
     },
-    enabled: !!organizationId,
+    enabled: !!organizationId && (locationId ?? 0) > 0,
   });
 
   const createServiceMutation = useMutation({
     mutationFn: async (serviceData: Partial<OrganisationServices>) => {
-      console.log('Creating service:', serviceData);
       const serviceToSave = { ...serviceData } as OrganisationServices;
       return await service.insert(serviceToSave);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['organization-services'] });
       queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
+      const cacheLocationId = Number(variables.organisationlocationid ?? locationId ?? 0);
+      if (cacheLocationId > 0) {
+        invalidatePublicSiteCacheForLocation(cacheLocationId);
+      }
       toast({
         title: "Service Created",
         description: "Service has been added successfully.",
@@ -56,12 +60,15 @@ export const useOrganizationServices = (organizationId?: number) => {
 
   const updateServiceMutation = useMutation({
     mutationFn: async (serviceData: OrganisationServices) => {
-      console.log('Updating service:', serviceData);
       return await service.update(serviceData);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['organization-services'] });
       queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
+      const cacheLocationId = Number(variables.organisationlocationid ?? locationId ?? 0);
+      if (cacheLocationId > 0) {
+        invalidatePublicSiteCacheForLocation(cacheLocationId);
+      }
       toast({
         title: "Service Updated",
         description: "Service has been updated successfully.",
@@ -79,10 +86,11 @@ export const useOrganizationServices = (organizationId?: number) => {
 
   const deleteServiceMutation = useMutation({
     mutationFn: async (serviceId: number) => {
-      console.log('Deleting service:', serviceId);
-      // Get the service to get its version
       const req = new OrganisationServicesSelectReq();
-      req.organisationid = organizationId;
+      req.organisationid = organizationId || 0;
+      if (locationId && locationId > 0) {
+        req.organisationlocationid = locationId;
+      }
       const services = await service.select(req);
       const serviceToDelete = services?.find(s => s.id === serviceId);
       
@@ -94,6 +102,9 @@ export const useOrganizationServices = (organizationId?: number) => {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organization-services'] });
       queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
+      if (locationId && locationId > 0) {
+        invalidatePublicSiteCacheForLocation(locationId);
+      }
       toast({
         title: "Service Deleted",
         description: "Service has been removed successfully.",

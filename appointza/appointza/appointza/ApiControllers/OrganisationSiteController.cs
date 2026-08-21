@@ -135,6 +135,337 @@ namespace appointza.Controllers
             }
         }
 
+        /// <summary>
+        /// Single public endpoint: resolve GUID → load site + events → bind template → return HTML.
+        /// UI should only render the returned html (no second GetSiteDetails / client render).
+        /// </summary>
+        [HttpGet("GetPublicHtml/{orgloctempid}")]
+        public async Task<ActionResult<ActionRes<OrganisationTemplateResolveRes>>> GetPublicHtml(string orgloctempid)
+        {
+            try
+            {
+                var token = (orgloctempid ?? "").Trim();
+                if (string.IsNullOrEmpty(token))
+                {
+                    return BadRequest(new ActionRes<OrganisationTemplateResolveRes>
+                    {
+                        error = "orgloctempid is required.",
+                    });
+                }
+
+                var locationId = await organisationLocationService.GetLocationIdByOrgLocTempId(token);
+                if (locationId <= 0)
+                {
+                    return NotFound(new ActionRes<OrganisationTemplateResolveRes>
+                    {
+                        error = "Location not found",
+                    });
+                }
+
+                var apiBaseUrl = $"{Request.Scheme}://{Request.Host}";
+                var frontendBaseUrl = Request.Headers["Origin"].FirstOrDefault()
+                    ?? Request.Headers["Referer"].FirstOrDefault()
+                    ?? apiBaseUrl;
+                if (Uri.TryCreate(frontendBaseUrl, UriKind.Absolute, out var originUri))
+                {
+                    frontendBaseUrl = $"{originUri.Scheme}://{originUri.Authority}";
+                }
+
+                var built = await BuildPublicHtmlForLocationAsync(locationId, token, apiBaseUrl, frontendBaseUrl);
+                return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = built });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "GetPublicHtml failed for {OrgLocTempId}", orgloctempid);
+                return StatusCode(500, new ActionRes<OrganisationTemplateResolveRes>
+                {
+                    error = "Internal server error",
+                });
+            }
+        }
+
+        /// <summary>Same as GetPublicHtml but by numeric location id (subdomain fallback).</summary>
+        [HttpGet("GetPublicHtmlByLocation/{locationId:long}")]
+        public async Task<ActionResult<ActionRes<OrganisationTemplateResolveRes>>> GetPublicHtmlByLocation(long locationId)
+        {
+            try
+            {
+                if (locationId <= 0)
+                {
+                    return BadRequest(new ActionRes<OrganisationTemplateResolveRes>
+                    {
+                        error = "locationId is required.",
+                    });
+                }
+
+                var apiBaseUrl = $"{Request.Scheme}://{Request.Host}";
+                var frontendBaseUrl = Request.Headers["Origin"].FirstOrDefault()
+                    ?? Request.Headers["Referer"].FirstOrDefault()
+                    ?? apiBaseUrl;
+                if (Uri.TryCreate(frontendBaseUrl, UriKind.Absolute, out var originUri))
+                {
+                    frontendBaseUrl = $"{originUri.Scheme}://{originUri.Authority}";
+                }
+
+                var built = await BuildPublicHtmlForLocationAsync(locationId, "", apiBaseUrl, frontendBaseUrl);
+                return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = built });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "GetPublicHtmlByLocation failed for {LocationId}", locationId);
+                return StatusCode(500, new ActionRes<OrganisationTemplateResolveRes>
+                {
+                    error = "Internal server error",
+                });
+            }
+        }
+
+        private async Task<OrganisationTemplateResolveRes> BuildPublicHtmlForLocationAsync(
+            long locationId,
+            string orgLocTempIdHint,
+            string apiBaseUrl,
+            string frontendBaseUrl)
+        {
+            var siteDetails = await organisationsiteService.GetSiteDetails(locationId);
+            if (siteDetails == null || siteDetails.Count == 0)
+            {
+                return new OrganisationTemplateResolveRes
+                {
+                    organisationlocationid = locationId,
+                    orgloctempid = orgLocTempIdHint ?? "",
+                    html = BuildErrorHtml("Site Details Not Found", "No site details were returned for this location."),
+                    versionKey = $"missing:{locationId}",
+                };
+            }
+
+            var siteDetail = siteDetails[0];
+            var orgId = siteDetail.organisationdetail?.id ?? 0;
+            var locId = siteDetail.locationdetail?.id > 0 ? siteDetail.locationdetail.id : locationId;
+
+            // Keep services scoped to this location (matches UI filter).
+            if (siteDetail.orgnaisatinservice != null && locId > 0)
+            {
+                siteDetail.orgnaisatinservice = siteDetail.orgnaisatinservice
+                    .Where(s => s.organisationlocationid == 0 || s.organisationlocationid == locId)
+                    .ToList();
+            }
+
+            var templateHtml = siteDetail.template_html ?? "";
+            if (string.IsNullOrWhiteSpace(templateHtml) && siteDetail.locationdetail?.templateid > 0)
+            {
+                var templateId = siteDetail.locationdetail.templateid;
+                var templateItems = await referenceValueService.Select(new ReferenceValueSelectReq
+                {
+                    id = templateId,
+                    referencetypeid = 0,
+                    organisationid = 0,
+                    parentid = 0,
+                });
+                if (templateItems != null && templateItems.Count > 0)
+                {
+                    templateHtml = templateItems[0].description ?? "";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(templateHtml))
+            {
+                return new OrganisationTemplateResolveRes
+                {
+                    organisationid = orgId,
+                    organisationlocationid = locId,
+                    orgloctempid = orgLocTempIdHint ?? "",
+                    templateid = siteDetail.locationdetail?.templateid ?? 0,
+                    html = BuildErrorHtml("No Template Assigned", "No template has been assigned to this location."),
+                    versionKey = $"empty-template:{locId}",
+                };
+            }
+
+            var events = await eventService.Select(new EventSelectReq
+            {
+                organisation_id = (int)orgId,
+                organisation_location_id = (int)locId,
+                is_public = true,
+                include_past = false,
+            }) ?? new List<Event>();
+
+            var facilities = await ResolveFacilities(siteDetail);
+            var organisationDetail = new OrganisationDetail
+            {
+                organisationid = orgId,
+                organisationlocationid = locId,
+                organisationname = siteDetail.organisationdetail?.name ?? "",
+                organisationtagline = siteDetail.organisationdetail?.tagline ?? "",
+                organisationlogo = siteDetail.organisationdetail?.organisationlogo ?? 0,
+                organisationnotes = siteDetail.organisationdetail?.notes ?? "",
+                organisationlocationaddressline1 = siteDetail.locationdetail?.addressline1 ?? "",
+                organisationlocationaddressline2 = siteDetail.locationdetail?.addressline2 ?? "",
+                organisationlocationcity = siteDetail.locationdetail?.city ?? "",
+                organisationlocationstate = siteDetail.locationdetail?.state ?? "",
+                organisationlocationcountry = siteDetail.locationdetail?.country ?? "",
+                organisationlocationpincode = siteDetail.locationdetail?.pincode ?? "",
+                organisationlocationgooglelocation = siteDetail.locationdetail?.googlelocation ?? "",
+                organisationlocationlatitude = siteDetail.locationdetail?.latitude ?? 0,
+                organisationlocationlongitude = siteDetail.locationdetail?.longitude ?? 0,
+            };
+
+            var boundHtml = BindTemplate(
+                templateHtml,
+                siteDetail,
+                organisationDetail,
+                apiBaseUrl,
+                frontendBaseUrl,
+                events,
+                facilities);
+
+            boundHtml = FinalizePublicHtml(boundHtml, apiBaseUrl);
+
+            var versionKey = BuildPublicHtmlVersionKey(siteDetail, events);
+
+            return new OrganisationTemplateResolveRes
+            {
+                organisationid = orgId,
+                organisationlocationid = locId,
+                orgloctempid = orgLocTempIdHint ?? "",
+                templateid = siteDetail.locationdetail?.templateid ?? 0,
+                html = boundHtml,
+                versionKey = versionKey,
+            };
+        }
+
+        private static string BuildPublicHtmlVersionKey(Sitedetails site, IList<Event> events)
+        {
+            var locUpdated = site.locationdetail?.modifiedon ?? site.locationdetail?.createdon ?? DateTime.MinValue;
+            var orgUpdated = site.organisationdetail?.modifiedon ?? site.organisationdetail?.createdon ?? DateTime.MinValue;
+            var eventStamp = events?
+                .Select(e => e.updated_at)
+                .DefaultIfEmpty(DateTime.MinValue)
+                .Max() ?? DateTime.MinValue;
+            var serviceCount = site.orgnaisatinservice?.Count ?? 0;
+            var roomCount = site.hospitality_rooms?.Count ?? 0;
+            return $"{site.locationdetail?.id}:{locUpdated:O}:{orgUpdated:O}:{eventStamp:O}:s{serviceCount}:r{roomCount}";
+        }
+
+        private static string BuildErrorHtml(string title, string message)
+        {
+            return $@"<!DOCTYPE html>
+<html><head><meta charset=""utf-8""><title>{title}</title>
+<style>body{{font-family:Arial,sans-serif;margin:40px;text-align:center}}.error{{color:#dc2626;font-size:1.2rem}}</style>
+</head><body><div class=""error""><h1>{title}</h1><p>{message}</p></div></body></html>";
+        }
+
+        private static string FinalizePublicHtml(string html, string apiBaseUrl)
+        {
+            var output = html ?? "";
+
+            // Drop leftover handlebars so users never see raw tokens.
+            output = Regex.Replace(output, @"\{\{#[^}]+\}\}", "");
+            output = Regex.Replace(output, @"\{\{\/[^}]+\}\}", "");
+            output = Regex.Replace(output, @"\{\{[^}]+\}\}", "");
+
+            // Normalize Files/Get URLs to absolute API host.
+            output = Regex.Replace(
+                output,
+                @"https?:\/\/[^""'\s>]*\/api\/Files\/Get\?id=(\d+)",
+                $"{apiBaseUrl}/api/Files/Get?id=$1",
+                RegexOptions.IgnoreCase);
+            output = Regex.Replace(
+                output,
+                @"(['""])\/api\/Files\/Get\?id=(\d+)\1",
+                $"$1{apiBaseUrl}/api/Files/Get?id=$2$1",
+                RegexOptions.IgnoreCase);
+
+            var bookingScript = @"
+<script>
+(function () {
+  function appointzaResolveMainAppOrigin() {
+    try {
+      if (window.parent && window.parent !== window && window.parent.__APPOINTZA_MAIN_ORIGIN__) {
+        return window.parent.__APPOINTZA_MAIN_ORIGIN__;
+      }
+    } catch (_) {}
+    try {
+      if (window.APP_CONFIG && window.APP_CONFIG.uiBaseUrl) {
+        return String(window.APP_CONFIG.uiBaseUrl).replace(/\/+$/, '');
+      }
+    } catch (_) {}
+    var h = (window.location.hostname || '').toLowerCase();
+    if (h === 'localhost' || h === '127.0.0.1' || (h.length > 10 && h.slice(-10) === '.localhost')) {
+      var p = window.location.port || '8083';
+      return window.location.protocol + '//localhost:' + p;
+    }
+    return window.location.protocol + '//' + window.location.host;
+  }
+  function isGuestHospitalityBook(href) {
+    try {
+      var u = new URL(href, window.location.origin);
+      return u.pathname === '/book';
+    } catch (_) {
+      return href.indexOf('/book?') !== -1 || href === '/book';
+    }
+  }
+  function toPath(href) {
+    try {
+      var u = new URL(href, window.location.origin);
+      return u.pathname + u.search + u.hash;
+    } catch (_) {
+      return href.indexOf('/') === 0 ? href : '/' + href;
+    }
+  }
+  document.addEventListener('click', function (e) {
+    var el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!el) return;
+    var href = el.getAttribute('href') || '';
+    var guestStay = isGuestHospitalityBook(href);
+    var serviceOrEvent =
+      href.indexOf('/book-appointment/') !== -1 ||
+      href.indexOf('/user/events/') !== -1;
+    if (!guestStay && !serviceOrEvent) return;
+    e.preventDefault();
+    var path = toPath(href);
+    var mainOrigin = appointzaResolveMainAppOrigin();
+    var bookingUrl = href.indexOf('http://') === 0 || href.indexOf('https://') === 0
+      ? href
+      : mainOrigin + path;
+    var token = null;
+    try { token = localStorage.getItem('auth_token'); } catch (_) {}
+    // Hospitality /book is guest checkout — do not force login.
+    if (!token && !guestStay) {
+      try { sessionStorage.setItem('appointza_auth_return', bookingUrl); } catch (_) {}
+      var loginUrl = mainOrigin + '/login?from=' + encodeURIComponent(bookingUrl);
+      if (window.parent && window.parent !== window) {
+        try { window.top.location.href = loginUrl; } catch (_) {
+          window.parent.postMessage({ type: 'appointza:login-required', returnUrl: bookingUrl }, '*');
+        }
+      } else {
+        window.location.href = loginUrl;
+      }
+      return;
+    }
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'appointza:booking-nav', url: bookingUrl }, '*');
+    } else {
+      window.location.href = bookingUrl;
+    }
+  });
+})();
+</script>";
+
+            if (output.IndexOf("</body>", StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                output = Regex.Replace(
+                    output,
+                    "</body>",
+                    bookingScript + "\n</body>",
+                    RegexOptions.IgnoreCase);
+            }
+            else
+            {
+                output += bookingScript;
+            }
+
+            return output;
+        }
+
         [HttpPost("ResolveTemplateBySubdomain")]
         public async Task<ActionResult<ActionRes<OrganisationTemplateResolveRes>>> ResolveTemplateBySubdomain(
             ActionReq<OrganisationTemplateResolveReq> req)
@@ -152,18 +483,48 @@ namespace appointza.Controllers
                 return BadRequest("customUrl is required.");
             }
 
+            var publicSite = await organisationLocationService.ResolvePublicSiteByCustomUrl(customUrl);
+            if (publicSite == null || publicSite.id <= 0)
+            {
+                result.item = null;
+                return Ok(result);
+            }
+
+            // Prefer SPA route /template/{orgloctempid} — same renderer as direct booking links.
+            if (!string.IsNullOrWhiteSpace(publicSite.orgloctempid))
+            {
+                result.item = new OrganisationTemplateResolveRes
+                {
+                    organisationid = publicSite.organisationid,
+                    organisationlocationid = publicSite.id,
+                    orgloctempid = publicSite.orgloctempid.Trim(),
+                    templateid = publicSite.templateid,
+                };
+                return Ok(result);
+            }
+
             var organisationDetail = await organisationService.GetOrganisationByCustomUrl(customUrl);
 
             if (organisationDetail == null || organisationDetail.organisationlocationid <= 0)
             {
-                result.item = null;
+                result.item = new OrganisationTemplateResolveRes
+                {
+                    organisationid = publicSite.organisationid,
+                    organisationlocationid = publicSite.id,
+                    templateid = publicSite.templateid,
+                };
                 return Ok(result);
             }
 
             var siteDetails = await organisationsiteService.GetSiteDetails(organisationDetail.organisationlocationid);
             if (siteDetails == null || siteDetails.Count == 0)
             {
-                result.item = null;
+                result.item = new OrganisationTemplateResolveRes
+                {
+                    organisationid = publicSite.organisationid,
+                    organisationlocationid = publicSite.id,
+                    templateid = publicSite.templateid,
+                };
                 return Ok(result);
             }
 
@@ -193,6 +554,8 @@ namespace appointza.Controllers
                 {
                     organisationid = organisationDetail.organisationid,
                     organisationlocationid = organisationDetail.organisationlocationid,
+                    orgloctempid = publicSite.orgloctempid?.Trim() ?? "",
+                    templateid = publicSite.templateid > 0 ? publicSite.templateid : (siteDetail.locationdetail?.templateid ?? 0),
                     html = ""
                 };
                 return Ok(result);
@@ -215,6 +578,8 @@ namespace appointza.Controllers
             {
                 organisationid = organisationDetail.organisationid,
                 organisationlocationid = organisationDetail.organisationlocationid,
+                orgloctempid = publicSite.orgloctempid?.Trim() ?? "",
+                templateid = publicSite.templateid > 0 ? publicSite.templateid : (siteDetail.locationdetail?.templateid ?? 0),
                 html = boundHtml
             };
 
@@ -257,6 +622,11 @@ namespace appointza.Controllers
             html = html.Replace("{{organisationdetail.notes}}", organisationNotes);
             html = html.Replace("{{organisation.notes}}", organisationNotes);
             html = html.Replace("{{OrganisationNotes}}", organisationNotes);
+            html = ApplyConditionalSection(html, "{{#organisationtagline}}", "{{/organisationtagline}}", !string.IsNullOrWhiteSpace(organisationTagline));
+            html = ApplyConditionalSection(html, "{{#organisationnotes}}", "{{/organisationnotes}}", !string.IsNullOrWhiteSpace(organisationNotes));
+            var gstNumber = siteDetail.organisationdetail?.gstnumber ?? "";
+            html = html.Replace("{{organisationdetail.gstnumber}}", gstNumber);
+            html = ApplyConditionalSection(html, "{{#gstnumber}}", "{{/gstnumber}}", !string.IsNullOrWhiteSpace(gstNumber));
             var mobile = siteDetail.locationdetail?.whatsapp_mobile ?? "";
             var latitude = siteDetail.locationdetail?.latitude.ToString() ?? "";
             var longitude = siteDetail.locationdetail?.longitude.ToString() ?? "";
@@ -281,7 +651,6 @@ namespace appointza.Controllers
             html = ApplyConditionalSection(html, "{{#googlemaps}}", "{{/googlemaps}}", !string.IsNullOrWhiteSpace(googleLocation));
             html = ApplyConditionalSection(html, "{{#coordinates}}", "{{/coordinates}}", siteDetail.locationdetail?.latitude != 0 || siteDetail.locationdetail?.longitude != 0);
             html = html.Replace("{{#customurl}}", "").Replace("{{/customurl}}", "");
-            html = html.Replace("{{#gstnumber}}", "").Replace("{{/gstnumber}}", "");
 
             // Organization logo conditional section
             html = ApplyConditionalSection(html, "{{#organizationlogo}}", "{{/organizationlogo}}", organisationLogo > 0);
@@ -291,6 +660,7 @@ namespace appointza.Controllers
                 .Where(url => !string.IsNullOrWhiteSpace(BuildVideoEmbedUrl(url)))
                 .Take(12)
                 .ToList();
+            html = ApplyConditionalSection(html, "{{#haslocationvideos}}", "{{/haslocationvideos}}", locationVideos.Count > 0);
             html = ApplyLoopSection(
                 html,
                 "{{#locationvideos}}",
@@ -303,6 +673,7 @@ namespace appointza.Controllers
 
             // Location images ({{#locationimages}}...{{/locationimages}})
             var locationImages = siteDetail.locationdetail?.images ?? new List<long>();
+            html = ApplyConditionalSection(html, "{{#haslocationimages}}", "{{/haslocationimages}}", locationImages.Count > 0);
             html = ApplyLoopSection(
                 html,
                 "{{#locationimages}}",
@@ -320,6 +691,7 @@ namespace appointza.Controllers
 
             // Services ({{#orgnaisatinservice}}...{{/orgnaisatinservice}})
             var services = siteDetail.orgnaisatinservice ?? new List<OrganisationServices>();
+            html = ApplyConditionalSection(html, "{{#hasservices}}", "{{/hasservices}}", services.Count > 0);
             html = ApplyLoopSection(
                 html,
                 "{{#orgnaisatinservice}}",
@@ -345,11 +717,13 @@ namespace appointza.Controllers
                         ? $"{apiBaseUrl}/api/Files/Get?id={serviceImageId}"
                         : "";
 
+                    // Only replace the id in Files/Get paths — a full URL here doubles the host
+                    // after {{environment.baseurl}} has already been applied.
                     if (serviceImageId > 0)
                     {
                         serviceTemplate = serviceTemplate.Replace(
                             "/api/Files/Get?id={{service_image_id}}",
-                            serviceImageUrl);
+                            $"/api/Files/Get?id={serviceImageId}");
                     }
 
                     serviceTemplate = ApplyConditionalSection(
@@ -366,6 +740,7 @@ namespace appointza.Controllers
             // Service timings ({{#OrganisationServiceTiming}}...{{/OrganisationServiceTiming}})
             var timings = siteDetail.OrganisationServiceTiming ?? new List<OrganisationServiceTiming>();
             var dayNames = new[] { "", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday" };
+            html = ApplyConditionalSection(html, "{{#hastimings}}", "{{/hastimings}}", timings.Count > 0);
             html = ApplyLoopSection(
                 html,
                 "{{#OrganisationServiceTiming}}",
@@ -415,35 +790,59 @@ namespace appointza.Controllers
                         .Replace("{{status}}", evt.status ?? "");
 
                     var eventImageId = evt.images?.ImageIds?.FirstOrDefault() ?? 0;
+                    var eventImageUrl = eventImageId > 0
+                        ? $"{apiBaseUrl}/api/Files/Get?id={eventImageId}"
+                        : "";
+
+                    // AI/custom templates often omit image markup — inject when photo exists.
+                    if (eventImageId > 0
+                        && loop.IndexOf("event_image", StringComparison.OrdinalIgnoreCase) < 0
+                        && loop.IndexOf("EVENT_IMAGE", StringComparison.OrdinalIgnoreCase) < 0)
+                    {
+                        var img =
+                            $"<img class=\"event-card-image\" src=\"{eventImageUrl}\" alt=\"\" loading=\"lazy\" style=\"width:100%;max-height:220px;object-fit:cover;border-radius:12px;margin-bottom:0.75rem;\" />";
+                        var injected = System.Text.RegularExpressions.Regex.Replace(
+                            eventTemplate,
+                            @"<(article|div)([^>]*class=[""'][^""']*event-card[^""']*[""'][^>]*)>",
+                            $"<$1$2>{img}",
+                            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (injected == eventTemplate)
+                        {
+                            injected = System.Text.RegularExpressions.Regex.Replace(
+                                eventTemplate,
+                                @"<(article|div)(\b[^>]*)>",
+                                $"<$1$2>{img}",
+                                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        }
+                        eventTemplate = injected;
+                    }
+
                     eventTemplate = ApplyConditionalSection(
                         eventTemplate,
                         "{{#event_image_id}}",
                         "{{/event_image_id}}",
                         eventImageId > 0);
                     // Support both styles:
-                    // 1) src="/api/Files/Get?id={{event_image_id}}"
+                    // 1) {{environment.baseurl}}/api/Files/Get?id={{event_image_id}} → keep host, swap id
                     // 2) src="{{event_image_id}}" (expects full URL)
                     if (eventImageId > 0)
                     {
                         eventTemplate = eventTemplate.Replace(
                             "/api/Files/Get?id={{event_image_id}}",
-                            $"{apiBaseUrl}/api/Files/Get?id={eventImageId}");
+                            $"/api/Files/Get?id={eventImageId}");
                     }
 
-                    // Replace remaining {{event_image_id}} with full URL for templates
-                    // that expect a direct URL.
                     eventTemplate = eventTemplate.Replace(
                         "{{event_image_id}}",
-                        eventImageId > 0 ? $"{apiBaseUrl}/api/Files/Get?id={eventImageId}" : "");
+                        eventImageUrl);
 
-                    // Also support templates that use {{event_image_url}} explicitly.
                     eventTemplate = eventTemplate.Replace(
                         "{{event_image_url}}",
-                        eventImageId > 0 ? $"{apiBaseUrl}/api/Files/Get?id={eventImageId}" : "");
+                        eventImageUrl);
 
                     eventTemplate = eventTemplate.Replace(
                         "{{EVENT_IMAGE_URL}}",
-                        eventImageId > 0 ? $"{apiBaseUrl}/api/Files/Get?id={eventImageId}" : "");
+                        eventImageUrl);
 
                     eventTemplate = eventTemplate.Replace(
                         "{{EVENTBOOKURL}}",
@@ -460,11 +859,13 @@ namespace appointza.Controllers
                 });
 
             // Facilities loop ({{#facilities}}...{{/facilities}})
+            var facilityList = facilities ?? new List<string>();
+            html = ApplyConditionalSection(html, "{{#hasfacilities}}", "{{/hasfacilities}}", facilityList.Count > 0);
             html = ApplyLoopSection(
                 html,
                 "{{#facilities}}",
                 "{{/facilities}}",
-                facilities ?? new List<string>(),
+                facilityList,
                 (loop, facility) =>
                 {
                     return loop.Replace("{{facility_displaytext}}", facility ?? "");
@@ -491,7 +892,9 @@ namespace appointza.Controllers
         {
             var html = templateHtml ?? "";
             var profile = siteDetail.hospitality_profile;
-            var rooms = (siteDetail.hospitality_rooms ?? []).Where(r => r.isactive).ToList();
+            var rooms = (siteDetail.hospitality_rooms ?? []).Where(r => r.isactive
+                && !string.Equals(r.status, "maintenance", StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(r.status, "blocked", StringComparison.OrdinalIgnoreCase)).ToList();
             var packages = (profile?.packages ?? []).Where(p => p.is_active && !string.IsNullOrWhiteSpace(p.name)).OrderBy(p => p.sort_order).ToList();
             var foodMenu = (profile?.food_menu ?? []).Where(f => !string.IsNullOrWhiteSpace(f.title) || !string.IsNullOrWhiteSpace(f.meal)).ToList();
             var nearbyPlaces = (profile?.nearby_places ?? []).Where(p => !string.IsNullOrWhiteSpace(p.name)).ToList();
@@ -510,6 +913,18 @@ namespace appointza.Controllers
             html = html.Replace("{{organisation.check_in_time}}", checkInTime);
             html = html.Replace("{{organisation.check_out_time}}", checkOutTime);
 
+            var hasPolicies = !string.IsNullOrWhiteSpace(cancellationPolicy)
+                || !string.IsNullOrWhiteSpace(paymentPolicy)
+                || !string.IsNullOrWhiteSpace(checkInTime)
+                || !string.IsNullOrWhiteSpace(checkOutTime);
+            // Default check-in/out times alone should not force an empty Policies section when
+            // both policy texts are blank and there is no hospitality profile.
+            if (profile == null && string.IsNullOrWhiteSpace(cancellationPolicy) && string.IsNullOrWhiteSpace(paymentPolicy))
+            {
+                hasPolicies = false;
+            }
+            html = ApplyConditionalSection(html, "{{#haspolicies}}", "{{/haspolicies}}", hasPolicies);
+
             html = ApplyConditionalSection(html, "{{#hasrooms}}", "{{/hasrooms}}", rooms.Count > 0);
             html = ApplyConditionalSection(html, "{{#haspackages}}", "{{/haspackages}}", packages.Count > 0);
             html = ApplyConditionalSection(html, "{{#hasfoodmenu}}", "{{/hasfoodmenu}}", foodMenu.Count > 0);
@@ -518,7 +933,8 @@ namespace appointza.Controllers
             html = ApplyLoopSection(html, "{{#rooms}}", "{{/rooms}}", rooms, (loop, room) =>
             {
                 var code = ResolveRoomCode(room);
-                var available = string.Equals(room.status, "available", StringComparison.OrdinalIgnoreCase);
+                var available = !string.Equals(room.status, "maintenance", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(room.status, "blocked", StringComparison.OrdinalIgnoreCase);
                 var name = !string.IsNullOrWhiteSpace(room.room_name) ? room.room_name.Trim() : $"Room {room.room_number}";
                 var mainPhoto = ResolveHospitalityMediaUrl(room.main_photo, apiBaseUrl, "");
                 var bookUrl = $"{frontendBaseUrl}/book?roomId={Uri.EscapeDataString(code)}&organisationId={organisationId}&locationId={locationId}";
@@ -533,10 +949,12 @@ namespace appointza.Controllers
                     .Replace("{{room.price}}", (room.pricing?.price_per_night ?? 0).ToString())
                     .Replace("{{room.main_photo}}", mainPhoto)
                     .Replace("{{room.video_url}}", room.booking_rules?.video_url ?? "")
-                    .Replace("{{room.status}}", room.status ?? "")
-                    .Replace("{{room.status_label}}", FormatRoomStatusLabel(room.status))
+                    // Public template never shows occupied/reserved — guests book via dates on /book.
+                    .Replace("{{room.status}}", available ? "available" : room.status ?? "")
+                    .Replace("{{room.status_label}}", available ? "Available" : FormatRoomStatusLabel(room.status))
                     .Replace("{{ROOM_BOOK_URL}}", bookUrl);
 
+                // Always show Book on the public site when the room is not permanently blocked.
                 roomHtml = ApplyConditionalSection(roomHtml, "{{#if_room_available}}", "{{/if_room_available}}", available);
                 roomHtml = ApplyConditionalSection(roomHtml, "{{#if_room_unavailable}}", "{{/if_room_unavailable}}", !available);
                 return roomHtml;

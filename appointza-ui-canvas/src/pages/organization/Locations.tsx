@@ -896,12 +896,12 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
           onValueChange={(value) => syncLocationSubtab(value as "locations" | "organization")}
           className="w-full"
         >
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="locations" className="flex items-center gap-2">
+          <TabsList className="grid w-full grid-cols-2 rounded-xl border border-stone-200 bg-white p-1 shadow-none">
+            <TabsTrigger value="locations" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
               <MapPin className="h-4 w-4" />
               Locations
             </TabsTrigger>
-            <TabsTrigger value="organization" className="flex items-center gap-2">
+            <TabsTrigger value="organization" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
               <Building2 className="h-4 w-4" />
               Organization
             </TabsTrigger>
@@ -910,8 +910,8 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
           <TabsContent value="locations" className="space-y-6">
             {/* Show form when adding or editing */}
             {(showAddDialog || showEditDialog) ? (
-              <Card>
-                <CardHeader>
+              <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
+                <CardHeader className="border-b border-stone-200">
                   <div className="flex items-center justify-between">
                     <div>
                       <CardTitle>{showAddDialog ? 'Add Location' : 'Edit Location'}</CardTitle>
@@ -1151,7 +1151,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   }}>
                     Cancel
                   </Button>
-                  <Button onClick={handleSave} disabled={isLoading}>
+                  <Button onClick={handleSave} disabled={isLoading} className="bg-blue-600 shadow-none hover:bg-blue-700">
                     {isLoading ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1175,7 +1175,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                       Manage your business locations and addresses.
                     </p>
                   </div>
-                  <Button onClick={openAddDialog}>
+                  <Button onClick={openAddDialog} className="bg-blue-600 shadow-none hover:bg-blue-700">
                     <Plus className="mr-2 h-4 w-4" />
                     Add Location
                   </Button>
@@ -1196,7 +1196,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
                 {/* Locations List */}
                 {filteredLocations.length === 0 ? (
-          <Card>
+          <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
             <CardContent className="py-8 text-center">
               <MapPin className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
               <h3 className="text-lg font-semibold mb-2">No locations found</h3>
@@ -1204,7 +1204,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                 {searchTerm ? "No locations match your search." : "Add your first location to get started!"}
               </p>
               {!searchTerm && (
-                <Button onClick={openAddDialog}>
+                <Button onClick={openAddDialog} className="bg-blue-600 shadow-none hover:bg-blue-700">
                   <Plus className="mr-2 h-4 w-4" />
                   Add Location
                 </Button>
@@ -1216,7 +1216,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
             <div className="grid gap-4">
           {filteredLocations.map((locationItem) => (
-            <Card key={locationItem.id} className="hover:shadow-md transition-shadow">
+            <Card key={locationItem.id} className="rounded-xl border-stone-200 bg-white shadow-none transition-colors hover:border-blue-200">
               <CardContent className="p-6">
                 <div className="flex items-start justify-between">
                   <div className="flex items-start space-x-4">
@@ -1278,7 +1278,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
         {/* Delete Confirmation Dialog */}
         <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-              <DialogContent>
+              <DialogContent className="rounded-2xl border-stone-200 bg-white shadow-none">
             <DialogHeader>
               <DialogTitle>Delete Location</DialogTitle>
               <DialogDescription>
@@ -1313,7 +1313,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   Manage your organization information and branding.
                 </p>
               </div>
-              <Button onClick={openOrganizationEdit}>
+              <Button onClick={openOrganizationEdit} className="bg-blue-600 shadow-none hover:bg-blue-700">
                 <Edit className="mr-2 h-4 w-4" />
                 Edit Organization
               </Button>
@@ -1321,7 +1321,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
 
             {/* Organization Details Card */}
             {organization && (
-              <Card>
+              <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Building2 className="h-5 w-5" />
@@ -1419,7 +1419,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   {(organization.organisation_type === "hospitality" ||
                     organization.organisation_type === "both") &&
                   hospitalitySettings ?
-                    <div className="rounded-xl border border-orange-100 bg-orange-50/40 p-4 space-y-4">
+                    <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4">
                       <div>
                         <p className="text-sm font-semibold text-stone-900">Stay booking settings</p>
                         <p className="text-xs text-stone-500">

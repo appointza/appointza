@@ -1,15 +1,11 @@
-// Runtime URLs and keys: window.APP_CONFIG from /config.js (load /config.js first in index.html). For production deploy, edit
-// appointzabuild/production/config.js (copied to wwwroot on Vite build) — PlanItNoww also reads the same file for baseUrl.
-// Get configuration from window.APP_CONFIG (loaded from config.js)
+// Runtime URLs and keys from public/config.js (loaded in index.html as /config.js).
+// Edit appointza-ui-canvas/public/config.js — used for dev, production build, and server startup.
 const getConfig = () => {
   if (typeof window !== 'undefined' && (window as any).APP_CONFIG) {
     return (window as any).APP_CONFIG;
   }
 
-  const fallbackBaseUrl =
-    typeof window !== 'undefined' && window.location?.origin
-      ? window.location.origin
-      : 'https://appointza.com';
+  const fallbackBaseUrl = 'http://localhost:5000';
 
   return {
     baseurl: fallbackBaseUrl,
@@ -21,7 +17,7 @@ const getConfig = () => {
         window.location.hostname === "127.0.0.1" ||
         window.location.hostname.endsWith(".localhost"))
         ? `http://localhost:${window.location.port || "8083"}`
-        : "https://appointza.com",
+        : fallbackBaseUrl,
     marketingDomain: "appointza.com",
     domainname: "appointza.com",
     production: false,
@@ -87,18 +83,29 @@ export function getMarketingDomain(): string {
   return apiDomain;
 }
 
-/** Org subdomain parent host — `domainname` from config.js, or localhost:port in dev. */
-export function getDomainName(): string {
-  if (typeof window !== "undefined") {
-    const h = window.location.hostname.toLowerCase();
-    if (h === "localhost" || h === "127.0.0.1" || h.endsWith(".localhost")) {
-      const port = window.location.port || "8083";
-      return port ? `localhost:${port}` : "localhost";
-    }
+/** API base URL from `APP_CONFIG.baseurl` (never hardcoded). */
+export function getApiBaseUrl(): string {
+  const config = getConfig() as { baseurl?: string };
+  if (config.baseurl) {
+    return normalizeBaseUrl(config.baseurl);
   }
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "http://localhost:5000";
+}
 
-  const config = getConfig() as { domainname?: string; marketingDomain?: string };
-  return config.domainname || config.marketingDomain || "appointza.com";
+/**
+ * Host for org public booking sites: `{slug}.{this}`.
+ * Always `appointza.com` — never the local UI host (localhost:8083).
+ */
+export function getOrganisationPublicSiteDomain(): string {
+  return "appointza.com";
+}
+
+/** Org subdomain parent host — from config (`domainname` or `baseurl` in local dev). */
+export function getDomainName(): string {
+  return getOrganisationPublicSiteDomain();
 }
 
 /** UI origin for login / Google Sign-In — never an org subdomain or API port. */
@@ -119,9 +126,9 @@ export function getUiBaseUrl(): string {
   return normalizeBaseUrl(`https://${getMarketingDomain()}`);
 }
 
-/** Call at use site so values reflect `config.js` after it loads (not one snapshot at import time). */
+/** Browser UI origin. API services must use `environment.baseurl` instead. */
 export function getAppBaseUrl(): string {
-  return normalizeBaseUrl(environment.baseurl || 'https://appointza.com');
+  return getUiBaseUrl();
 }
 
 export function getAppDomain(): string {

@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Copy, Link2, Loader2, RefreshCw } from "lucide-react";
+import { ChevronDown, Copy, Link2, Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CardDescription, CardTitle } from "@/components/ui/card";
@@ -56,6 +56,7 @@ export default function IntegrationTokenPanel({
   embedded = false,
 }: IntegrationTokenPanelProps) {
   const { toast } = useToast();
+  const [isOpen, setIsOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [urls, setUrls] = useState<IntegrationTokenUrlsRes | null>(null);
 
@@ -212,34 +213,66 @@ export default function IntegrationTokenPanel({
   if (embedded) {
     return (
       <div className="border-t border-stone-100">
-        <div className={headerClass}>
+        <button
+          type="button"
+          className={cn(headerClass, "flex w-full items-center justify-between gap-3 text-left")}
+          onClick={() => setIsOpen((open) => !open)}
+          aria-expanded={isOpen}
+        >
           <CardTitle className={`flex items-center gap-3 ${titleClass}`}>
             <span className={iconWrapClass}>
               <Link2 className="h-5 w-5" />
             </span>
             <span>Integration API</span>
           </CardTitle>
-          <CardDescription className={descClass}>
-            Secure key for external apps to read your leads and customers from Appointza
-          </CardDescription>
-        </div>
-        {body}
+          <ChevronDown
+            className={cn(
+              "h-5 w-5 shrink-0 text-stone-400 transition-transform",
+              isOpen && "rotate-180",
+            )}
+          />
+        </button>
+        {isOpen ? (
+          <>
+            <CardDescription className={cn(descClass, contentClass, "pb-4 pt-0 md:pb-4")}>
+              Secure key for external apps to read your leads and customers from Appointza
+            </CardDescription>
+            {body}
+          </>
+        ) : null}
       </div>
     );
   }
 
   return (
-    <div className={cn(org.card, "overflow-hidden rounded-3xl p-5 md:p-6")}>
-      <CardTitle className={`mb-1 flex items-center gap-3 ${titleClass}`}>
-        <span className={iconWrapClass}>
-          <Link2 className="h-5 w-5" />
-        </span>
-        <span>Integration API</span>
-      </CardTitle>
-      <CardDescription className={cn(descClass, "mb-4")}>
-        Secure key for external apps to read your leads and customers from Appointza
-      </CardDescription>
-      {body}
+    <div className={cn(org.card, "overflow-hidden rounded-3xl")}>
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 p-5 text-left md:p-6"
+        onClick={() => setIsOpen((open) => !open)}
+        aria-expanded={isOpen}
+      >
+        <CardTitle className={`flex items-center gap-3 ${titleClass}`}>
+          <span className={iconWrapClass}>
+            <Link2 className="h-5 w-5" />
+          </span>
+          <span>Integration API</span>
+        </CardTitle>
+        <ChevronDown
+          className={cn(
+            "h-5 w-5 shrink-0 text-stone-400 transition-transform",
+            isOpen && "rotate-180",
+          )}
+        />
+      </button>
+      {isOpen ? (
+        <>
+          <CardDescription className={cn(descClass, "px-5 pb-4 md:px-6")}>
+            Secure key for external apps to read your leads and customers from Appointza
+          </CardDescription>
+          {body}
+        </>
+      ) : null}
     </div>
   );
 }

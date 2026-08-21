@@ -44,16 +44,8 @@ const updateFile = (filePath, transform) => {
 
 const replaceConfigUrls = (content) =>
   content
-    .replace(/baseurl:\s*['"][^'"]*['"]/g, `baseurl: '${baseUrl}'`)
-    .replace(/templateBaseUrl:\s*['"][^'"]*['"]/g, `templateBaseUrl: '${templateBaseUrl}'`);
-
-const replaceEnvUrls = (content) =>
-  content
-    .replace(/^VITE_BASE_URL=.*$/m, `VITE_BASE_URL=${baseUrl}`)
-    .replace(/^VITE_TEMPLATE_BASE_URL=.*$/m, `VITE_TEMPLATE_BASE_URL=${templateBaseUrl}`);
-
-const replaceServerBaseUrl = (content) =>
-  content.replace(/"baseUrl"\s*:\s*"[^"]*"/g, `"baseUrl": "${baseUrl}"`);
+    .replace(/baseurl:\s*["'][^"']*["']/g, `baseurl: "${baseUrl}"`)
+    .replace(/templateBaseUrl:\s*["'][^"']*["']/g, `templateBaseUrl: "${templateBaseUrl}"`);
 
 const replaceDefaultUrlTokens = (content) =>
   content
@@ -61,29 +53,16 @@ const replaceDefaultUrlTokens = (content) =>
     .replace(/http:\/\/localhost:8083/g, baseUrl);
 
 const files = [
-  // UI runtime config
   { file: path.join(uiRoot, "public", "config.js"), transform: replaceConfigUrls },
-  { file: path.join(uiRoot, "public", "config.dev.js"), transform: replaceConfigUrls },
-  { file: path.join(uiRoot, "public", "config.prod.js"), transform: replaceConfigUrls },
-
-  // Capacitor copied assets (if present locally)
-  { file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "config.js"), transform: replaceConfigUrls },
-  { file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "config.dev.js"), transform: replaceConfigUrls },
-  { file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "config.prod.js"), transform: replaceConfigUrls },
-
-  // Vite env files
-  { file: path.join(uiRoot, ".env"), transform: replaceEnvUrls },
-  { file: path.join(uiRoot, ".env.development"), transform: replaceEnvUrls },
-  { file: path.join(uiRoot, ".env.production"), transform: replaceEnvUrls },
-
-  // SEO URL tokens in index pages
+  {
+    file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "config.js"),
+    transform: replaceConfigUrls,
+  },
   { file: path.join(uiRoot, "index.html"), transform: replaceDefaultUrlTokens },
-  { file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "index.html"), transform: replaceDefaultUrlTokens },
-
-  // Server config base URLs
-  { file: path.join(repoRoot, "PlanItNoww_Server", "PlanItNoww", "appsettings.Development.json"), transform: replaceServerBaseUrl },
-  { file: path.join(repoRoot, "PlanItNoww_Server", "PlanItNoww", "appsettings.Production.json"), transform: replaceServerBaseUrl },
-  { file: path.join(repoRoot, "PlanItNoww_Server", "PlanItNoww", "appsettings.json"), transform: replaceServerBaseUrl },
+  {
+    file: path.join(uiRoot, "android", "app", "src", "main", "assets", "www", "index.html"),
+    transform: replaceDefaultUrlTokens,
+  },
 ];
 
 const updated = [];
@@ -115,4 +94,3 @@ if (skipped.length > 0) {
   console.log("Skipped (not found):");
   skipped.forEach((item) => console.log(`- ${item}`));
 }
-

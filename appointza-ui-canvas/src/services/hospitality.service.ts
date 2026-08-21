@@ -12,6 +12,8 @@ import {
   OrganisationRoomStatusBoardRes,
   OrganisationRoomStatusReq,
   OrganisationRoomStatusUpdateReq,
+  OrganisationRoomStatusEvent,
+  OrganisationRoomStatusEventSelectReq,
 } from "../models/hospitality.model";
 import { AxiosHelperUtils } from "../utils/axioshelper.utils";
 import { environment } from "../utils/environment";
@@ -129,6 +131,16 @@ export class HospitalityService {
       postdata,
     );
     return resp.item ?? false;
+  }
+
+  async selectRoomStatusEvents(req: OrganisationRoomStatusEventSelectReq) {
+    const postdata = new ActionReq<OrganisationRoomStatusEventSelectReq>();
+    postdata.item = req;
+    const resp = await this.http.post<ActionRes<OrganisationRoomStatusEvent[]>>(
+      `${this.roomBase}/SelectStatusEvents`,
+      postdata,
+    );
+    return resp.item ?? [];
   }
 }
 

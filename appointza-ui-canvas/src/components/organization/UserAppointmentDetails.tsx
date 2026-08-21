@@ -1,6 +1,12 @@
 
 import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NumberInput } from "@/components/ui/number-input";
@@ -24,6 +30,8 @@ import { ReferenceType, ReferenceTypeSelectReq } from "@/models/referencetype.mo
 import { Files, FilesSelectReq } from "@/models/files.model";
 import { useAuth } from "@/contexts/AuthContext";
 import FileViewer from "@/components/common/FileViewer";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 
 interface UserAppointmentDetailsProps {
   appointment: BookedAppoinmentRes;
@@ -42,6 +50,7 @@ interface Task {
 const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpdate, onRefresh }: UserAppointmentDetailsProps) => {
   const { toast } = useToast();
   const { user } = useAuth();
+  const isMobile = useIsMobile();
   const [notes, setNotes] = useState(appointment.notes || "");
   const [tasks, setTasks] = useState<ReferenceValue[]>([]);
   const [files, setFiles] = useState<Files[]>([]);
@@ -708,17 +717,25 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
   };
 
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center">
+    <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
+      <SheetContent
+        side={isMobile ? "bottom" : "right"}
+        className={cn(
+          "overflow-y-auto",
+          isMobile
+            ? "h-[88dvh] max-h-[88dvh] rounded-t-3xl p-4"
+            : "h-dvh w-full p-6 sm:max-w-xl lg:max-w-2xl",
+        )}
+      >
+        <SheetHeader>
+          <SheetTitle className="flex items-center">
             <Calendar className="mr-2 h-5 w-5" />
             Appointment Details
-          </DialogTitle>
-          <DialogDescription>
+          </SheetTitle>
+          <SheetDescription>
             View appointment details
-          </DialogDescription>
-        </DialogHeader>
+          </SheetDescription>
+        </SheetHeader>
 
         <div className="space-y-6">
           {/* Appointment Overview */}
@@ -793,7 +810,7 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
             </CardContent>
           </Card>
         </div>
-      </DialogContent>
+      </SheetContent>
       
       {/* File Viewer Dialog */}
       {selectedFile && (
@@ -806,7 +823,7 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
           }}
         />
       )}
-    </Dialog>
+    </Sheet>
   );
 };
 

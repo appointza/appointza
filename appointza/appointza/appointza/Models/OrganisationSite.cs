@@ -32,6 +32,8 @@ namespace appointza.Models
         public string template_html { get; set; } = "";
         public OrganisationHospitalityProfile? hospitality_profile { get; set; }
         public List<OrganisationRoom> hospitality_rooms { get; set; } = [];
+        /// <summary>Resolved facility display labels for {{#facilities}} template loops.</summary>
+        public List<string> facilities { get; set; } = [];
     }
 
     public class OrganisationTemplateResolveReq
@@ -45,6 +47,20 @@ namespace appointza.Models
     {
         public long organisationid { get; set; }
         public long organisationlocationid { get; set; }
+        /// <summary>Stable public booking GUID (`organisationlocation.orgloctempid`).</summary>
+        public string orgloctempid { get; set; } = "";
+        public long templateid { get; set; }
         public string html { get; set; } = "";
+        /// <summary>Fingerprint for client cache revalidation.</summary>
+        public string versionKey { get; set; } = "";
+    }
+
+    public class PublicSiteLocationResolve
+    {
+        public long id { get; set; }
+        public long organisationid { get; set; }
+        public string orgloctempid { get; set; } = "";
+        public long templateid { get; set; }
+        public string customurl { get; set; } = "";
     }
 } 

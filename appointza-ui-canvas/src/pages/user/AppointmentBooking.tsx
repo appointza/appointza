@@ -17,7 +17,7 @@ import {
   ChevronLeft,
   ChevronRight
 } from "lucide-react";
-import { format, isToday } from "date-fns";
+import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import UserLayout from "@/components/layout/UserLayout";
 import { useAuth } from "@/contexts/AuthContext";
@@ -35,10 +35,14 @@ import { OrganisationServiceTiming, OrganisationServiceTimingSelectReq, Weeks } 
 import { OrganisationServices, OrganisationServicesSelectReq } from "@/models/organisationservices.model";
 import { AppoinmentFinal, SelectedSerivice, AppoinmentSelectReq } from "@/models/appoinment.model";
 import { DayOfWeekUtil } from "@/utils/dayofweek.util";
-import { PaymentService, CreatePaymentOrderReq, VerifyPaymentReq } from "@/services/payment.service";
-import { loadScript } from "@/utils/razorpay.util";
+import type { CreatePaymentOrderReq, VerifyPaymentReq } from "@/services/payment.service";
 import { environment } from "@/utils/environment";
 import { getServiceEffectivePriceForDate } from "@/utils/servicePricing.util";
+import {
+  parseDotNetTimeSpanToMilliseconds,
+  isTimeSlotInPastForToday,
+} from "@/utils/appointmentBookingTime.util";
+import { BookingTimeSlotPicker } from "@/components/booking/BookingTimeSlotPicker";
 
 interface HolidayInfo {
   date: Date;
@@ -46,71 +50,6 @@ interface HolidayInfo {
   isFullDay: boolean;
   startTime?: string;
   endTime?: string;
-}
-
-/** Parses .NET TimeSpan JSON (e.g. "23:15:00", "1.00:00:00") into milliseconds from midnight. */
-function parseDotNetTimeSpanToMilliseconds(span: unknown): number | null {
-  if (span == null) return null;
-  const s = String(span).trim();
-  if (!s) return null;
-  const withDays = /^(-?)(\d+)\.(\d{2}):(\d{2}):(\d{2})/.exec(s);
-  if (withDays) {
-    const sign = withDays[1] === "-" ? -1 : 1;
-    const days = parseInt(withDays[2], 10);
-    const hh = parseInt(withDays[3], 10);
-    const mm = parseInt(withDays[4], 10);
-    const ss = parseInt(withDays[5], 10);
-    return sign * ((days * 24 + hh) * 3600 + mm * 60 + ss) * 1000;
-  }
-  const hms = /^(-?)(\d{1,2}):(\d{2}):(\d{2})/.exec(s);
-  if (hms) {
-    const sign = hms[1] === "-" ? -1 : 1;
-    const hh = parseInt(hms[2], 10);
-    const mm = parseInt(hms[3], 10);
-    const ss = parseInt(hms[4], 10);
-    return sign * (hh * 3600 + mm * 60 + ss) * 1000;
-  }
-  return null;
-}
-
-/** Start instant of a slot on the given calendar day (local), using the same time encoding as the API. */
-function getSlotStartOnCalendarDay(selectedDate: Date, fromtime: string | undefined | null): Date | null {
-  const day = new Date(selectedDate);
-  day.setHours(0, 0, 0, 0);
-
-  if (fromtime == null || String(fromtime).trim() === "") return null;
-
-  const ms = parseDotNetTimeSpanToMilliseconds(fromtime);
-  if (ms != null && Number.isFinite(ms)) {
-    return new Date(day.getTime() + ms);
-  }
-
-  const s = String(fromtime).trim();
-  const hms = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(s);
-  if (hms) {
-    const d = new Date(day);
-    d.setHours(
-      parseInt(hms[1], 10),
-      parseInt(hms[2], 10),
-      parseInt(hms[3] || "0", 10),
-      0
-    );
-    return d;
-  }
-
-  return null;
-}
-
-/** True when the selected day is today (local) and the slot start is not after "now". */
-function isTimeSlotInPastForToday(
-  selectedDate: Date,
-  fromtime: string | undefined | null,
-  now: Date = new Date()
-): boolean {
-  if (!fromtime || !isToday(selectedDate)) return false;
-  const start = getSlotStartOnCalendarDay(selectedDate, fromtime);
-  if (!start) return false;
-  return start.getTime() <= now.getTime();
 }
 
 const AppointmentBooking = () => {
@@ -130,7 +69,6 @@ const AppointmentBooking = () => {
   const organisationServicesService = useMemo(() => new OrganisationServicesService(), []);
   const filesService = useMemo(() => new FilesService(), []);
   const appointmentService = useMemo(() => new AppoinmentService(), []);
-  const paymentService = useMemo(() => new PaymentService(), []);
 
   // State
   const [isLoading, setIsLoading] = useState(false);
@@ -426,6 +364,9 @@ const AppointmentBooking = () => {
     try {
       const req = new OrganisationServicesSelectReq();
       req.organisationid = parseInt(organisationId);
+      if (organisationLocationId > 0) {
+        req.organisationlocationid = parseInt(organisationLocationId);
+      }
       const response = await organisationServicesService.select(req);
       if (response) {
         // Filter only active services
@@ -958,6 +899,9 @@ const AppointmentBooking = () => {
         })) // Required for service-based pricing
       };
 
+      const { PaymentService } = await import("@/services/payment.service");
+      const { loadScript } = await import("@/utils/razorpay.util");
+      const paymentService = new PaymentService();
       const paymentOrder = await paymentService.createOrder(paymentReq);
       
       // Load Razorpay script
@@ -1061,6 +1005,8 @@ const AppointmentBooking = () => {
               appointmentid: bookedAppointment.id
             };
 
+            const { PaymentService } = await import("@/services/payment.service");
+            const paymentService = new PaymentService();
             const verifyResult = await paymentService.verifyPayment(verifyReq);
             
             if (verifyResult.isvalid) {
@@ -1683,71 +1629,18 @@ const AppointmentBooking = () => {
                 )}
               >
               {timeSlots.length > 0 ? (
-                <>
-                  {hasLeaveRequests &&
-                    (() => {
-                      const leaveInfo = getLeaveInfoForDate(selectedDate);
-                      if (leaveInfo) {
-                        return (
-                          <div className="bg-orange-50 border border-orange-200 rounded-2xl p-3">
-                            <div className="flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-orange-600 shrink-0" />
-                              <span className="text-sm font-medium text-orange-800">
-                                Leave Request Active
-                              </span>
-                            </div>
-                            <p className="text-xs text-orange-700 mt-1 pl-6">
-                              {leaveInfo.isfullday
-                                ? "Full day leave - All time slots unavailable"
-                                : `Half day leave: ${leaveInfo.start_time.slice(0, 5)} - ${leaveInfo.end_time.slice(0, 5)}`}
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
-                    })()}
-
-                  <div className="grid grid-cols-3 gap-3">
-                    {timeSlots.map((slot, index) => {
-                      const isSelected = selectedTimeSlot.fromtime === slot.fromtime;
-                      const isBooked = slot.statuscode === "Booked";
-                      const isBlocked = isTimeSlotBlocked(selectedDate, slot.fromtime);
-                      const isBlockedByLeave = isTimeSlotBlockedByLeave(selectedDate, slot.fromtime);
-                      const isPastSlot = isTimeSlotInPastForToday(selectedDate, slot.fromtime);
-                      const disabled = isBooked || isBlocked || isBlockedByLeave || isPastSlot;
-
-                      return (
-                        <Button
-                          key={`${slot.fromtime}-${index}`}
-                          type="button"
-                          variant="outline"
-                          disabled={disabled}
-                          onClick={() => handleTimeSlotSelection(slot)}
-                          className={cn(
-                            "h-auto min-h-[3.25rem] rounded-2xl py-4 font-medium border-gray-200 shadow-none transition text-center",
-                            !disabled && !isSelected && "hover:bg-orange-50 hover:border-orange-500",
-                            isSelected &&
-                              "bg-orange-500 text-white border-orange-500 hover:bg-orange-600 hover:text-white",
-                            isBooked && "opacity-50 cursor-not-allowed",
-                            isBlocked && "bg-yellow-50 border-yellow-300 text-yellow-900",
-                            isBlockedByLeave && "bg-orange-100 border-orange-300 text-orange-900",
-                            isPastSlot && "opacity-55 cursor-not-allowed bg-zinc-100 border-zinc-200 text-zinc-500"
-                          )}
-                        >
-                          <div className="text-center w-full">
-                            <div>{formatTime(slot.fromtime)}</div>
-                            {isBooked && <div className="text-xs text-red-600">Booked</div>}
-                            {isBlocked && <div className="text-xs">Holiday</div>}
-                            {isBlockedByLeave && <div className="text-xs">Leave</div>}
-                            {isPastSlot && !isBooked && !isBlocked && !isBlockedByLeave && (
-                              <div className="text-xs text-zinc-500">Past</div>
-                            )}
-                          </div>
-                        </Button>
-                      );
-                    })}
-                  </div>
-                </>
+                <BookingTimeSlotPicker
+                  timeSlots={timeSlots}
+                  selectedFromTime={selectedTimeSlot.fromtime}
+                  selectedDate={selectedDate}
+                  hasLeaveRequests={hasLeaveRequests}
+                  leaveInfo={hasLeaveRequests ? getLeaveInfoForDate(selectedDate) : null}
+                  formatTime={formatTime}
+                  isTimeSlotBlocked={isTimeSlotBlocked}
+                  isTimeSlotBlockedByLeave={isTimeSlotBlockedByLeave}
+                  isTimeSlotInPastForToday={isTimeSlotInPastForToday}
+                  onSelect={handleTimeSlotSelection}
+                />
               ) : (
                 <div className="text-center py-10 rounded-2xl border border-dashed border-gray-200 bg-gray-50/50">
                   <Clock className="h-10 w-10 text-gray-400 mx-auto mb-3" />

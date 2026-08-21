@@ -13,7 +13,7 @@ const SegmentTabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "mb-5 flex w-full overflow-hidden rounded-2xl border border-stone-200 bg-white p-1 shadow-sm sm:mb-8",
+      "mb-5 flex w-full overflow-hidden rounded-xl border border-stone-200 bg-white p-1 shadow-none sm:mb-8",
       className,
     )}
     {...props}
@@ -28,7 +28,7 @@ const SegmentTabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "min-h-[44px] flex-1 touch-manipulation rounded-xl px-4 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:text-stone-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500/30 focus-visible:ring-offset-0 data-[state=active]:bg-gradient-coral data-[state=active]:text-white data-[state=active]:shadow-sm",
+      "min-h-[44px] flex-1 touch-manipulation rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30 focus-visible:ring-offset-0 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none",
       className,
     )}
     {...props}

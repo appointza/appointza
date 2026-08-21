@@ -26,8 +26,21 @@ export function resolveMainAppBookingUrl(href: string): string {
   return getMainAppAuthUrl(path);
 }
 
+/** Guest hospitality stay booking (`/book?...`) — no login required. */
+export function isGuestHospitalityBookPath(hrefOrPath: string): boolean {
+  const raw = (hrefOrPath || "").trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw, "https://appointza.local");
+    return parsed.pathname === "/book" || parsed.pathname.endsWith("/book");
+  } catch {
+    return raw === "/book" || raw.startsWith("/book?") || raw.includes("/book?");
+  }
+}
+
 /**
- * Book now from org website → main app booking page (/book-appointment/:org/:loc).
+ * Book now from org website → main app booking page.
+ * Service/event bookings require login; hospitality `/book` is guest-friendly.
  */
 export function navigateToTemplateBooking(href: string, navigate: NavigateFunction): void {
   const path = resolveTemplateBookingPath(href);
@@ -35,8 +48,9 @@ export function navigateToTemplateBooking(href: string, navigate: NavigateFuncti
 
   const onOrgSite = isOrgSubdomainHost();
   const target = onOrgSite ? resolveMainAppBookingUrl(href) : path;
+  const guestHospitality = isGuestHospitalityBookPath(path);
 
-  if (isUserLoggedIn()) {
+  if (isUserLoggedIn() || guestHospitality) {
     if (target.startsWith("http://") || target.startsWith("https://")) {
       window.location.href = target;
       return;
@@ -64,9 +78,25 @@ export function buildRoomBookPath(
   organisationId: number,
   locationId: number,
   roomCode: string,
+  options?: { checkIn?: string; checkOut?: string; packageId?: string },
 ): string {
   const params = new URLSearchParams();
   params.set("roomId", roomCode);
+  params.set("organisationId", String(organisationId));
+  params.set("locationId", String(locationId));
+  if (options?.checkIn) params.set("checkIn", options.checkIn);
+  if (options?.checkOut) params.set("checkOut", options.checkOut);
+  if (options?.packageId) params.set("packageId", options.packageId);
+  return `/book?${params.toString()}`;
+}
+
+export function buildPackageBookPath(
+  organisationId: number,
+  locationId: number,
+  packageId: string,
+): string {
+  const params = new URLSearchParams();
+  params.set("packageId", packageId);
   params.set("organisationId", String(organisationId));
   params.set("locationId", String(locationId));
   return `/book?${params.toString()}`;
@@ -79,12 +109,22 @@ function appointzaResolveMainAppOrigin() {
       return window.parent.__APPOINTZA_MAIN_ORIGIN__;
     }
   } catch (_) {}
+  try {
+    if (window.APP_CONFIG && window.APP_CONFIG.uiBaseUrl) {
+      return String(window.APP_CONFIG.uiBaseUrl).replace(/\\/+$/, '');
+    }
+  } catch (_) {}
   var h = (window.location.hostname || '').toLowerCase();
   if (h === 'localhost' || h === '127.0.0.1' || (h.length > 10 && h.slice(-10) === '.localhost')) {
     var p = window.location.port || '8083';
     return window.location.protocol + '//localhost:' + p;
   }
-  return 'https://appointza.com';
+  try {
+    if (window.APP_CONFIG && window.APP_CONFIG.baseurl) {
+      return String(window.APP_CONFIG.baseurl).replace(/\\/+$/, '');
+    }
+  } catch (_) {}
+  return window.location.protocol + '//' + window.location.host;
 }`;
 
 /** Script injected into published template HTML — resolves login host at click time (not baked). */
@@ -92,6 +132,14 @@ export function buildTemplateBookingClickScript(): string {
   return `
 (function () {
 ${MAIN_APP_ORIGIN_RESOLVER}
+  function isGuestHospitalityBook(href) {
+    try {
+      var u = new URL(href, window.location.origin);
+      return u.pathname === '/book';
+    } catch (_) {
+      return href.indexOf('/book?') !== -1 || href === '/book';
+    }
+  }
   function toPath(href) {
     try {
       var u = new URL(href, window.location.origin);
@@ -104,10 +152,11 @@ ${MAIN_APP_ORIGIN_RESOLVER}
     var el = e.target && e.target.closest ? e.target.closest('a[href]') : null;
     if (!el) return;
     var href = el.getAttribute('href') || '';
-    var isBooking =
+    var guestStay = isGuestHospitalityBook(href);
+    var serviceOrEvent =
       href.indexOf('/book-appointment/') !== -1 ||
       href.indexOf('/user/events/') !== -1;
-    if (!isBooking) return;
+    if (!guestStay && !serviceOrEvent) return;
     e.preventDefault();
     var path = toPath(href);
     var mainOrigin = appointzaResolveMainAppOrigin();
@@ -116,7 +165,8 @@ ${MAIN_APP_ORIGIN_RESOLVER}
       : mainOrigin + path;
     var token = null;
     try { token = localStorage.getItem('auth_token'); } catch (_) {}
-    if (!token) {
+    // Hospitality /book is guest checkout — do not force login.
+    if (!token && !guestStay) {
       try { sessionStorage.setItem('appointza_auth_return', bookingUrl); } catch (_) {}
       var loginUrl = mainOrigin + '/login?from=' + encodeURIComponent(bookingUrl);
       if (window.parent && window.parent !== window) {

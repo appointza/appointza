@@ -300,8 +300,8 @@ const MarketingHomePage = () => {
       <section className="relative overflow-hidden bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-800 text-white pt-20 pb-16 md:pb-24">
         {/* background glow */}
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute -top-40 -left-40 w-[600px] h-[600px] rounded-full bg-orange-500/10 blur-[120px]" />
-          <div className="absolute -bottom-20 -right-20 w-[500px] h-[500px] rounded-full bg-pink-500/10 blur-[120px]" />
+          <div className="pointer-events-none absolute -top-40 -left-40 hidden h-[600px] w-[600px] rounded-full bg-orange-500/10 blur-[120px] md:block" />
+          <div className="pointer-events-none absolute -bottom-20 -right-20 hidden h-[500px] w-[500px] rounded-full bg-pink-500/10 blur-[120px] md:block" />
         </div>
 
         <div className="relative max-w-7xl mx-auto px-6">
@@ -1174,7 +1174,7 @@ const MarketingHomePage = () => {
       ══════════════════════════════════════════════════════════════════════ */}
       <section className="relative overflow-hidden bg-gradient-to-br from-zinc-950 via-zinc-900 to-zinc-800 py-24 md:py-32 text-white">
         <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-orange-500/10 blur-[100px]" />
+          <div className="pointer-events-none absolute left-1/2 top-0 hidden h-[400px] w-[700px] -translate-x-1/2 rounded-full bg-orange-500/10 blur-[100px] md:block" />
         </div>
         <div className="relative max-w-4xl mx-auto px-6 text-center">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-orange-500/30 bg-orange-500/10 text-orange-400 text-xs font-semibold mb-6 tracking-wide">

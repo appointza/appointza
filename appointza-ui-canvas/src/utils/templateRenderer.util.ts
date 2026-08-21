@@ -10,6 +10,7 @@ import { toDateOnlyString } from "@/utils/eventDate.util";
 import {
   buildHospitalityPolicyTokens,
   buildTemplateFoodMenu,
+  buildTemplateGuestServices,
   buildTemplateNearbyPlaces,
   buildTemplatePackages,
   buildTemplateRooms,
@@ -73,6 +74,41 @@ const formatDateValue = (value: unknown) => {
 
 const buildFileGetUrl = (filesApiBaseUrl: string, fileId: number): string =>
   fileId > 0 ? `${filesApiBaseUrl}/api/Files/Get?id=${fileId}` : "";
+
+/**
+ * Templates often use `{{environment.baseurl}}/api/Files/Get?id={{token}}`.
+ * After baseurl is applied, replacing the path with a *full* URL doubles the host.
+ * Swap only the id in Files/Get paths; bare `{{token}}` still becomes a full URL.
+ */
+const bindFileIdToken = (
+  html: string,
+  token: string,
+  fileId: number,
+  fileUrl: string,
+): string => {
+  const placeholder = `{{${token}}}`;
+  let out = html;
+  if (fileId > 0) {
+    out = out.replaceAll(`/api/Files/Get?id=${placeholder}`, `/api/Files/Get?id=${fileId}`);
+  }
+  out = out.replaceAll(placeholder, fileId > 0 ? fileUrl : "");
+  return out;
+};
+
+/** When a custom/AI template omits event image tokens, still show the event photo. */
+const injectEventImageIfMissing = (loopTemplate: string, eventImageUrl: string): string => {
+  if (!eventImageUrl) return loopTemplate;
+  if (/\{\{\s*#?event_image|EVENT_IMAGE/i.test(loopTemplate)) return loopTemplate;
+
+  const img = `<img class="event-card-image" src="${eventImageUrl}" alt="" loading="lazy" style="width:100%;max-height:220px;object-fit:cover;border-radius:12px;margin-bottom:0.75rem;" />`;
+  const withCardClass = loopTemplate.replace(
+    /<(article|div)([^>]*class=["'][^"']*event-card[^"']*["'][^>]*)>/i,
+    `<$1$2>${img}`,
+  );
+  if (withCardClass !== loopTemplate) return withCardClass;
+
+  return loopTemplate.replace(/<(article|div)(\b[^>]*)>/i, `<$1$2>${img}`);
+};
 
 const resolveServiceImageId = (service: unknown): number => {
   const record = service as {
@@ -150,8 +186,17 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   html = replaceToken(html, "organisationdetail.notes", siteData.organisationdetail?.notes);
   html = replaceToken(html, "organisation.notes", siteData.organisationdetail?.notes);
   html = replaceToken(html, "OrganisationNotes", siteData.organisationdetail?.notes);
+  html = replaceToken(html, "organisationdetail.gstnumber", siteData.organisationdetail?.gstnumber);
+  const locationEmail =
+    (siteData.locationdetail as { email?: string } | undefined)?.email?.trim() || "";
+  html = replaceToken(html, "organisationemail", locationEmail);
+  html = applyConditionalSection(
+    html,
+    "{{#organisationemail}}",
+    "{{/organisationemail}}",
+    !!locationEmail,
+  );
 
-  html = replaceToken(html, "organisationemail", "");
   html = replaceToken(html, "currentyear", new Date().getFullYear());
   const bookPath = buildBookAppointmentPath(organisationId, siteData.locationdetail?.id || 0);
   html = replaceToken(html, "BOOKNOWURL", `${getUiBaseUrl()}${bookPath}`);
@@ -196,7 +241,8 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
 
   // Strip any remaining bare markers that weren't handled above.
   html = html.replaceAll("{{#customurl}}", "").replaceAll("{{/customurl}}", "");
-  html = html.replaceAll("{{#gstnumber}}", "").replaceAll("{{/gstnumber}}", "");
+  const hasGst = !!(siteData.organisationdetail?.gstnumber || "").trim();
+  html = applyConditionalSection(html, "{{#gstnumber}}", "{{/gstnumber}}", hasGst);
 
   const locationVideoUrls = (
     (siteData.locationdetail?.attributes as { video_urls?: unknown } | undefined)?.video_urls ?? []
@@ -206,6 +252,12 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         .filter((url): url is string => typeof url === "string" && !!buildVideoEmbedUrl(url))
         .slice(0, 12)
     : [];
+  html = applyConditionalSection(
+    html,
+    "{{#haslocationvideos}}",
+    "{{/haslocationvideos}}",
+    locationVideos.length > 0,
+  );
   html = applyLoopSection(
     html,
     "{{#locationvideos}}",
@@ -219,6 +271,12 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   );
 
   const locationImages = siteData.locationdetail?.images || [];
+  html = applyConditionalSection(
+    html,
+    "{{#haslocationimages}}",
+    "{{/haslocationimages}}",
+    locationImages.length > 0,
+  );
   html = applyLoopSection(
     html,
     "{{#locationimages}}",
@@ -247,11 +305,13 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   }
 
   const dayNames = ["", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  const services = siteData.orgnaisatinservice || [];
+  html = applyConditionalSection(html, "{{#hasservices}}", "{{/hasservices}}", services.length > 0);
   html = applyLoopSection(
     html,
     "{{#orgnaisatinservice}}",
     "{{/orgnaisatinservice}}",
-    siteData.orgnaisatinservice || [],
+    services,
     (loopTemplate, service) => {
       const serviceId = service?.id ?? 0;
       const locationId = siteData.locationdetail?.id || 0;
@@ -267,32 +327,24 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         .replaceAll("{{SERVICE_BOOK_URL}}", `${getUiBaseUrl()}${serviceBookPath}`)
         .replaceAll("{{SERVICE_IMAGE_URL}}", serviceImageUrl);
 
-      if (serviceImageId > 0) {
-        serviceHtml = serviceHtml.replaceAll(
-          "/api/Files/Get?id={{service_image_id}}",
-          serviceImageUrl,
-        );
-      }
-
       serviceHtml = applyConditionalSection(
         serviceHtml,
         "{{#service_image_id}}",
         "{{/service_image_id}}",
         serviceImageId > 0,
       );
-      serviceHtml = serviceHtml.replaceAll(
-        "{{service_image_id}}",
-        serviceImageId > 0 ? serviceImageUrl : "",
-      );
+      serviceHtml = bindFileIdToken(serviceHtml, "service_image_id", serviceImageId, serviceImageUrl);
       return serviceHtml;
     }
   );
 
+  const timings = siteData.OrganisationServiceTiming || [];
+  html = applyConditionalSection(html, "{{#hastimings}}", "{{/hastimings}}", timings.length > 0);
   html = applyLoopSection(
     html,
     "{{#OrganisationServiceTiming}}",
     "{{/OrganisationServiceTiming}}",
-    siteData.OrganisationServiceTiming || [],
+    timings,
     (loopTemplate, timing) =>
       loopTemplate
         .replaceAll("{{day_name}}", dayNames[timing?.day_of_week || 0] || `Day ${timing?.day_of_week || 0}`)
@@ -311,8 +363,9 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
     (loopTemplate, evt) => {
       const eventImageId = resolveEventImageId(evt as Record<string, unknown>);
       const eventImageUrl = buildFileGetUrl(filesApiBaseUrl, eventImageId);
+      const templateWithImage = injectEventImageIfMissing(loopTemplate, eventImageUrl);
 
-      let eventHtml = loopTemplate
+      let eventHtml = templateWithImage
         .replaceAll("{{event_name}}", String((evt as { event_name?: unknown }).event_name || ""))
         .replaceAll("{{event_date}}", formatDateValue((evt as { event_date?: unknown }).event_date))
         .replaceAll("{{from_date}}", formatDateValue((evt as { from_date?: unknown }).from_date))
@@ -324,13 +377,6 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         .replaceAll("{{EVENTBOOKURL}}", `${frontendBaseUrl}/user/events/${String((evt as { id?: unknown }).id || "")}/book`)
         .replaceAll("{{EVENT_IMAGE_URL}}", eventImageUrl);
 
-      if (eventImageId > 0) {
-        eventHtml = eventHtml.replaceAll(
-          "/api/Files/Get?id={{event_image_id}}",
-          eventImageUrl,
-        );
-      }
-
       eventHtml = applyConditionalSection(eventHtml, "{{#event_image_id}}", "{{/event_image_id}}", eventImageId > 0);
       eventHtml = applyConditionalSection(
         eventHtml,
@@ -338,10 +384,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         "{{/to_date}}",
         !!(evt as { to_date?: unknown }).to_date
       );
-      eventHtml = eventHtml.replaceAll(
-        "{{event_image_id}}",
-        eventImageId > 0 ? eventImageUrl : "",
-      );
+      eventHtml = bindFileIdToken(eventHtml, "event_image_id", eventImageId, eventImageUrl);
       eventHtml = eventHtml.replaceAll("{{event_image_url}}", eventImageUrl);
       return eventHtml;
     }
@@ -365,6 +408,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   );
   const templateFoodMenu = buildTemplateFoodMenu(hospitalityProfile?.food_menu ?? []);
   const templateNearby = buildTemplateNearbyPlaces(hospitalityProfile?.nearby_places ?? []);
+  const templateGuestServices = buildTemplateGuestServices(hospitalityProfile?.guest_services ?? []);
 
   html = replaceToken(html, "hospitality.cancellation_policy", policyTokens.cancellation_policy);
   html = replaceToken(html, "hospitality.payment_policy", policyTokens.payment_policy);
@@ -375,6 +419,20 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   html = replaceToken(html, "organisation.check_in_time", policyTokens.check_in_time);
   html = replaceToken(html, "organisation.check_out_time", policyTokens.check_out_time);
 
+  const hasPolicies = !!(
+    hospitalityProfile &&
+    (policyTokens.cancellation_policy?.trim() ||
+      policyTokens.payment_policy?.trim() ||
+      (hospitalityProfile.checkin_time || "").trim() ||
+      (hospitalityProfile.checkout_time || "").trim())
+  );
+  html = applyConditionalSection(html, "{{#haspolicies}}", "{{/haspolicies}}", hasPolicies);
+
+  const hasTagline = !!(siteData.organisationdetail?.tagline || "").trim();
+  const hasNotes = !!(siteData.organisationdetail?.notes || "").trim();
+  html = applyConditionalSection(html, "{{#organisationtagline}}", "{{/organisationtagline}}", hasTagline);
+  html = applyConditionalSection(html, "{{#organisationnotes}}", "{{/organisationnotes}}", hasNotes);
+
   html = applyConditionalSection(html, "{{#hasrooms}}", "{{/hasrooms}}", templateRooms.length > 0);
   html = applyConditionalSection(html, "{{#haspackages}}", "{{/haspackages}}", templatePackages.length > 0);
   html = applyConditionalSection(html, "{{#hasfoodmenu}}", "{{/hasfoodmenu}}", templateFoodMenu.length > 0);
@@ -383,6 +441,12 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
     "{{#hasnearby}}",
     "{{/hasnearby}}",
     templateNearby.length > 0,
+  );
+  html = applyConditionalSection(
+    html,
+    "{{#hasguestservices}}",
+    "{{/hasguestservices}}",
+    templateGuestServices.length > 0,
   );
 
   html = applyLoopSection(html, "{{#rooms}}", "{{/rooms}}", templateRooms, (loopTemplate, room) => {
@@ -463,6 +527,69 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         .replaceAll("{{place.map_url}}", place.map_url),
   );
 
+  html = applyLoopSection(
+    html,
+    "{{#guest_services}}",
+    "{{/guest_services}}",
+    templateGuestServices,
+    (loopTemplate, guest) =>
+      loopTemplate
+        .replaceAll("{{guest.name}}", guest.name)
+        .replaceAll("{{guest.price}}", guest.price)
+        .replaceAll("{{guest.description}}", guest.description)
+        .replaceAll("{{guest.category}}", guest.category)
+        .replaceAll("{{guest.icon}}", guest.icon),
+  );
+
+  // Facilities (optional — may arrive as resolved display strings on site payload)
+  const facilities = (
+    (siteData as { facilities?: unknown }).facilities ??
+    (siteData.locationdetail as { facilities?: unknown } | undefined)?.facilities ??
+    []
+  );
+  const facilityLabels = Array.isArray(facilities)
+    ? facilities
+        .map((item) => {
+          if (typeof item === "string") return item.trim();
+          if (item && typeof item === "object" && "facility_displaytext" in item) {
+            return String((item as { facility_displaytext?: unknown }).facility_displaytext || "").trim();
+          }
+          if (item && typeof item === "object" && "displaytext" in item) {
+            return String((item as { displaytext?: unknown }).displaytext || "").trim();
+          }
+          return "";
+        })
+        .filter(Boolean)
+    : [];
+  html = applyConditionalSection(html, "{{#hasfacilities}}", "{{/hasfacilities}}", facilityLabels.length > 0);
+  html = applyLoopSection(
+    html,
+    "{{#facilities}}",
+    "{{/facilities}}",
+    facilityLabels,
+    (loopTemplate, label) => loopTemplate.replaceAll("{{facility_displaytext}}", label),
+  );
+
+  // Reviews (optional — shows when review data exists on site payload)
+  const reviews = (siteData as { reviews?: Array<Record<string, unknown>> }).reviews ?? [];
+  const reviewList = Array.isArray(reviews) ? reviews : [];
+  html = applyConditionalSection(html, "{{#hasreviews}}", "{{/hasreviews}}", reviewList.length > 0);
+  html = applyLoopSection(
+    html,
+    "{{#reviews}}",
+    "{{/reviews}}",
+    reviewList,
+    (loopTemplate, review) => {
+      const rating = Number(review?.rating ?? 0);
+      const stars =
+        String(review?.rating_stars || "").trim() ||
+        (Number.isFinite(rating) && rating > 0 ? "★".repeat(Math.min(5, Math.max(0, Math.round(rating)))) : "");
+      return loopTemplate
+        .replaceAll("{{rating_stars}}", stars)
+        .replaceAll("{{comment}}", String(review?.comment || ""));
+    },
+  );
+
   // Remove any unhandled handlebars tags to avoid showing raw placeholders to users.
   html = html.replace(/\{\{#[^}]+\}\}/g, "");
   html = html.replace(/\{\{\/[^}]+\}\}/g, "");
@@ -510,7 +637,6 @@ ${buildTemplateBookingClickScript()}
   );
 
   // Normalize file/image URLs to a stable absolute HTTPS endpoint.
-  html = html.replace(/http:\/\/appointza\.com\/api\/Files\/Get\?id=/g, "https://appointza.com/api/Files/Get?id=");
   html = html.replace(/https?:\/\/[^"'\s>]*\/api\/Files\/Get\?id=(\d+)/g, (_m, id) => `${filesApiBaseUrl}/api/Files/Get?id=${id}`);
   html = html.replace(/(["'])\/api\/Files\/Get\?id=(\d+)\1/g, (_m, quote, id) => `${quote}${filesApiBaseUrl}/api/Files/Get?id=${id}${quote}`);
 

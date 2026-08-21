@@ -1,5 +1,5 @@
 
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { useContext, useState, useEffect, useRef, ReactNode, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { AuthService } from '@/services/AuthService';
 import { UsersPermissionData } from '@/models/users.model';
@@ -9,50 +9,22 @@ import {
   redirectToLogin,
   resolveLoginReturnPath,
 } from '@/utils/authNavigation.util';
-
-interface User {
-  id: number;
-  mobile: string;
-  organisationid: number;
-  locationid: number;
-  firstname?: string;
-  lastname?: string;
-  email?: string;
-  username?: string;
-  imageid?: number;
-  userpermission?: UsersPermissionData;
-  isStaff?: boolean;
-}
-
-interface AuthContextType {
-  isAuthenticated: boolean;
-  /** False until localStorage auth has been read (avoids redirect flash on reload). */
-  authReady: boolean;
-  userType: 'user' | 'organization' | null;
-  user: User | null;
-  mobile: string | null;
-  canSwitchMode: boolean;
-  setUserType: (type: 'user' | 'organization') => void;
-  setMobile: (mobile: string) => void;
-  switchToMode: (mode: 'user' | 'organization') => void;
-  logout: () => void;
-  refreshAuth: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+import { AuthContext, type AuthUser } from '@/contexts/auth-context';
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
   const [userType, setUserTypeState] = useState<'user' | 'organization' | null>(null);
-  const [user, setUser] = useState<User | null>(null);
+  const [user, setUser] = useState<AuthUser | null>(null);
   const [mobile, setMobileState] = useState<string | null>(null);
   const [canSwitchMode, setCanSwitchMode] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const locationRef = useRef(location);
+  locationRef.current = location;
   const sessionExpireHandledAtRef = useRef(0);
 
-  const refreshAuth = () => {
+  const refreshAuth = useCallback(() => {
     const token = localStorage.getItem('auth_token');
     const storedUserType = localStorage.getItem('user_type') as 'user' | 'organization' | null;
     const userContextStr = localStorage.getItem('user_context');
@@ -129,7 +101,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // the user to the default page (e.g. /explore) instead of back to checkout/booking.
         const currentPath = window.location.pathname;
         if (currentPath === '/login' || currentPath === '/register' || currentPath === '/otp') {
-          const fromPath = resolveLoginReturnPath(location);
+          const fromPath = resolveLoginReturnPath(locationRef.current);
           const target = resolvePostLoginPath(
             finalUserType as 'user' | 'organization',
             fromPath
@@ -166,7 +138,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setAuthReady(true);
     }
-  };
+  }, []);
 
   useEffect(() => {
     refreshAuth();
@@ -226,39 +198,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => window.removeEventListener('appointza:session-expired', handler);
   }, [navigate]);
 
-  const setUserType = (type: 'user' | 'organization') => {
+  const setUserType = useCallback((type: 'user' | 'organization') => {
     console.log('AuthContext: Setting user type to', type);
     setUserTypeState(type);
     localStorage.setItem('user_type', type);
-  };
+  }, []);
 
-  const setMobile = (mobile: string) => {
+  const setMobile = useCallback((mobile: string) => {
     setMobileState(mobile);
-  };
+  }, []);
 
-  const switchToMode = (mode: 'user' | 'organization') => {
+  const switchToMode = useCallback((mode: 'user' | 'organization') => {
     console.log('AuthContext: switchToMode called with mode =', mode);
     console.log('AuthContext: current canSwitchMode =', canSwitchMode);
-    
+
     if (!canSwitchMode) {
       console.log('AuthContext: User cannot switch modes');
       return;
     }
-    
-    // Update the user type immediately
+
     setUserType(mode);
-    
+
     console.log('AuthContext: Navigating to', mode === 'user' ? USER_POST_LOGIN_PATH : '/organization/dashboard');
 
-    // Navigate to appropriate dashboard
     if (mode === 'user') {
       navigate(USER_POST_LOGIN_PATH);
     } else {
       navigate('/organization/dashboard');
     }
-  };
+  }, [canSwitchMode, navigate, setUserType]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     console.log('AuthContext: Logging out');
     AuthService.logout();
     setIsAuthenticated(false);
@@ -267,22 +237,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setMobileState(null);
     setCanSwitchMode(false);
     navigate('/');
-  };
+  }, [navigate]);
+
+  const contextValue = useMemo(() => ({
+    isAuthenticated,
+    authReady,
+    userType,
+    user,
+    mobile,
+    canSwitchMode,
+    setUserType,
+    setMobile,
+    switchToMode,
+    logout,
+    refreshAuth,
+  }), [authReady, canSwitchMode, isAuthenticated, logout, mobile, refreshAuth, setMobile, setUserType, switchToMode, user, userType]);
 
   return (
-    <AuthContext.Provider value={{
-      isAuthenticated,
-      authReady,
-      userType,
-      user,
-      mobile,
-      canSwitchMode,
-      setUserType,
-      setMobile,
-      switchToMode,
-      logout,
-      refreshAuth
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

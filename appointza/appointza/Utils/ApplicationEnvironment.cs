@@ -6,8 +6,6 @@ namespace appointza.Utils
         public string postgresqlconnection { get; set; }
         /// <summary>Campusza product database (school management domain).</summary>
         public string campusza_postgresqlconnection { get; set; }
-        /// <summary>AppointzaStay product database (lodging / property management).</summary>
-        public string appointzastay_postgresqlconnection { get; set; }
         public ApplicationEnvironmentAwsS3ConfigData awss3config { get; set; } = new ApplicationEnvironmentAwsS3ConfigData();
         public string jwtsecret { get; set; }
         public ApplicationEnvironmentRazorpayConfigData razorpay { get; set; } = new ApplicationEnvironmentRazorpayConfigData();

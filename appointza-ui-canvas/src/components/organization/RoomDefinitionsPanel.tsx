@@ -4,10 +4,9 @@ import { BedDouble, Loader2, MapPin, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
-import { OrganisationRoom, emptyRoom, normalizeOrganisationRoom, statusClassName, statusLabel } from "@/models/hospitality.model";
+import { OrganisationRoom, emptyRoom, normalizeOrganisationRoom } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
 import { RoomEditorForm } from "@/components/organization/RoomEditorForm";
 import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
@@ -101,7 +100,6 @@ export function RoomDefinitionsPanel({
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          next.set("section", "room-definitions");
           if (roomId && roomId > 0) next.set("roomId", String(roomId));
           else next.delete("roomId");
           return next;
@@ -303,15 +301,10 @@ export function RoomDefinitionsPanel({
                 onClick={() => openEdit(room)}
               >
                 <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <CardTitle className="text-lg">Room {room.room_number}</CardTitle>
-                      <p className="text-sm capitalize text-stone-500">
-                        {room.room_name || room.room_type} · Floor {room.floor_number}
-                      </p>
-                    </div>
-                    <Badge className={statusClassName(room.status)}>{statusLabel(room.status)}</Badge>
-                  </div>
+                  <CardTitle className="text-lg">Room {room.room_number}</CardTitle>
+                  <p className="text-sm capitalize text-stone-500">
+                    {room.room_name || room.room_type} · Floor {room.floor_number}
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-2 text-sm text-stone-600">
                   {room.guest?.name ?

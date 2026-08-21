@@ -23,12 +23,13 @@ export class EventService {
         return environment.baseurl + '/api/Event';
     }
 
-    async select(req: EventSelectReq) {
+    async select(req: EventSelectReq, skipAuthorization: boolean = false) {
         let postdata: ActionReq<EventSelectReq> = new ActionReq<EventSelectReq>();
         postdata.item = req;
         let resp = await this.http.post<ActionRes<Array<Event>>>(
-            this.baseurl + '/select', 
-            postdata
+            this.baseurl + '/select',
+            postdata,
+            skipAuthorization,
         );
         return (resp.item ?? []).map((event) => normalizeEventDatesFromApi(event));
     }

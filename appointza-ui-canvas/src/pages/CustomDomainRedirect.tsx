@@ -1,19 +1,28 @@
-import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { Loader2, AlertCircle, ShieldAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { OrganisationSiteTemplateView } from "@/components/template/OrganisationSiteTemplateView";
 import { environment } from "@/utils/environment";
-import { extractOrganisationCustomSubdomain } from "@/utils/orgPublicSiteUrl.util";
+import { extractOrganisationCustomSubdomain, isOrgLocTempId } from "@/utils/orgPublicSiteUrl.util";
+import {
+  readPublicSiteSubdomainResolve,
+  shouldForcePublicSiteRefresh,
+  writePublicSiteSubdomainResolve,
+} from "@/utils/publicSiteCache.util";
+import Index from "./Index";
+
+type SubdomainResolveResult = {
+  organisationlocationid?: number;
+  orgloctempid?: string;
+};
 
 const CustomDomainRedirect = () => {
-  const navigate = useNavigate();
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [isNotVerified, setIsNotVerified] = useState(false);
   const [locationId, setLocationId] = useState(0);
 
   useEffect(() => {
     const handleCustomDomainRedirect = async () => {
+      let redirecting = false;
       try {
         setIsLoading(true);
 
@@ -21,6 +30,19 @@ const CustomDomainRedirect = () => {
         if (!customUrlSlug) {
           setError("main-page");
           return;
+        }
+
+        if (!shouldForcePublicSiteRefresh()) {
+          const cachedResolve = readPublicSiteSubdomainResolve(customUrlSlug);
+          if (cachedResolve?.orgloctempid && isOrgLocTempId(cachedResolve.orgloctempid)) {
+            redirecting = true;
+            window.location.replace(`/template/${encodeURIComponent(cachedResolve.orgloctempid)}`);
+            return;
+          }
+          if (cachedResolve?.organisationlocationid) {
+            setLocationId(cachedResolve.organisationlocationid);
+            return;
+          }
         }
 
         const postJson = async (path: string, body: unknown) => {
@@ -49,11 +71,23 @@ const CustomDomainRedirect = () => {
         const payload = await postJson("/api/OrganisationSite/ResolveTemplateBySubdomain", {
           item: { customUrl: customUrlSlug },
         });
-        const resolved = payload?.item || payload;
+        const resolved = (payload?.item || payload) as SubdomainResolveResult | null;
+
+        writePublicSiteSubdomainResolve(customUrlSlug, {
+          orgloctempid: resolved?.orgloctempid,
+          organisationlocationid: resolved?.organisationlocationid,
+        });
+
+        const orgLocTempId = (resolved?.orgloctempid || "").trim();
+        if (orgLocTempId && isOrgLocTempId(orgLocTempId)) {
+          redirecting = true;
+          window.location.replace(`/template/${encodeURIComponent(orgLocTempId)}`);
+          return;
+        }
 
         const resolvedLocationId = resolved?.organisationlocationid || 0;
         if (!resolvedLocationId) {
-          throw new Error("Location not found for this custom URL");
+          throw new Error("No location found for this subdomain. Check organisationlocation.customurl.");
         }
 
         setLocationId(resolvedLocationId);
@@ -61,11 +95,13 @@ const CustomDomainRedirect = () => {
         console.error("Error processing custom domain:", resolveError);
         setError(resolveError instanceof Error ? resolveError.message : "Unknown error occurred");
       } finally {
-        setIsLoading(false);
+        if (!redirecting) {
+          setIsLoading(false);
+        }
       }
     };
 
-    handleCustomDomainRedirect();
+    void handleCustomDomainRedirect();
   }, []);
 
   if (isLoading) {
@@ -74,7 +110,7 @@ const CustomDomainRedirect = () => {
         <div className="text-center">
           <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Your Booking Page</h2>
-          <p className="text-gray-600">Please wait while we find your business location...</p>
+          <p className="text-gray-600">Resolving {extractOrganisationCustomSubdomain(window.location.host) || "subdomain"}…</p>
         </div>
       </div>
     );
@@ -84,71 +120,18 @@ const CustomDomainRedirect = () => {
     return <OrganisationSiteTemplateView locationId={locationId} />;
   }
 
+  if (error === "main-page") {
+    // Index stays in the main chunk (eager home route). Avoid a cancelled dynamic import.
+    return <Index />;
+  }
+
   if (error) {
-    if (error === "main-page") {
-      const Index = React.lazy(() => import("./Index"));
-      return (
-        <React.Suspense
-          fallback={
-            <div className="min-h-screen flex items-center justify-center bg-gray-50">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-            </div>
-          }
-        >
-          <Index />
-        </React.Suspense>
-      );
-    }
-
-    if (isNotVerified) {
-      return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-gray-100">
-          <div className="text-center max-w-lg mx-auto p-8 bg-white rounded-xl shadow-lg">
-            <ShieldAlert className="h-16 w-16 text-amber-500 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold text-gray-900 mb-3">Organization Not Verified</h2>
-            <p className="text-gray-600 mb-6 leading-relaxed">
-              This organization is currently not verified or the booking page has not been set up yet.
-              Please contact the administrator for assistance.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <a
-                href="mailto:support@appointza.com"
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-              >
-                Contact Support
-              </a>
-              <button
-                onClick={() => navigate("/")}
-                className="px-6 py-3 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors font-medium"
-              >
-                Go to Homepage
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center max-w-md mx-auto p-6">
           <AlertCircle className="h-12 w-12 text-red-500 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-900 mb-2">Organization Not Found</h2>
           <p className="text-gray-600 mb-4">{error}</p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <a
-              href="mailto:support@appointza.com"
-              className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              Contact Support
-            </a>
-            <button
-              onClick={() => navigate("/")}
-              className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition-colors"
-            >
-              Go to Homepage
-            </button>
-          </div>
         </div>
       </div>
     );

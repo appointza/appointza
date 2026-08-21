@@ -163,7 +163,8 @@ namespace appointza.Services
                 // Get all services for this organization
                 var allServices = await organisationServicesService.SelectTransaction(db, new OrganisationServicesSelectReq 
                 { 
-                    organisationid = req.organizationid 
+                    organisationid = req.organizationid,
+                    organisationlocationid = req.organisationlocationid,
                 });
 
                 // Calculate total based on selected services

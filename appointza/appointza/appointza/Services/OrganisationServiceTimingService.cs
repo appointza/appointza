@@ -318,6 +318,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                 new OrganisationServicesSelectReq
                 {
                     organisationid = organisationServiceTiming.organisationid,
+                    organisationlocationid = organisationServiceTiming.organisationlocationid,
                 });
 
             // 3. Get minimum service duration (default to 15 mins if no services)

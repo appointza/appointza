@@ -8,15 +8,12 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
-  Building2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { OrganizationSwitchService, OrganizationInfo } from "@/services/organizationSwitch.service";
 import UserBottomNav from "./UserBottomNav";
 import {
   resolveProfileImageId,
@@ -45,20 +42,24 @@ const SidebarLink = ({
   return (
     <Link
       to={to}
+      title={collapsed ? String(children) : undefined}
       className={cn(
-        "flex items-center gap-3 rounded-xl py-3 text-sm font-medium transition-all duration-200",
-        collapsed ? "justify-center px-2" : "px-5",
+        "flex items-center gap-3 rounded-xl py-2.5 text-sm font-medium transition-all duration-200",
+        collapsed ? "justify-center px-2" : "px-4",
         isActive
-          ? cn(
-              "bg-gradient-appointza font-semibold text-white shadow-md shadow-blue-500/20",
-              !collapsed && "border-l-4 border-transparent pl-4",
-            )
-          : cn("text-slate-600 hover:bg-blue-50 hover:text-blue-700", !collapsed && "border-l-4 border-transparent"),
-        collapsed && "border-l-0",
+          ? "bg-white/10 text-white"
+          : "text-zinc-400 hover:bg-white/5 hover:text-white",
       )}
       onClick={onClick}
     >
-      <Icon className="size-5 shrink-0 stroke-[2]" aria-hidden />
+      <Icon
+        className={cn(
+          "size-5 shrink-0",
+          isActive ? "text-white" : "text-zinc-500",
+        )}
+        strokeWidth={2}
+        aria-hidden
+      />
       {!collapsed && <span>{children}</span>}
     </Link>
   );
@@ -70,9 +71,6 @@ const UserSidebar = () => {
   const { user } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [imageVersion, setImageVersion] = useState(0);
-  const [availableOrganizations, setAvailableOrganizations] = useState<OrganizationInfo[]>([]);
-  const [selectedOrganization, setSelectedOrganization] = useState<string>("appointza");
-  const orgSwitchService = useMemo(() => new OrganizationSwitchService(), []);
 
   const profileImageId = useMemo(() => {
     void imageVersion;
@@ -82,11 +80,7 @@ const UserSidebar = () => {
   const { blobUrl: userImageUrl } = useAuthenticatedProfileImage(profileImageId, imageVersion);
 
   const hideSidebar =
-    location.pathname.startsWith("/momantza") ||
-    location.pathname.startsWith("/campusza") ||
-    location.pathname.startsWith("/crm");
-
-  const userMobile = user?.mobile || (user as { mobilenumber?: string })?.mobilenumber;
+    location.pathname.startsWith("/campusza");
 
   useEffect(() => {
     const stored = localStorage.getItem("user_sidebar_collapsed");
@@ -99,24 +93,6 @@ const UserSidebar = () => {
     localStorage.setItem("user_sidebar_collapsed", next ? "1" : "0");
     window.dispatchEvent(new CustomEvent("user-sidebar-toggle", { detail: { collapsed: next } }));
   };
-
-  useEffect(() => {
-    const loadOrganizations = async () => {
-      if (!userMobile) return;
-      try {
-        const orgs = await orgSwitchService.getAvailableOrganizations(userMobile);
-        setAvailableOrganizations(orgs);
-        const currentOrg = orgs.find((o) => o.isCurrent);
-        if (currentOrg) {
-          setSelectedOrganization(currentOrg.organizationId);
-        }
-        localStorage.setItem("selectedOrganization", currentOrg?.organizationId || "appointza");
-      } catch (error) {
-        console.error("Error loading organizations:", error);
-      }
-    };
-    loadOrganizations();
-  }, [userMobile, orgSwitchService]);
 
   useEffect(() => {
     const onContextUpdated = () => setImageVersion((v) => v + 1);
@@ -135,21 +111,22 @@ const UserSidebar = () => {
   return (
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-blue-50 bg-gradient-to-b from-white via-white to-blue-50/40 shadow-[6px_0_30px_-20px_rgba(36,76,170,0.28)] transition-all duration-200 lg:flex",
+        "fixed left-0 top-0 z-40 hidden h-screen flex-col border-r border-zinc-800 bg-black shadow-none transition-all duration-200 lg:flex",
         isCollapsed ? "w-16" : "w-64",
       )}
-      style={{
-        backgroundColor: "hsl(var(--app-sidebar))",
-        borderColor: "hsl(var(--app-sidebar-border))",
-      }}
     >
       {user ? (
-        <div className="shrink-0 border-b border-blue-50 bg-transparent px-3 py-4">
+        <div
+          className={cn(
+            "relative shrink-0 border-b border-zinc-800",
+            isCollapsed ? "flex flex-col items-center gap-2 p-4" : "px-5 py-5 pr-12",
+          )}
+        >
           {isCollapsed ? (
-            <div className="flex flex-col items-center gap-2">
-              <Avatar className="h-10 w-10 shrink-0 ring-2 ring-blue-500/20">
+            <>
+              <Avatar className="h-10 w-10 shrink-0 ring-2 ring-white/10">
                 <AvatarImage src={userImageUrl} alt={user.firstname || user.username || "User"} />
-                <AvatarFallback className="bg-blue-100 text-blue-700">
+                <AvatarFallback className="bg-zinc-800 text-zinc-200">
                   {(user.firstname || user.username || "U").charAt(0).toUpperCase()}
                 </AvatarFallback>
               </Avatar>
@@ -157,78 +134,49 @@ const UserSidebar = () => {
                 variant="ghost"
                 size="icon"
                 onClick={toggleCollapse}
-                className="h-8 w-8 shrink-0 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+                className="h-8 w-8 text-zinc-500 hover:bg-white/10 hover:text-white"
                 aria-label="Expand sidebar"
               >
                 <ChevronRight className="size-[18px]" />
               </Button>
-            </div>
+            </>
           ) : (
             <>
               <div className="flex items-start gap-3">
-                <Avatar className="h-10 w-10 shrink-0 ring-2 ring-blue-500/20">
+                <Avatar className="h-10 w-10 shrink-0 ring-2 ring-white/10">
                   <AvatarImage src={userImageUrl} alt={user.firstname || user.username || "User"} />
-                  <AvatarFallback className="bg-blue-100 text-blue-700">
+                  <AvatarFallback className="bg-zinc-800 text-zinc-200">
                     {(user.firstname || user.username || "U").charAt(0).toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1 pt-0.5">
-                  <p className="truncate text-sm font-medium text-gray-900">
+                  <p className="truncate text-sm font-medium text-white">
                     {user.firstname || user.username || "User"}
                   </p>
                   {user.email && (
-                    <p className="truncate text-xs text-gray-500">{user.email}</p>
+                    <p className="truncate text-xs text-zinc-400">{user.email}</p>
                   )}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={toggleCollapse}
-                  className="mt-0.5 h-8 w-8 shrink-0 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
-                  aria-label="Collapse sidebar"
-                >
-                  <ChevronLeft className="size-[18px]" />
-                </Button>
               </div>
-              {availableOrganizations.length > 1 && (
-                <div className="mt-3">
-                  <label className="mb-1 block text-xs font-medium text-gray-500">Organization</label>
-                  <Select
-                    value={selectedOrganization}
-                    onValueChange={(value) => {
-                      setSelectedOrganization(value);
-                      localStorage.setItem("selectedOrganization", value);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-full rounded-xl border-gray-200 text-xs focus:ring-orange-500/25">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                    {availableOrganizations.map((org) => (
-                      <SelectItem key={org.organizationId} value={org.organizationId}>
-                        <div className="flex items-center gap-2">
-                          <Building2 className="h-3 w-3" />
-                          <span>{org.organizationName}</span>
-                          {org.isCurrent && (
-                            <span className="text-xs text-orange-600">(Current)</span>
-                          )}
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                  </Select>
-                </div>
-              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggleCollapse}
+                className="absolute right-3 top-1/2 h-8 w-8 -translate-y-1/2 text-zinc-500 hover:bg-white/10 hover:text-white"
+                aria-label="Collapse sidebar"
+              >
+                <ChevronLeft className="size-[18px]" />
+              </Button>
             </>
           )}
         </div>
       ) : (
-        <div className="flex shrink-0 justify-center border-b border-gray-200 px-2 py-3">
+        <div className="relative flex shrink-0 justify-center border-b border-zinc-800 p-4">
           <Button
             variant="ghost"
             size="icon"
             onClick={toggleCollapse}
-            className="h-8 w-8 text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            className="h-8 w-8 text-zinc-500 hover:bg-white/10 hover:text-white"
             aria-label={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {isCollapsed ? <ChevronRight className="size-[18px]" /> : <ChevronLeft className="size-[18px]" />}
@@ -237,7 +185,7 @@ const UserSidebar = () => {
       )}
 
       <nav className="flex min-h-0 flex-1 flex-col">
-        <div className={cn("min-h-0 flex-1 space-y-1 overflow-y-auto", isCollapsed ? "px-2 py-4" : "px-4 py-6")}>
+        <div className={cn("min-h-0 flex-1 space-y-1 overflow-y-auto", isCollapsed ? "px-2 py-4" : "px-3 py-5")}>
           <SidebarLink to="/explore" icon={Home} collapsed={isCollapsed}>
             Home
           </SidebarLink>
@@ -252,7 +200,7 @@ const UserSidebar = () => {
           </SidebarLink>
         </div>
 
-        <div className="mt-auto shrink-0 border-t border-blue-50 bg-transparent p-4">
+        <div className="mt-auto shrink-0 border-t border-zinc-800 p-3">
           <SidebarLink to="/user/profile" icon={Settings} collapsed={isCollapsed}>
             Settings
           </SidebarLink>

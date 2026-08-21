@@ -7,6 +7,7 @@ namespace appointza.Services
     public class OrganisationRoomService
     {
         readonly IDbProvider dbprovider;
+        readonly RequestState requeststate;
 
         static readonly string[] ValidStatuses =
         [
@@ -14,9 +15,10 @@ namespace appointza.Services
             "cleaning", "maintenance", "blocked", "hold",
         ];
 
-        public OrganisationRoomService(IDbProvider dbprovider)
+        public OrganisationRoomService(IDbProvider dbprovider, RequestState requeststate)
         {
             this.dbprovider = dbprovider;
+            this.requeststate = requeststate;
         }
 
         public async Task<List<OrganisationRoom>> Select(OrganisationRoomSelectReq req)
@@ -171,6 +173,14 @@ namespace appointza.Services
             db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
             await db.ExecuteNonQuery(command);
             room.updated_at = now;
+
+            var previousStatus = (existing.status ?? "").Trim().ToLowerInvariant();
+            var nextStatus = (room.status ?? "").Trim().ToLowerInvariant();
+            if (!string.Equals(previousStatus, nextStatus, StringComparison.Ordinal))
+            {
+                await InsertStatusEventTransaction(db, room, previousStatus, nextStatus, source: "save", notes: "");
+            }
+
             return room;
         }
 
@@ -202,9 +212,13 @@ namespace appointza.Services
                 organisation_location_id = req.organisation_location_id,
             });
 
-            var asOf = DateOnly.FromDateTime(DateTime.UtcNow);
+            // Hotel board is day-based: show occupancy for "today" (or req.date), not a sticky DB flag.
+            var asOf = DateOnly.FromDateTime(DateTime.Now);
             if (!string.IsNullOrWhiteSpace(req.date) && DateOnly.TryParse(req.date, out var parsed))
                 asOf = parsed;
+
+            foreach (var room in rooms)
+                ApplyStatusBoardViewForDate(room, asOf);
 
             var counts = ValidStatuses.ToDictionary(s => s, _ => 0);
             foreach (var room in rooms)
@@ -212,6 +226,15 @@ namespace appointza.Services
                 var key = ValidStatuses.Contains(room.status) ? room.status : "available";
                 counts[key]++;
             }
+
+            var statusSummary = ValidStatuses
+                .Select(s => new OrganisationRoomStatusSummaryItem
+                {
+                    value = s,
+                    label = StatusDisplayLabel(s),
+                    count = counts[s],
+                })
+                .ToList();
 
             var floors = rooms
                 .GroupBy(r => r.floor_number)
@@ -224,16 +247,90 @@ namespace appointza.Services
                 })
                 .ToList();
 
+            OrganisationRoom? selectedRoom = null;
+            if (req.room_id is > 0)
+                selectedRoom = rooms.FirstOrDefault(r => r.id == req.room_id);
+
             return new OrganisationRoomStatusBoardRes
             {
                 organisation_id = req.organisation_id,
-                today = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
+                today = DateOnly.FromDateTime(DateTime.Now).ToString("yyyy-MM-dd"),
                 as_of = asOf.ToString("yyyy-MM-dd"),
                 selected_id = req.room_id,
+                selected_room = selectedRoom,
                 counts = counts,
+                status_summary = statusSummary,
                 floors = floors,
                 rooms = rooms,
             };
+        }
+
+        static string StatusDisplayLabel(string status) => status switch
+        {
+            "available" => "Available",
+            "reserved" => "Reserved",
+            "occupied" => "Occupied",
+            "checkout_pending" => "Check-out pending",
+            "cleaning" => "Cleaning",
+            "maintenance" => "Maintenance",
+            "blocked" => "Out of Service",
+            "hold" => "Hold",
+            _ => status,
+        };
+
+        /// <summary>
+        /// Derive board status for a calendar day from booking check-in/out.
+        /// A room booked only for 12 Aug must show Available on any other day.
+        /// </summary>
+        static void ApplyStatusBoardViewForDate(OrganisationRoom room, DateOnly asOf)
+        {
+            var stored = ValidStatuses.Contains(room.status) ? room.status : "available";
+
+            // Manual ops overrides stay as-is (not date occupancy).
+            if (stored is "maintenance" or "blocked" or "cleaning" or "hold")
+                return;
+
+            if (!TryGetStayDates(room, out var checkIn, out var checkOut))
+            {
+                // Sticky reserved/occupied without valid dates → treat as free for the board day.
+                if (stored is "reserved" or "occupied" or "checkout_pending")
+                {
+                    room.status = "available";
+                    room.guest = null;
+                }
+                return;
+            }
+
+            // Stay nights: check_in <= day < check_out
+            if (asOf >= checkIn && asOf < checkOut)
+            {
+                room.status = stored is "occupied" or "checkout_pending" ? stored : "reserved";
+                return;
+            }
+
+            // Checkout morning
+            if (asOf == checkOut && stored == "checkout_pending")
+            {
+                room.status = "checkout_pending";
+                return;
+            }
+
+            // Past or future stay relative to asOf — free today
+            room.status = "available";
+            room.guest = null;
+        }
+
+        static bool TryGetStayDates(OrganisationRoom room, out DateOnly checkIn, out DateOnly checkOut)
+        {
+            checkIn = default;
+            checkOut = default;
+            if (room.booking == null)
+                return false;
+            if (!DateOnly.TryParse(room.booking.check_in, out checkIn))
+                return false;
+            if (!DateOnly.TryParse(room.booking.check_out, out checkOut))
+                return false;
+            return checkOut > checkIn;
         }
 
         public async Task<bool> UpdateStatus(OrganisationRoomStatusUpdateReq req)
@@ -244,15 +341,30 @@ namespace appointza.Services
 
             using IDb db = await dbprovider.GetDb();
             await db.Connect();
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
 
             var room = await GetByIdTransaction(db, req.id, req.organisation_id)
                 ?? throw new InvalidOperationException("Room not found.");
 
+            var previousStatus = (room.status ?? "").Trim().ToLowerInvariant();
             room.status = status;
             if (status is not "checkout_pending" and not "cleaning")
                 room.cleaning_assignment = null;
 
-            await UpdateTransaction(db, room);
+            await UpdateTransactionWithoutStatusLog(db, room);
+
+            if (!string.Equals(previousStatus, status, StringComparison.Ordinal))
+            {
+                var source = string.IsNullOrWhiteSpace(req.source) ? "api" : req.source.Trim();
+                await InsertStatusEventTransaction(
+                    db,
+                    room,
+                    previousStatus,
+                    status,
+                    source,
+                    req.notes ?? "");
+            }
+
             return true;
         }
 
@@ -262,6 +374,7 @@ namespace appointza.Services
                 id = req.id,
                 organisation_id = req.organisation_id,
                 status = "checkout_pending",
+                source = "checkout",
             });
 
         public async Task<bool> MarkClean(OrganisationRoomIdReq req) =>
@@ -270,7 +383,204 @@ namespace appointza.Services
                 id = req.id,
                 organisation_id = req.organisation_id,
                 status = "available",
+                source = "mark_clean",
             });
+
+        public async Task<List<OrganisationRoomStatusEvent>> SelectStatusEvents(OrganisationRoomStatusEventSelectReq req)
+        {
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
+
+            if (req.organisation_id <= 0 || req.organisation_room_id <= 0)
+                return [];
+
+            var limit = req.limit <= 0 ? 50 : Math.Min(req.limit, 200);
+            var query = @"
+                SELECT id, organisation_id, organisation_location_id, organisation_room_id, booking_id,
+                       from_status, to_status, event_type, changed_by_user_id, changed_by_name,
+                       source, notes, occurred_at, created_at
+                FROM organisation_room_status_events
+                WHERE organisation_id = @organisation_id
+                  AND organisation_room_id = @organisation_room_id";
+
+            if (!string.IsNullOrWhiteSpace(req.booking_id))
+                query += " AND booking_id = @booking_id";
+
+            query += " ORDER BY occurred_at DESC, id DESC LIMIT @limit";
+
+            DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = req.organisation_id;
+            db.AddParameter(command, "organisation_room_id", DbTypes.Types.Long).Value = req.organisation_room_id;
+            db.AddParameter(command, "limit", DbTypes.Types.Integer).Value = limit;
+            if (!string.IsNullOrWhiteSpace(req.booking_id))
+                db.AddParameter(command, "booking_id", DbTypes.Types.String).Value = req.booking_id.Trim();
+
+            var result = new List<OrganisationRoomStatusEvent>();
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                while (await reader.ReadAsync())
+                {
+                    result.Add(MapStatusEvent(reader));
+                }
+            }
+            return result;
+        }
+
+        /// <summary>Update room row without writing a status event (caller logs explicitly).</summary>
+        async Task UpdateTransactionWithoutStatusLog(IDb db, OrganisationRoom room)
+        {
+            var existing = await GetByIdTransaction(db, room.id, room.organisation_id)
+                ?? throw new InvalidOperationException("Room not found.");
+
+            room.guest ??= existing.guest;
+            room.booking ??= existing.booking;
+            room.payment ??= existing.payment;
+            room.cleaning_assignment ??= existing.cleaning_assignment;
+            room.created_at = existing.created_at;
+            EnsureDefaults(room);
+
+            var now = DateTime.UtcNow;
+            const string update = @"
+                UPDATE organisation_rooms
+                SET organisation_location_id = @organisation_location_id,
+                    room_number = @room_number,
+                    room_name = @room_name,
+                    room_type = @room_type,
+                    floor_number = @floor_number,
+                    building_wing = @building_wing,
+                    status = @status,
+                    capacity = @capacity::jsonb,
+                    pricing = @pricing::jsonb,
+                    amenities = @amenities::jsonb,
+                    main_photo = @main_photo,
+                    gallery_photos = @gallery_photos::jsonb,
+                    booking_rules = @booking_rules::jsonb,
+                    guest = @guest::jsonb,
+                    booking = @booking::jsonb,
+                    payment = @payment::jsonb,
+                    cleaning_assignment = @cleaning_assignment::jsonb,
+                    updated_at = @updated_at
+                WHERE id = @id AND organisation_id = @organisation_id AND isactive = TRUE";
+
+            DbCommand command = db.GetCommand(update);
+            BindRoomParameters(db, command, room);
+            db.AddParameter(command, "id", DbTypes.Types.Long).Value = room.id;
+            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = now;
+            await db.ExecuteNonQuery(command);
+            room.updated_at = now;
+        }
+
+        async Task InsertStatusEventTransaction(
+            IDb db,
+            OrganisationRoom room,
+            string fromStatus,
+            string toStatus,
+            string source,
+            string notes)
+        {
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
+
+            var eventType = MapEventType(toStatus, source);
+            var userId = ResolveActorUserId();
+            var userName = ResolveActorName();
+            var now = DateTime.UtcNow;
+
+            const string insert = @"
+                INSERT INTO organisation_room_status_events (
+                    organisation_id, organisation_location_id, organisation_room_id, booking_id,
+                    from_status, to_status, event_type, changed_by_user_id, changed_by_name,
+                    source, notes, occurred_at, created_at
+                ) VALUES (
+                    @organisation_id, @organisation_location_id, @organisation_room_id, @booking_id,
+                    @from_status, @to_status, @event_type, @changed_by_user_id, @changed_by_name,
+                    @source, @notes, @occurred_at, @created_at
+                )";
+
+            DbCommand command = db.GetCommand(insert);
+            db.AddParameter(command, "organisation_id", DbTypes.Types.Long).Value = room.organisation_id;
+            db.AddParameter(command, "organisation_location_id", DbTypes.Types.Long).Value =
+                room.organisation_location_id > 0 ? room.organisation_location_id : DBNull.Value;
+            db.AddParameter(command, "organisation_room_id", DbTypes.Types.Long).Value = room.id;
+            db.AddParameter(command, "booking_id", DbTypes.Types.String).Value =
+                room.booking?.booking_id?.Trim() ?? "";
+            db.AddParameter(command, "from_status", DbTypes.Types.String).Value = fromStatus ?? "";
+            db.AddParameter(command, "to_status", DbTypes.Types.String).Value = toStatus ?? "";
+            db.AddParameter(command, "event_type", DbTypes.Types.String).Value = eventType;
+            db.AddParameter(command, "changed_by_user_id", DbTypes.Types.Long).Value =
+                userId > 0 ? userId : DBNull.Value;
+            db.AddParameter(command, "changed_by_name", DbTypes.Types.String).Value = userName;
+            db.AddParameter(command, "source", DbTypes.Types.String).Value = string.IsNullOrWhiteSpace(source) ? "api" : source;
+            db.AddParameter(command, "notes", DbTypes.Types.String).Value = notes ?? "";
+            db.AddParameter(command, "occurred_at", DbTypes.Types.DateTime).Value = now;
+            db.AddParameter(command, "created_at", DbTypes.Types.DateTime).Value = now;
+            await db.ExecuteNonQuery(command);
+        }
+
+        static string MapEventType(string toStatus, string source)
+        {
+            var src = (source ?? "").Trim().ToLowerInvariant();
+            if (src is "checkout" or "mark_clean")
+                return src == "checkout" ? "checkout" : "clean";
+
+            return (toStatus ?? "").Trim().ToLowerInvariant() switch
+            {
+                "reserved" => "booked",
+                "occupied" => "checkin",
+                "checkout_pending" => "checkout",
+                "cleaning" => "cleaning",
+                "available" => "available",
+                "hold" => "hold",
+                "maintenance" => "maintenance",
+                "blocked" => "blocked",
+                _ => "manual",
+            };
+        }
+
+        long ResolveActorUserId()
+        {
+            try
+            {
+                var ctx = requeststate.usercontext;
+                if (ctx == null) return 0;
+                if (ctx.id > 0) return ctx.id;
+                if (ctx.userid > 0) return ctx.userid;
+            }
+            catch { /* guest/unauthenticated */ }
+            return 0;
+        }
+
+        string ResolveActorName()
+        {
+            try
+            {
+                var name = requeststate.usercontext?.username?.Trim();
+                if (!string.IsNullOrWhiteSpace(name)) return name!;
+            }
+            catch { /* guest/unauthenticated */ }
+            return "System";
+        }
+
+        static OrganisationRoomStatusEvent MapStatusEvent(DbDataReader reader)
+        {
+            return new OrganisationRoomStatusEvent
+            {
+                id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]),
+                organisation_id = reader["organisation_id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisation_id"]),
+                organisation_location_id = reader["organisation_location_id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisation_location_id"]),
+                organisation_room_id = reader["organisation_room_id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisation_room_id"]),
+                booking_id = reader["booking_id"]?.ToString() ?? "",
+                from_status = reader["from_status"]?.ToString() ?? "",
+                to_status = reader["to_status"]?.ToString() ?? "",
+                event_type = reader["event_type"]?.ToString() ?? "",
+                changed_by_user_id = reader["changed_by_user_id"] == DBNull.Value ? null : Convert.ToInt64(reader["changed_by_user_id"]),
+                changed_by_name = reader["changed_by_name"]?.ToString() ?? "",
+                source = reader["source"]?.ToString() ?? "api",
+                notes = reader["notes"]?.ToString() ?? "",
+                occurred_at = reader["occurred_at"] == DBNull.Value ? DateTime.UtcNow : Convert.ToDateTime(reader["occurred_at"]),
+                created_at = reader["created_at"] == DBNull.Value ? DateTime.UtcNow : Convert.ToDateTime(reader["created_at"]),
+            };
+        }
 
         static void EnsureDefaults(OrganisationRoom room)
         {

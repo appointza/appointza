@@ -57,7 +57,10 @@ export function AssetPickerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto rounded-2xl">
+      <DialogContent
+        className="z-[110] max-h-[85vh] max-w-2xl overflow-y-auto rounded-2xl"
+        overlayClassName="z-[110]"
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

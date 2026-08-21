@@ -3,14 +3,9 @@ import {
   CalendarDays, 
   Home, 
   User,
-  Calendar,
-  Building2
+  Calendar
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useAuth } from "@/contexts/AuthContext";
-import { useState, useEffect, useMemo } from "react";
-import { OrganizationSwitchService, OrganizationInfo } from "@/services/organizationSwitch.service";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface NavItem {
   to: string;
@@ -20,41 +15,13 @@ interface NavItem {
 
 const UserBottomNav = () => {
   const location = useLocation();
-  const { user } = useAuth();
-  const [availableOrganizations, setAvailableOrganizations] = useState<OrganizationInfo[]>([]);
-  const [selectedOrganization, setSelectedOrganization] = useState<string>("appointza");
-  const orgSwitchService = useMemo(() => new OrganizationSwitchService(), []);
 
-  // Hide bottom nav for Momantza, Campusza, and CRM routes
-  const hideNav = location.pathname.startsWith("/momantza") || 
-                  location.pathname.startsWith("/campusza") ||
-                  location.pathname.startsWith("/crm");
+  // Campusza has its own product navigation.
+  const hideNav = location.pathname.startsWith("/campusza");
   
   if (hideNav) {
     return null;
   }
-
-  // Load available organizations
-  useEffect(() => {
-    const loadOrganizations = async () => {
-      if (!user?.mobilenumber) return;
-      
-      try {
-        const orgs = await orgSwitchService.getAvailableOrganizations(user.mobilenumber);
-        setAvailableOrganizations(orgs);
-        
-        const currentOrg = orgs.find(o => o.isCurrent);
-        if (currentOrg) {
-          setSelectedOrganization(currentOrg.organizationId);
-          localStorage.setItem('selectedOrganization', currentOrg.organizationId);
-        }
-      } catch (error) {
-        console.error("Error loading organizations:", error);
-      }
-    };
-
-    loadOrganizations();
-  }, [user?.mobilenumber, orgSwitchService]);
 
   const navItems: NavItem[] = [
     {
@@ -80,33 +47,7 @@ const UserBottomNav = () => {
   ];
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-blue-50 bg-white/95 shadow-[0_-8px_30px_-18px_rgba(36,76,170,0.28)] backdrop-blur-xl" style={{ paddingBottom: 'max(var(--safe-area-inset-bottom), env(safe-area-inset-bottom, 0px))' }}>
-      {/* Organization Switcher for Mobile */}
-      {availableOrganizations.length > 1 && (
-        <div className="px-2 py-1 border-b border-gray-200">
-          <Select 
-            value={selectedOrganization} 
-            onValueChange={(value) => {
-              setSelectedOrganization(value);
-              localStorage.setItem('selectedOrganization', value);
-            }}
-          >
-            <SelectTrigger className="w-full h-8 text-xs">
-              <Building2 className="h-3 w-3 mr-1" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {availableOrganizations.map((org) => (
-                <SelectItem key={org.organizationId} value={org.organizationId}>
-                  {org.organizationName}
-                  {org.isCurrent && " (Current)"}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-      
+    <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-blue-50 bg-white shadow-[0_-8px_30px_-18px_rgba(36,76,170,0.28)] md:bg-white/95 md:backdrop-blur-xl" style={{ paddingBottom: 'max(var(--safe-area-inset-bottom), env(safe-area-inset-bottom, 0px))' }}>
       <div className="flex items-center justify-around h-16">
         {navItems.map((item) => {
           const Icon = item.icon;

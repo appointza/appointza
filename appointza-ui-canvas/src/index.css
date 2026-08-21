@@ -127,6 +127,13 @@
       radial-gradient(circle at 100% 100%, rgba(123, 77, 255, 0.08), transparent 32rem);
     background-attachment: fixed;
   }
+
+  /* Fixed backgrounds + large gradients are expensive on mobile GPUs / touch scroll. */
+  @media (max-width: 768px), (hover: none) {
+    body {
+      background-attachment: scroll;
+    }
+  }
   
   /* Prevent horizontal overflow on all elements */
   * {
@@ -241,8 +248,7 @@
   }
 
   .org-card {
-    @apply rounded-2xl border border-white/80 bg-white;
-    box-shadow: var(--app-shadow);
+    @apply rounded-xl border border-stone-200 bg-white shadow-none;
   }
 
   .org-panel {
@@ -254,8 +260,7 @@
   }
 
   .org-loading {
-    @apply flex min-h-[16rem] items-center justify-center rounded-2xl border border-white/80 bg-white;
-    box-shadow: var(--app-shadow);
+    @apply flex min-h-[16rem] items-center justify-center rounded-xl border border-stone-200 bg-white shadow-none;
   }
 
   .org-tabs-underline {
@@ -273,6 +278,11 @@
     background-image:
       radial-gradient(circle at 0% 0%, rgba(47, 128, 237, 0.07), transparent 24rem),
       radial-gradient(circle at 100% 100%, rgba(123, 77, 255, 0.07), transparent 28rem);
+  }
+
+  .org-flat-shell {
+    background-color: #f8fafc;
+    background-image: none;
   }
 
   .app-surface-card {

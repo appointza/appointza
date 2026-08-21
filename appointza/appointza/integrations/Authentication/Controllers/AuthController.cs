@@ -4,7 +4,6 @@ using appointza.Authentication.Models;
 using appointza.Authentication.Utils;
 using appointza.Utils;
 using appointza.Models.Campusza;
-using appointza.Models.AppointzaStay;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
 
@@ -17,20 +16,17 @@ namespace appointza.Authentication.Controllers
         private readonly ILogger<AuthController> logger;
         private readonly AuthService authService;
         private readonly CampuszaAuthService campuszaAuthService;
-        private readonly AppointzaStayAuthService appointzaStayAuthService;
         private readonly RequestState requestState;
 
         public AuthController(
             ILogger<AuthController> logger,
             AuthService authService,
             CampuszaAuthService campuszaAuthService,
-            AppointzaStayAuthService appointzaStayAuthService,
             RequestState requestState)
         {
             this.logger = logger;
             this.authService = authService;
             this.campuszaAuthService = campuszaAuthService;
-            this.appointzaStayAuthService = appointzaStayAuthService;
             this.requestState = requestState;
         }
 
@@ -128,50 +124,6 @@ namespace appointza.Authentication.Controllers
             {
                 logger.LogError(ex, "Error during Campusza profile update");
                 return BadRequest(new { error = ex.Message, message = "Profile update failed" });
-            }
-            return Ok(result);
-        }
-
-        /// <summary>AppointzaStay email/phone + password login — product auth via the central Auth API.</summary>
-        [HttpPost("AppointzaStayLogin")]
-        public ActionResult<ActionRes<AppointzaStayAuthRes>> AppointzaStayLogin(ActionReq<AppointzaStayLoginReq> req)
-        {
-            ActionRes<AppointzaStayAuthRes> result = new ActionRes<AppointzaStayAuthRes>();
-            try
-            {
-                result.item = appointzaStayAuthService.Login(req.item);
-            }
-            catch (AppException ex)
-            {
-                logger.LogWarning(ex, "AppointzaStay login rejected");
-                return BadRequest(new { error = ex.Message, message = ex.Message, key = ex.code.ToString() });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error during AppointzaStay login");
-                return BadRequest(new { error = ex.Message, message = "Login failed" });
-            }
-            return Ok(result);
-        }
-
-        /// <summary>AppointzaStay registration — organisation owner or guest.</summary>
-        [HttpPost("AppointzaStayRegister")]
-        public ActionResult<ActionRes<AppointzaStayAuthRes>> AppointzaStayRegister(ActionReq<AppointzaStaySignupReq> req)
-        {
-            ActionRes<AppointzaStayAuthRes> result = new ActionRes<AppointzaStayAuthRes>();
-            try
-            {
-                result.item = appointzaStayAuthService.Register(req.item);
-            }
-            catch (AppException ex)
-            {
-                logger.LogWarning(ex, "AppointzaStay registration rejected");
-                return BadRequest(new { error = ex.Message, message = ex.Message, key = ex.code.ToString() });
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error during AppointzaStay registration");
-                return BadRequest(new { error = ex.Message, message = "Registration failed" });
             }
             return Ok(result);
         }

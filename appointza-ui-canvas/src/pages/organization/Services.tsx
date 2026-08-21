@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -57,6 +57,7 @@ import { useOrganizationServices } from "@/hooks/useOrganizationServices";
 import { OrganisationServices } from "@/models/organisationservices.model";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGlobalId } from "@/contexts/GlobalIdContext";
+import { useOrganisationLocationScope } from "@/hooks/useOrganisationLocationScope";
 import { useEvents } from "@/hooks/useEvents";
 import { useEventBookingForm } from "@/hooks/useEventBookingForm";
 import { EventFormFieldsEditor } from "@/components/organization/EventFormFieldsEditor";
@@ -67,17 +68,14 @@ import {
   ComboEditorFields,
   ServiceEditorFields,
 } from "@/components/organization/ServiceEditorFields";
+import { RoomDefinitionsPanel } from "@/components/organization/RoomDefinitionsPanel";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
 import type { EventBookingFormField } from "@/utils/eventBookingFormFields.util";
 import { ReferenceValue } from "@/models/referencevalue.model";
 import { Event } from "@/models/event.model";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
-import {
-  OrganisationLocation,
-  OrganisationLocationSelectReq,
-} from "@/models/organisationlocation.model";
 import { FilesService } from "@/services/files.service";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import { getServicePriceSummary } from "@/utils/servicePricing.util";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
@@ -212,6 +210,7 @@ function parseTimeToMinutes(value: string): number | null {
 
 const OrganizationServices = () => {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { toast } = useToast();
   const {
     isComplete,
@@ -223,13 +222,61 @@ const OrganizationServices = () => {
     refetch: refetchOnboarding,
   } = useOnboardingStatus();
   const { user, isAuthenticated, userType } = useAuth();
-  const { id: globalLocationId } = useGlobalId();
-  const organizationId = user?.organisationid || 1; // Default to 1 for demo
-  const [activeTab, setActiveTab] = useState<"services" | "events">("services");
+  const { id: globalLocationId, setId: setGlobalLocationId } = useGlobalId();
+  const organizationId = user?.organisationid ?? 0;
+  const { locationId: scopedLocationId, locationLabel: scopedLocationLabel } =
+    useOrganisationLocationScope(organizationId);
+  type CatalogTab = "services" | "events" | "rooms";
+  const kindFromUrl = searchParams.get("kind");
+  const [activeTab, setActiveTabState] = useState<CatalogTab>(() => {
+    if (kindFromUrl === "events" || kindFromUrl === "rooms" || kindFromUrl === "services") {
+      return kindFromUrl;
+    }
+    return "services";
+  });
+
+  const setActiveTab = (tab: CatalogTab) => {
+    setActiveTabState(tab);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("kind", tab);
+        if (tab !== "rooms") next.delete("roomId");
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
+  useEffect(() => {
+    if (kindFromUrl === "events" || kindFromUrl === "rooms" || kindFromUrl === "services") {
+      setActiveTabState(kindFromUrl);
+      return;
+    }
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (!next.get("kind")) next.set("kind", "services");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [kindFromUrl, setSearchParams]);
+
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
-  const locationService = useMemo(() => new OrganisationLocationService(), []);
+  const { data: locationsData } = useOrganisationLocations({
+    organisationId: organizationId,
+    staffLocationId: user?.locationid || 0,
+    enabled: !!organizationId,
+  });
+  const locations = locationsData ?? [];
   const filesService = useMemo(() => new FilesService(), []);
+
+  useEffect(() => {
+    if (locations.length > 0 && selectedLocationId === 0) {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [locations, selectedLocationId]);
 
   const organisationDisplayName = useMemo(() => {
     try {
@@ -250,6 +297,7 @@ const OrganizationServices = () => {
 
   // Events state - use globalLocationId from GlobalIdContext
   const eventLocationId = globalLocationId ? Number(globalLocationId) : undefined;
+  const serviceLocationId = eventLocationId;
   const {
     events,
     isLoading: isLoadingEvents,
@@ -296,27 +344,6 @@ const OrganizationServices = () => {
     | null
   >(null);
 
-  // Fetch locations
-  useEffect(() => {
-    const fetchLocations = async () => {
-      if (!organizationId) return;
-
-      try {
-        const req = new OrganisationLocationSelectReq();
-        req.organisationid = organizationId;
-        const response = await locationService.select(req);
-        if (response && response.length > 0) {
-          setLocations(response);
-          setSelectedLocationId(response[0].id);
-        }
-      } catch (error) {
-        console.error("Error fetching locations:", error);
-      }
-    };
-
-    fetchLocations();
-  }, [organizationId, locationService]);
-
   console.log("OrganizationServices: isAuthenticated =", isAuthenticated);
   console.log("OrganizationServices: userType =", userType);
   console.log("OrganizationServices: user =", user);
@@ -331,7 +358,7 @@ const OrganizationServices = () => {
     isCreating,
     isUpdating,
     isDeleting,
-  } = useOrganizationServices(organizationId);
+  } = useOrganizationServices(organizationId, serviceLocationId);
 
   const organizationServiceCardImageUrls = useMemo(() => {
     const map: Record<number, string | undefined> = {};
@@ -354,14 +381,16 @@ const OrganizationServices = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
   const [showComboForm, setShowComboForm] = useState(false);
+  const [serviceFormError, setServiceFormError] = useState("");
 
   const openServiceForm = (
     item?: OrganisationServices,
     isCombo: boolean = false
   ) => {
+    setServiceFormError("");
     const newService = item ? { ...item } : new OrganisationServices();
     // Load existing images from attributes
-    setServiceImages((item as any)?.attributes?.ImageIds || []);
+    setServiceImages(item?.attributes?.ImageIds || []);
 
     // Initialize weekday_price and weekend_price if not set
     if (!newService.weekday_price || newService.weekday_price === 0) {
@@ -406,14 +435,17 @@ const OrganizationServices = () => {
         setShowAddForm(false);
         setShowComboForm(false);
       }
-    } else if (isComboService) {
-      setShowComboForm(true);
-      setShowAddForm(false);
-      setShowEditForm(false);
     } else {
-      setShowAddForm(true);
-      setShowEditForm(false);
-      setShowComboForm(false);
+      setEditingService(null);
+      if (isComboService) {
+        setShowComboForm(true);
+        setShowAddForm(false);
+        setShowEditForm(false);
+      } else {
+        setShowAddForm(true);
+        setShowEditForm(false);
+        setShowComboForm(false);
+      }
     }
   };
 
@@ -458,31 +490,24 @@ const OrganizationServices = () => {
       }
     } catch (error) {
       console.error("Error saving service:", error);
-      toast({
-        title: "Error",
-        description: "Failed to save service. Please try again.",
-        variant: "destructive",
-      });
+      setServiceFormError("Failed to save service. Please try again.");
     }
   };
 
+  const failServiceValidation = (message: string): boolean => {
+    setServiceFormError(message);
+    return false;
+  };
+
   const validateService = (): boolean => {
+    setServiceFormError("");
+
     if (!service.Servicename.trim()) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a service name",
-        variant: "destructive",
-      });
-      return false;
+      return failServiceValidation("Please enter a service name");
     }
 
     if (service.Iscombo && selectedComboServices.length < 2) {
-      toast({
-        title: "Validation Error",
-        description: "A combo must include at least 2 services",
-        variant: "destructive",
-      });
-      return false;
+      return failServiceValidation("A combo must include at least 2 services");
     }
 
     // For combos, price is calculated from selected services, so skip price validation
@@ -491,30 +516,15 @@ const OrganizationServices = () => {
       if (!service.is_price_different) {
         // Same price for all days
         if (service.prize <= 0) {
-          toast({
-            title: "Validation Error",
-            description: "Price must be greater than 0",
-            variant: "destructive",
-          });
-          return false;
+          return failServiceValidation("Price must be greater than 0");
         }
       } else {
         // Different prices for weekdays/weekends
         if (!service.weekday_price || service.weekday_price <= 0) {
-          toast({
-            title: "Validation Error",
-            description: "Weekday price must be greater than 0",
-            variant: "destructive",
-          });
-          return false;
+          return failServiceValidation("Weekday price must be greater than 0");
         }
         if (!service.weekend_price || service.weekend_price <= 0) {
-          toast({
-            title: "Validation Error",
-            description: "Weekend price must be greater than 0",
-            variant: "destructive",
-          });
-          return false;
+          return failServiceValidation("Weekend price must be greater than 0");
         }
       }
     }
@@ -522,31 +532,16 @@ const OrganizationServices = () => {
     // Offer price is optional. If provided, it must be > 0.
     // Offer price only when same price all days
     if (service.is_price_different && service.offerprize > 0) {
-      toast({
-        title: "Validation Error",
-        description: "Offer price is only available when same price applies all week",
-        variant: "destructive",
-      });
-      return false;
+      return failServiceValidation("Offer price is only available when same price applies all week");
     }
 
     if (service.offerprize && service.offerprize < 0) {
-      toast({
-        title: "Validation Error",
-        description: "Offer price must be 0 or greater",
-        variant: "destructive",
-      });
-      return false;
+      return failServiceValidation("Offer price must be 0 or greater");
     }
 
     // Validate duration
     if (!service.timetaken || service.timetaken <= 0) {
-      toast({
-        title: "Validation Error",
-        description: "Please enter a valid duration in minutes",
-        variant: "destructive",
-      });
-      return false;
+      return failServiceValidation("Please enter a valid duration in minutes");
     }
 
     return true;
@@ -555,6 +550,7 @@ const OrganizationServices = () => {
   const prepareServiceForSave = (): OrganisationServices => {
     const serviceToSave = { ...service };
     serviceToSave.organisationid = organizationId;
+    serviceToSave.organisationlocationid = serviceLocationId || selectedLocationId || 0;
     serviceToSave.isactive = true;
     serviceToSave.attributes = {
       ...(serviceToSave.attributes || {}),
@@ -619,12 +615,10 @@ const OrganizationServices = () => {
   const handleComboSelection = (items: OrganisationServices[]) => {
     setSelectedComboServices(items);
 
-    // Calculate total price for the combo
     const totalPrice = items.reduce((sum, item) => sum + item.prize, 0);
     setService((prev) => ({
       ...prev,
       prize: totalPrice,
-      offerprize: 0, // Offer is optional
     }));
   };
 
@@ -683,6 +677,7 @@ const OrganizationServices = () => {
     setService(new OrganisationServices());
     setSelectedComboServices([]);
     setServiceImages([]);
+    setServiceFormError("");
   };
 
   const openEventBookingForm = async (eventItem: Event) => {
@@ -977,7 +972,7 @@ const OrganizationServices = () => {
       "OrganizationServices: Not authenticated, showing auth required message"
     );
     return (
-      <div className="flex min-h-screen items-center justify-center bg-appointza-cream">
+      <div className="flex min-h-screen items-center justify-center bg-white">
         <div className="text-center">
           <h2 className="text-2xl font-bold mb-4">Authentication Required</h2>
           <p className="text-stone-600">Please log in to access this page.</p>
@@ -1018,30 +1013,40 @@ const OrganizationServices = () => {
         </div>
       )}
 
-      {showServicesEventsGuide && (
+      {showServicesEventsGuide && activeTab !== "rooms" && (
         <ServicesEventsExplainer
-          activeTab={activeTab}
-          onTabChange={setActiveTab}
+          activeTab={activeTab === "events" ? "events" : "services"}
+          onTabChange={(tab) => setActiveTab(tab)}
           inOnboarding={!isComplete}
         />
       )}
 
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "services" | "events")} className="w-full">
+        <Tabs
+          value={activeTab}
+          onValueChange={(v) => setActiveTab(v as "services" | "events" | "rooms")}
+          className="w-full"
+        >
           {/* Tabs + primary action in one row */}
           <div className="org-panel-section px-6 md:px-8 py-4 sm:py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <TabsList className="flex w-full max-w-full overflow-hidden rounded-2xl border border-stone-200 bg-white p-1 shadow-sm sm:w-auto">
+              <TabsList className="flex w-full max-w-full overflow-x-auto rounded-xl border border-stone-200 bg-white p-1 shadow-none sm:w-auto">
                 <TabsTrigger
                   value="services"
-                  className="flex-1 rounded-xl px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-gradient-coral data-[state=active]:text-white"
+                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
                 >
                   Services
                 </TabsTrigger>
                 <TabsTrigger
                   value="events"
-                  className="flex-1 rounded-xl px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-gradient-coral data-[state=active]:text-white"
+                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
                 >
                   Events
+                </TabsTrigger>
+                <TabsTrigger
+                  value="rooms"
+                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+                >
+                  Rooms
                 </TabsTrigger>
               </TabsList>
 
@@ -1051,15 +1056,8 @@ const OrganizationServices = () => {
                   {services.length >= 2 && !showAddForm && !showEditForm && !showComboForm && (
                     <Button
                       variant="outline"
-                      onClick={() => {
-                        setShowComboForm(true);
-                        setShowAddForm(false);
-                        setShowEditForm(false);
-                        const newService = new OrganisationServices();
-                        newService.Iscombo = true;
-                        setService(newService);
-                      }}
-                      className="h-11 rounded-2xl border-stone-100 bg-white px-5 font-medium text-appointza-navy hover:bg-appointza-cream/60 shadow-sm"
+                      onClick={() => openServiceForm(undefined, true)}
+                      className="h-11 rounded-xl border-stone-200 bg-white px-5 font-medium text-appointza-navy shadow-none hover:bg-stone-50"
                     >
                       <Layers className="mr-2 h-4 w-4" />
                       Create Combo
@@ -1073,17 +1071,17 @@ const OrganizationServices = () => {
                         setShowComboForm(false);
                         setService(new OrganisationServices());
                       }}
-                      className="h-11 rounded-2xl bg-gradient-coral px-6 font-medium text-white hover:opacity-95 shadow-sm"
+                      className="h-11 rounded-xl bg-blue-600 px-6 font-medium text-white shadow-none hover:bg-blue-700"
                     >
                       <Plus className="mr-2 h-4 w-4" />
                       New Service
                     </Button>
                   )}
                 </div>
-              ) : !showAddEventForm && !showEditEventForm && !showEventBookingPanel ? (
+              ) : activeTab === "events" && !showAddEventForm && !showEditEventForm && !showEventBookingPanel ? (
                 <Button
                   onClick={() => openEventForm()}
-                  className="h-11 rounded-2xl bg-gradient-coral px-6 font-medium text-white hover:opacity-95 shadow-sm"
+                  className="h-11 rounded-xl bg-blue-600 px-6 font-medium text-white shadow-none hover:bg-blue-700"
                 >
                   <Plus className="mr-2 h-4 w-4" />
                   New Event
@@ -1101,7 +1099,7 @@ const OrganizationServices = () => {
                   placeholder="Search services..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="h-11 w-full rounded-xl border-blue-100 bg-white py-2.5 pl-11 pr-4 shadow-sm focus-visible:border-blue-400 focus-visible:ring-blue-100"
+                  className="h-11 w-full rounded-xl border-stone-200 bg-white py-2.5 pl-11 pr-4 shadow-none focus-visible:border-blue-500 focus-visible:ring-blue-100"
                 />
               </div>
             </div>
@@ -1109,13 +1107,13 @@ const OrganizationServices = () => {
             {/* Services List */}
             <div className="space-y-4">
                 {filteredServices.length === 0 ? (
-                  <div className="rounded-3xl border border-stone-100 bg-appointza-cream/60/80 p-10 shadow-sm text-center space-y-4">
+                  <div className="space-y-4 rounded-2xl border border-stone-200 bg-white p-10 text-center shadow-none">
                     <Package className="h-12 w-12 mx-auto text-zinc-400 mb-2" aria-hidden />
                     <h3 className="text-lg font-semibold text-appointza-navy">No services available</h3>
                     <p className="text-stone-600 text-sm mb-4">Add your first service to get started!</p>
                     <Button
                       onClick={() => openServiceForm(undefined, false)}
-                      className="rounded-2xl bg-white border border-stone-200 text-appointza-navy hover:border-orange-400 hover:bg-orange-50/50"
+                      className="rounded-xl border border-stone-200 bg-white text-appointza-navy shadow-none hover:border-blue-300 hover:bg-blue-50"
                       variant="outline"
                     >
                       <Plus className="mr-2 h-4 w-4" />
@@ -1149,10 +1147,10 @@ const OrganizationServices = () => {
                         return (
                           <article
                             key={serviceItem.id}
-                            className="flex flex-col overflow-hidden rounded-3xl border border-white/80 bg-white shadow-[0_10px_30px_-18px_rgba(39,72,154,0.28)] transition-all hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_18px_42px_-20px_rgba(56,80,170,0.34)]"
+                            className="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-none transition-colors hover:border-blue-300"
                           >
-                            {/* Hero image / gradient (matches reference card) */}
-                            <div className="relative h-44 w-full overflow-hidden bg-gradient-coral">
+                            {/* Hero image with a solid fallback */}
+                            <div className="relative h-44 w-full overflow-hidden bg-blue-600">
                               {coverUrl ? (
                                 <img
                                   src={coverUrl}
@@ -1160,7 +1158,7 @@ const OrganizationServices = () => {
                                   className="absolute inset-0 h-full w-full object-cover"
                                   loading="lazy"
                                   onError={(e) => {
-                                    // Hide the image if it fails; gradient remains.
+                                    // Hide the image if it fails; solid fallback remains.
                                     (e.target as HTMLImageElement).style.display = "none";
                                   }}
                                 />
@@ -1169,7 +1167,7 @@ const OrganizationServices = () => {
                                   <Package className="h-10 w-10" />
                                 </div>
                               )}
-                              <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/25 to-transparent" aria-hidden />
+                              <div className="absolute inset-0 bg-black/5" aria-hidden />
                             </div>
 
                             <div className="flex flex-1 flex-col p-6">
@@ -1220,14 +1218,14 @@ const OrganizationServices = () => {
                               <div className="mt-6 flex w-full gap-2">
                                 <button
                                   type="button"
-                                  className="flex-1 min-w-0 rounded-2xl border border-stone-200 bg-white py-3 font-medium text-appointza-navy transition-colors hover:bg-stone-50"
+                                  className="min-w-0 flex-1 rounded-xl border border-stone-200 bg-white py-3 font-medium text-appointza-navy transition-colors hover:border-blue-300 hover:bg-blue-50"
                                   onClick={() => openServiceForm(serviceItem, serviceItem.Iscombo)}
                                 >
                                   Edit
                                 </button>
                                 <button
                                   type="button"
-                                  className="shrink-0 rounded-2xl border border-stone-200 bg-white px-4 py-3 font-medium text-stone-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                                  className="shrink-0 rounded-xl border border-stone-200 bg-white px-4 py-3 font-medium text-stone-500 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                                   aria-label="Delete service"
                                   onClick={() => requestDeleteService(serviceItem)}
                                   disabled={isDeleting}
@@ -1258,7 +1256,7 @@ const OrganizationServices = () => {
                       placeholder="Search events..."
                       value={eventSearchTerm}
                       onChange={(e) => setEventSearchTerm(e.target.value)}
-                      className="w-full pl-11 pr-4 py-3 h-12 rounded-2xl bg-white border-stone-100 shadow-sm focus-visible:ring-orange-500/25 focus-visible:border-orange-400"
+                      className="h-12 w-full rounded-xl border-stone-200 bg-white py-3 pl-11 pr-4 shadow-none focus-visible:border-blue-500 focus-visible:ring-blue-100"
                     />
                   </div>
                   <div className="flex w-full flex-col sm:flex-row gap-3 sm:w-auto shrink-0">
@@ -1269,7 +1267,7 @@ const OrganizationServices = () => {
                           setEventDateFilter(value as "all" | "past" | "today" | "future")
                         }
                       >
-                        <SelectTrigger className="rounded-2xl h-11 border-stone-100 shadow-sm bg-white">
+                        <SelectTrigger className="h-11 rounded-xl border-stone-200 bg-white shadow-none">
                           <SelectValue placeholder="Filter by date" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1287,7 +1285,7 @@ const OrganizationServices = () => {
                           setEventPublicFilter(value as "all" | "public" | "private")
                         }
                       >
-                        <SelectTrigger className="rounded-2xl h-11 border-stone-100 shadow-sm bg-white">
+                        <SelectTrigger className="h-11 rounded-xl border-stone-200 bg-white shadow-none">
                           <SelectValue placeholder="Visibility" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1301,12 +1299,12 @@ const OrganizationServices = () => {
                 </div>
 
                 {isLoadingEvents ? (
-                  <div className="flex items-center justify-center h-64 rounded-xl border border-stone-100 bg-white">
+                  <div className="flex h-64 items-center justify-center rounded-xl border border-stone-200 bg-white shadow-none">
                     <Loader2 className="h-8 w-8 animate-spin text-zinc-400" aria-hidden />
                     <span className="ml-3 text-stone-600">Loading eventsâ€¦</span>
                   </div>
                 ) : filteredEvents.length === 0 ? (
-                  <Card className="border-stone-100 shadow-sm">
+                  <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
                     <CardContent className="py-14 text-center">
                       <Calendar className="h-14 w-14 mx-auto text-zinc-300 mb-4" aria-hidden />
                       <h3 className="text-lg font-semibold mb-2 text-appointza-navy">No events found</h3>
@@ -1315,7 +1313,7 @@ const OrganizationServices = () => {
                       </p>
                       <Button
                         onClick={() => openEventForm()}
-                        className="rounded-2xl bg-gradient-to-r from-[#FF6B6B] to-[#FF6B9D] text-white hover:opacity-95"
+                        className="rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700"
                       >
                         <Plus className="mr-2 h-4 w-4" />
                         Add Event
@@ -1340,9 +1338,9 @@ const OrganizationServices = () => {
                         return (
                           <article
                             key={eventItem.id}
-                            className="flex flex-col overflow-hidden rounded-3xl border border-stone-100 bg-white shadow-[0_1px_12px_-4px_rgba(26,31,44,0.08)] transition-all hover:border-stone-200 hover:shadow-[0_10px_28px_-12px_rgba(26,31,44,0.18)]"
+                            className="flex flex-col overflow-hidden rounded-2xl border border-stone-200 bg-white shadow-none transition-colors hover:border-blue-300"
                           >
-                            <div className="relative h-44 w-full overflow-hidden bg-gradient-coral shrink-0">
+                            <div className="relative h-44 w-full shrink-0 overflow-hidden bg-blue-600">
                               {img ? (
                                 <img
                                   src={img}
@@ -1358,12 +1356,12 @@ const OrganizationServices = () => {
                                   <Calendar className="h-10 w-10" />
                                 </div>
                               )}
-                              <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/25 to-transparent" aria-hidden />
+                              <div className="absolute inset-0 bg-black/5" aria-hidden />
                             </div>
 
                             <div className="flex flex-col flex-1 p-6">
                               <div className="mb-3 flex items-center justify-between gap-3">
-                                <span className="inline-flex items-center rounded-full bg-[#FFF0EB] px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#E85D4C]">
+                                <span className="inline-flex items-center rounded-full bg-blue-50 px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-blue-600">
                                   {eventItem.event_type || "Event"}
                                 </span>
                                 {eventItem.entry_amount > 0 ? (
@@ -1438,7 +1436,7 @@ const OrganizationServices = () => {
                               <div className="mt-auto flex flex-col gap-2 w-full">
                                 <button
                                   type="button"
-                                  className="w-full bg-gradient-to-r from-[#FF6B6B] to-[#FF6B9D] text-white py-4 rounded-2xl font-medium hover:opacity-95 transition-opacity inline-flex items-center justify-center gap-2"
+                                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-4 font-medium text-white transition-colors hover:bg-blue-700"
                                   onClick={() => openEventForm(eventItem)}
                                 >
                                   <Ticket className="size-4 shrink-0" aria-hidden />
@@ -1446,7 +1444,7 @@ const OrganizationServices = () => {
                                 </button>
                                 <button
                                   type="button"
-                                  className="w-full py-3 rounded-2xl font-medium bg-white border border-stone-200 text-stone-700 hover:border-[#FFD4CC] hover:bg-[#FFF8F5] hover:text-[#E85D4C] transition-colors inline-flex items-center justify-center gap-2"
+                                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white py-3 font-medium text-stone-700 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                                   onClick={() => openEventBookingForm(eventItem)}
                                 >
                                   <ClipboardList className="size-4 shrink-0" aria-hidden />
@@ -1454,7 +1452,7 @@ const OrganizationServices = () => {
                                 </button>
                                 <button
                                   type="button"
-                                  className="w-full py-3 rounded-2xl font-medium bg-white border border-stone-200 text-stone-600 hover:border-red-300 hover:bg-red-50 hover:text-red-600 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50"
+                                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white py-3 font-medium text-stone-600 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
                                   onClick={() => requestDeleteEvent(eventItem)}
                                   disabled={isDeletingEvent}
                                 >
@@ -1475,6 +1473,19 @@ const OrganizationServices = () => {
                 )}
               </div>
           </TabsContent>
+
+          <TabsContent value="rooms" className="mt-0 px-6 md:px-8 py-6 space-y-6 focus-visible:outline-none">
+            <RoomDefinitionsPanel
+              locationId={scopedLocationId}
+              locationName={scopedLocationLabel}
+              onOpenRoomStatus={(roomId) => {
+                const next = new URLSearchParams();
+                next.set("section", "room-status");
+                if (roomId > 0) next.set("id", String(roomId));
+                navigate(`/organization/hospitality?${next.toString()}`);
+              }}
+            />
+          </TabsContent>
         </Tabs>
 
         <ResponsiveEditSheet
@@ -1486,6 +1497,7 @@ const OrganizationServices = () => {
               "Update name, pricing, duration, and images for this service."
             : "Enter the details of the service you want to offer."
           }
+          errorMessage={serviceFormError || undefined}
           isEdit={showEditForm}
           saving={showEditForm ? isUpdating : isCreating}
           onCancel={closeServiceForm}
@@ -1504,19 +1516,28 @@ const OrganizationServices = () => {
         <ResponsiveEditSheet
           open={showComboForm}
           onOpenChange={() => {}}
-          title="Create combo package"
-          subtitle="Create a combo package by selecting multiple services."
-          saving={isCreating}
+          title={editingService ? "Edit combo package" : "Create combo package"}
+          subtitle={
+            editingService
+              ? "Update included services, pricing, duration, and images for this combo."
+              : "Bundle two or more services and add a combo image customers will see."
+          }
+          errorMessage={serviceFormError || undefined}
+          isEdit={Boolean(editingService)}
+          saving={editingService ? isUpdating : isCreating}
           onCancel={closeServiceForm}
           onSave={() => void handleSaveService()}
-          saveLabel="Create combo"
+          saveLabel={editingService ? "Save changes" : "Create combo"}
         >
           <ComboEditorFields
             service={service}
             onChange={setService}
             services={services}
             selectedComboServices={selectedComboServices}
-            onSelectedComboServicesChange={setSelectedComboServices}
+            onSelectedComboServicesChange={handleComboSelection}
+            serviceImages={serviceImages}
+            onServiceImagesChange={setServiceImages}
+            idPrefix={editingService ? "edit-combo" : "combo"}
           />
         </ResponsiveEditSheet>
 
@@ -1552,7 +1573,7 @@ const OrganizationServices = () => {
         >
           {isLoadingBookingForm ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-blue-600" />
               <span className="text-sm text-stone-600">Loading booking form…</span>
             </div>
           ) : (
@@ -1597,7 +1618,7 @@ const OrganizationServices = () => {
         >
           {isLoadingBookingForm ? (
             <div className="flex items-center justify-center py-12">
-              <Loader2 className="mr-2 h-6 w-6 animate-spin text-[#E85D4C]" />
+              <Loader2 className="mr-2 h-6 w-6 animate-spin text-blue-600" />
               <span className="text-sm text-stone-600">Loading booking form…</span>
             </div>
           ) : (
@@ -1615,7 +1636,7 @@ const OrganizationServices = () => {
             if (!open) setDeleteConfirm(null);
           }}
         >
-          <AlertDialogContent className="max-h-[min(90dvh,40rem)] w-[calc(100vw-1.5rem)] max-w-lg gap-3 overflow-y-auto rounded-3xl border-stone-100 p-4 md:p-6">
+          <AlertDialogContent className="max-h-[min(90dvh,40rem)] w-[calc(100vw-1.5rem)] max-w-lg gap-3 overflow-y-auto rounded-2xl border-stone-200 p-4 shadow-none md:p-6">
             <AlertDialogHeader>
               <AlertDialogTitle className="text-appointza-navy">
                 Delete {deleteConfirm?.kind === "service" ? "service" : "event"}?

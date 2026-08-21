@@ -81,6 +81,66 @@ export class LocationService {
     }
   }
 
+  static readStoredLocationId(): number {
+    try {
+      const fromKey = Number(localStorage.getItem('organizationlocationid') || 0);
+      if (fromKey > 0) return fromKey;
+
+      const userContextStr = localStorage.getItem('user_context');
+      if (!userContextStr) return 0;
+      const userContext = JSON.parse(userContextStr);
+      return Number(userContext?.organisationlocationid || 0);
+    } catch {
+      return 0;
+    }
+  }
+
+  static minimalLocationDetail(id: number, organisationId = 0): LocationDetail {
+    return {
+      id,
+      name: `Location #${id}`,
+      address: '',
+      city: '',
+      state: '',
+      country: '',
+      pincode: '',
+      phone: '',
+      email: '',
+      organisationid: organisationId,
+      templateid: 0,
+      isactive: true,
+      createdby: 0,
+      createdon: '',
+      modifiedby: 0,
+      modifiedon: '',
+      version: 0,
+    };
+  }
+
+  /** Dashboard-selected location(s) from localStorage — no API. */
+  static getStoredLocations(user?: { organisationid?: number; locationid?: number; organisationlocationid?: number; isStaff?: boolean } | null): LocationDetail[] {
+    const stored = LocationService.getLocationFromStorage();
+    const staffId = user?.organisationlocationid || user?.locationid || 0;
+    const isStaff = user ? LocationService.isStaff(user) : false;
+
+    if (stored) {
+      if (!isStaff || !staffId || stored.id === staffId) {
+        return [stored];
+      }
+    }
+
+    const resolvedId = LocationService.readStoredLocationId() || (isStaff ? staffId : 0);
+    if (resolvedId > 0) {
+      return [LocationService.minimalLocationDetail(resolvedId, user?.organisationid || stored?.organisationid || 0)];
+    }
+
+    return [];
+  }
+
+  static getStoredCurrentLocation(user?: { organisationid?: number; locationid?: number; organisationlocationid?: number; isStaff?: boolean } | null): LocationDetail | null {
+    return LocationService.getStoredLocations(user)[0] ?? null;
+  }
+
   // Fetch location details by ID
   async fetchLocationDetails(locationId: number): Promise<LocationDetail | null> {
     try {

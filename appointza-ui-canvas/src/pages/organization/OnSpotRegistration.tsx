@@ -109,6 +109,7 @@ const OnSpotRegistration = () => {
       
       const req = new OrganisationServicesSelectReq();
       req.organisationid = organisationId;
+      req.organisationlocationid = organisationLocationId;
       req.id = 0; // Get all services
       
       const response = await organisationServicesService.select(req);

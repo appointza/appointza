@@ -10,9 +10,13 @@ namespace appointza.Services
         readonly OrganisationRoomService roomService;
         readonly OrganisationHospitalityContentService hospitalityContentService;
 
-        static readonly HashSet<string> BlockedStatuses = new(StringComparer.OrdinalIgnoreCase)
+        /// <summary>
+        /// Permanent / operational blocks only. Occupied/reserved/etc. are date-window conflicts,
+        /// not a ban on booking other dates.
+        /// </summary>
+        static readonly HashSet<string> StructurallyBlockedStatuses = new(StringComparer.OrdinalIgnoreCase)
         {
-            "occupied", "reserved", "checkout_pending", "cleaning", "maintenance", "blocked", "hold",
+            "maintenance", "blocked",
         };
 
         public GuestHospitalityBookingService(
@@ -52,6 +56,8 @@ namespace appointza.Services
             var orgInfo = await GetOrganisationInfo(req.organisation_id);
             var locationInfo = await GetLocationInfo(req.organisation_location_id);
 
+            var requestedAvailable = selectedRoom != null && selectedRoom.available_for_dates;
+
             return new
             {
                 organisation = new
@@ -79,7 +85,7 @@ namespace appointza.Services
                 check_in_time = req.check_in_time,
                 check_out_time = req.check_out_time,
                 requested_room_id = req.room_id,
-                requested_room_available = selectedRoom != null,
+                requested_room_available = requestedAvailable,
             };
         }
 
@@ -100,6 +106,20 @@ namespace appointza.Services
                 checkInTime,
                 checkOutTime,
                 profile);
+
+            if (!string.IsNullOrWhiteSpace(req.room_id) && room == null)
+            {
+                // Distinguish "unknown room" vs "dates conflict" for clearer guest messaging.
+                var allRooms = await roomService.Select(new OrganisationRoomSelectReq
+                {
+                    organisation_id = req.organisation_id,
+                    organisation_location_id = req.organisation_location_id,
+                });
+                var exists = allRooms.Any(r => RoomCodeMatches(r, req.room_id) && IsStructurallyBookable(r));
+                if (exists)
+                    throw new ArgumentException(
+                        "This room is not available for the selected dates. Please choose different dates.");
+            }
 
             return HospitalityBookingCalculator.Compute(
                 inDate,
@@ -142,7 +162,8 @@ namespace appointza.Services
                 checkOut,
                 checkInTime,
                 checkOutTime,
-                profile) ?? throw new ArgumentException("Selected room is not available for these dates.");
+                profile) ?? throw new ArgumentException(
+                    "Selected room is not available for these dates. Choose different dates or another room.");
 
             var quote = HospitalityBookingCalculator.Compute(
                 inDate,
@@ -222,10 +243,14 @@ namespace appointza.Services
 
             return allRooms
                 .Where(IsStructurallyBookable)
-                .Where(r => !HasRoomConflict(r, windowStart, windowEnd))
                 .OrderBy(r => r.floor_number)
                 .ThenBy(r => r.room_number)
-                .Select(ToPublicRoom)
+                .Select(r =>
+                {
+                    var pub = ToPublicRoom(r);
+                    pub.available_for_dates = !HasRoomConflict(r, windowStart, windowEnd);
+                    return pub;
+                })
                 .ToList();
         }
 
@@ -252,29 +277,103 @@ namespace appointza.Services
             });
 
             var room = allRooms.FirstOrDefault(r => RoomCodeMatches(r, roomId));
-            if (room == null || !IsStructurallyBookable(room) || HasRoomConflict(room, windowStart, windowEnd))
+            if (room == null || !IsStructurallyBookable(room))
+                return null;
+
+            if (HasRoomConflict(room, windowStart, windowEnd))
                 return null;
 
             return room;
         }
 
         static bool IsStructurallyBookable(OrganisationRoom room) =>
-            room.isactive && !BlockedStatuses.Contains(room.status);
+            room.isactive && !StructurallyBlockedStatuses.Contains(room.status ?? "");
 
+        /// <summary>
+        /// Match organisation appointments board (<c>getRoomAvailabilityState</c>):
+        /// a stay is blocked when any requested night is not Available.
+        /// </summary>
         static bool HasRoomConflict(OrganisationRoom room, DateTime windowStart, DateTime windowEnd)
         {
-            if (room.booking == null)
-                return false;
+            var requestStart = DateOnly.FromDateTime(windowStart);
+            var requestEnd = DateOnly.FromDateTime(windowEnd);
 
-            if (!DateOnly.TryParse(room.booking.check_in, out var checkIn) ||
-                !DateOnly.TryParse(room.booking.check_out, out var checkOut))
+            // Hourly same calendar day — check that one day.
+            if (requestEnd <= requestStart)
+                return !IsDayAvailableForGuest(room, requestStart);
+
+            // Overnight nights: [check-in date, check-out date)
+            for (var day = requestStart; day < requestEnd; day = day.AddDays(1))
             {
-                return BlockedStatuses.Contains(room.status);
+                if (!IsDayAvailableForGuest(room, day))
+                    return true;
             }
 
-            var existingStart = checkIn.ToDateTime(TimeOnly.MinValue);
-            var existingEnd = checkOut.ToDateTime(TimeOnly.MinValue);
-            return existingStart < windowEnd && existingEnd > windowStart;
+            return false;
+        }
+
+        /// <summary>
+        /// Mirrors appointza-ui-canvas getRoomAvailabilityState → "Available".
+        /// </summary>
+        static bool IsDayAvailableForGuest(OrganisationRoom room, DateOnly day)
+        {
+            var status = (room.status ?? "").Trim().ToLowerInvariant();
+
+            if (status is "maintenance" or "blocked")
+                return false;
+            if (status == "cleaning")
+                return false;
+
+            if (TryGetStayDates(room, out var checkIn, out var checkOut))
+            {
+                // Booked nights: check_in <= day < check_out
+                if (day >= checkIn && day < checkOut)
+                    return false;
+
+                // Org board: checkout morning still occupied / check-out pending
+                if (day == checkOut && status is "occupied" or "checkout_pending")
+                    return false;
+
+                return true;
+            }
+
+            // No valid stay dates — status only affects "today" (same as org UI).
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            if (day != today)
+                return true;
+
+            return status is not ("occupied" or "reserved" or "checkout_pending" or "hold");
+        }
+
+        static bool TryGetStayDates(OrganisationRoom room, out DateOnly checkIn, out DateOnly checkOut)
+        {
+            checkIn = default;
+            checkOut = default;
+            if (room.booking == null)
+                return false;
+            if (!TryParseDateOnlyFlexible(room.booking.check_in, out checkIn))
+                return false;
+            if (!TryParseDateOnlyFlexible(room.booking.check_out, out checkOut))
+                return false;
+            // Allow same-day hourly stays; overnight requires checkOut > checkIn.
+            return checkOut >= checkIn;
+        }
+
+        static bool TryParseDateOnlyFlexible(string? value, out DateOnly date)
+        {
+            date = default;
+            if (string.IsNullOrWhiteSpace(value))
+                return false;
+            var trimmed = value.Trim();
+            // Prefer yyyy-MM-dd prefix so ISO datetimes don't shift by timezone.
+            if (trimmed.Length >= 10
+                && trimmed[4] == '-'
+                && trimmed[7] == '-'
+                && DateOnly.TryParse(trimmed[..10], out date))
+            {
+                return true;
+            }
+            return DateOnly.TryParse(trimmed, out date);
         }
 
         static bool HasValidWindow(

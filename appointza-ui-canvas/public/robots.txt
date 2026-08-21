@@ -2,7 +2,7 @@ User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: https://appointza.com/sitemap.xml
+Sitemap: http://localhost:8083/sitemap.xml
 
 # Disallow admin and API routes
 Disallow: /api/

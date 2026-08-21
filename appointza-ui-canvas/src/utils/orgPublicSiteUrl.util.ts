@@ -13,8 +13,10 @@ export function buildOrganisationCustomUrlHost(input: Pick<OrganisationSiteUrlIn
 }
 
 export function buildOrganisationPublicSiteOriginFromHost(host: string): string {
-  const protocol =
-    typeof window !== "undefined" && window.location.protocol === "http:" ? "http:" : "https:";
+  const hostname = host.split("/")[0].toLowerCase();
+  const protocol = hostname.endsWith("appointza.com") || hostname === "appointza.com" ? "https:" : (
+    typeof window !== "undefined" && window.location.protocol === "http:" ? "http:" : "https:"
+  );
   return `${protocol}//${host}`;
 }
 
@@ -40,25 +42,42 @@ export function buildOrganisationTemplateBookingUrl(orgloctempid?: string | null
   return `${getUiBaseUrl()}/template/${encodeURIComponent(guid)}`;
 }
 
-/** Subdomain slug from host, e.g. awonderonesurprise.localhost:8083 → awonderonesurprise */
+/** Subdomain slug from host, e.g. awonderonesurprise.localhost:5000 → awonderonesurprise */
 export function extractOrganisationCustomSubdomain(host: string): string | null {
-  const domain = getDomainName().toLowerCase();
   const hostOnly = (host || "").replace(/^https?:\/\//i, "").split("/")[0].toLowerCase();
+  if (!hostOnly) return null;
 
-  if (!hostOnly || hostOnly === domain || hostOnly === `www.${domain}`) {
+  const colonIdx = hostOnly.lastIndexOf(":");
+  const hostname = colonIdx > -1 ? hostOnly.slice(0, colonIdx) : hostOnly;
+  const port = colonIdx > -1 ? hostOnly.slice(colonIdx + 1) : "";
+  const hostWithPort = port ? `${hostname}:${port}` : hostname;
+
+  const domain = getDomainName().toLowerCase();
+  const domainColonIdx = domain.lastIndexOf(":");
+  const domainHost = domainColonIdx > -1 ? domain.slice(0, domainColonIdx) : domain;
+  const domainPort = domainColonIdx > -1 ? domain.slice(domainColonIdx + 1) : "";
+  const domainWithPort = domainPort ? `${domainHost}:${domainPort}` : domainHost;
+
+  if (
+    hostWithPort === domainWithPort ||
+    hostWithPort === `www.${domainWithPort}` ||
+    hostname === domainHost ||
+    hostname === `www.${domainHost}`
+  ) {
     return null;
   }
 
-  const suffix = `.${domain}`;
-  if (hostOnly.endsWith(suffix)) {
-    const slug = hostOnly.slice(0, -suffix.length);
+  const suffixWithPort = `.${domainWithPort}`;
+  if (hostWithPort.endsWith(suffixWithPort)) {
+    const slug = hostWithPort.slice(0, -suffixWithPort.length);
     if (slug && !slug.includes(".")) {
       return slug;
     }
   }
 
-  if (hostOnly.endsWith(".localhost")) {
-    const slug = hostOnly.slice(0, -".localhost".length);
+  // Dev subdomains: {slug}.localhost with any port (e.g. awonderonesurprise.localhost:5000)
+  if (hostname.endsWith(".localhost") && hostname !== "localhost") {
+    const slug = hostname.slice(0, -".localhost".length);
     if (slug && !slug.includes(".")) {
       return slug;
     }

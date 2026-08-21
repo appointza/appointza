@@ -337,8 +337,8 @@ const OtpVerification = () => {
 
       {/* Right: brand panel */}
       <div className="relative order-1 hidden h-dvh flex-col justify-between overflow-hidden bg-gradient-coral p-12 text-white lg:order-2 lg:flex">
-        <div className="absolute -top-32 -left-32 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
-        <div className="absolute -bottom-32 -right-32 h-96 w-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="pointer-events-none absolute -left-32 -top-32 hidden h-96 w-96 rounded-full bg-white/10 blur-3xl md:block" />
+        <div className="pointer-events-none absolute -bottom-32 -right-32 hidden h-96 w-96 rounded-full bg-white/10 blur-3xl md:block" />
         <Link to="/" className="relative flex items-center gap-3">
           <img
             src="/lovable-uploads/6205c671-a6b9-4927-8268-bd1fa436cd0b.png"

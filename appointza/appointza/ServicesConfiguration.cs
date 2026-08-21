@@ -5,10 +5,7 @@ using appointza.FirebaseNotification.Services;
 using appointza.Sms.Services;
 using appointza.WhatsAppMsg.Services;
 using appointza.Utils;
-using appointza.Data.AppointzaStay;
-using appointza.Services.AppointzaStay;
 using CampuszaServices = appointza.Services.Campusza;
-using StayServices = appointza.Services.AppointzaStay;
 
 namespace appointza
 {
@@ -70,7 +67,6 @@ namespace appointza
             services.AddScoped<Authentication.Services.UsersService>(); // Changed from Transient to Scoped - moved to Authentication
             services.AddScoped<Authentication.Services.AuthService>(); // Authentication service
             services.AddScoped<CampuszaAuthService>();
-            services.AddScoped<AppointzaStayAuthService>();
             services.AddScoped<PlatformUserCredentialService>();
             services.AddScoped<UserProductProfileService>();
             services.AddScoped<ReferenceTypeService>(); // Changed from Transient to Scoped
@@ -94,7 +90,6 @@ namespace appointza
             services.AddScoped<WebsiteService>();
             services.AddScoped<EnquiryService>();
             services.AddScoped<IntegrationTokenService>();
-            services.AddScoped<B2BLeadsImportService>();
             services.AddScoped<SubscriptionPlanService>();
             services.AddScoped<CreditWalletService>();
             services.AddScoped<CreditWalletRechargeService>();
@@ -104,6 +99,7 @@ namespace appointza
             services.AddScoped<OrganisationHospitalityContentService>();
             services.AddScoped<OrganisationRoomService>();
             services.AddScoped<GuestHospitalityBookingService>();
+            services.AddScoped<OrganisationLoyaltyService>();
             services.AddScoped<BookingFeeService>();
             services.AddScoped<SubscriptionTopUpService>();
             //        services.AddScoped<OrganisationServiceTimingService>();
@@ -136,27 +132,6 @@ namespace appointza
             services.AddScoped<CampuszaServices.StudentTermService>();
             services.AddScoped<CampuszaServices.SubjectService>();
             services.AddScoped<CampuszaServices.TermService>();
-
-            // AppointzaStay product services
-            services.AddSingleton<AppDataStore>();
-            services.AddSingleton<OrganisationResolver>();
-            services.AddSingleton<StayServices.LogService>();
-            services.AddSingleton<StayServices.BookingDetailService>();
-            services.AddSingleton<StayServices.UserService>();
-            services.AddSingleton<StayServices.CustomerService>();
-            services.AddSingleton<StayServices.RoomService>();
-            services.AddSingleton<StayServices.PackageService>();
-            services.AddSingleton<StayServices.WebsiteProfileSyncService>();
-            services.AddSingleton<StayServices.OrganisationService>();
-            services.AddSingleton<StayServices.OnboardingService>();
-            services.AddSingleton<StayServices.GuestBookingService>();
-            services.AddSingleton<StayServices.StaffBookingService>();
-            services.AddSingleton<StayServices.CreditService>();
-            services.AddSingleton<StayServices.SiteBuilderService>();
-            services.AddSingleton<StayServices.AssetService>();
-            services.AddSingleton<StayServices.StayAuthService>();
-            services.AddSingleton<StayServices.StayPaymentService>();
-            services.AddSingleton<StayServices.PlatformAdminService>();
 
         }
     }

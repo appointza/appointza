@@ -19,12 +19,14 @@ import {
   Users,
   BedDouble,
   FileText,
+  Sparkles,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import ClientServiceHistory from "@/components/organization/ClientServiceHistory";
 import TodayAppointmentCard from "@/components/organization/TodayAppointmentCard";
 import EnhancedTimeline from "@/components/organization/EnhancedTimeline";
+import { useMountWhenOpened } from "@/hooks/useMountWhenOpened";
 import CreateClientDialog from "@/components/organization/CreateClientDialog";
 import OnSpotRegistrationDialog from "@/components/organization/OnSpotRegistrationDialog";
 import { useNavigate } from "react-router-dom";
@@ -36,7 +38,7 @@ import { EventBookingService } from "@/services/eventbooking.service";
 import { EventService } from "@/services/event.service";
 import { ReferenceTypeService } from "@/services/referencetype.service";
 import { ReferenceValueService } from "@/services/referencevalue.service";
-import { ClientInfoRes, ClientsSelectReq, SearchAppointmentByMobileReq, BookedAppoinmentRes, AppoinmentSelectReq } from "@/models/appoinment.model";
+import { ClientInfoRes, SearchAppointmentByMobileReq, BookedAppoinmentRes, AppoinmentSelectReq } from "@/models/appoinment.model";
 import { AppointmentRecord, AppointmentRecordSelectReq } from "@/models/appointmentrecord.model";
 import { EventBooking, EventBookingSelectReq } from "@/models/eventbooking.model";
 import { Event, EventSelectReq } from "@/models/event.model";
@@ -65,6 +67,40 @@ import {
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { loyaltyService } from "@/services/loyalty.service";
+import { resolveOrganisationId } from "@/utils/organisationContext.util";
+import { ClientLoyaltyWallet } from "@/models/loyalty.model";
+import {
+  useOrganisationClients,
+  useInvalidateOrganisationClients,
+} from "@/hooks/useOrganisationClients";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+function loyaltyRewardLabel(type: string, value: number, maxDiscount = 0) {
+  switch (type) {
+    case "percentage_discount":
+      return maxDiscount > 0 ? `${value}% off (max ₹${maxDiscount})` : `${value}% discount`;
+    case "fixed_discount":
+      return `₹${value} off`;
+    case "loyalty_points":
+      return `${value} points`;
+    case "free_service":
+      return "1 free service";
+    case "cashback":
+      return `₹${value} cashback`;
+    case "coupon":
+      return "Coupon";
+    default:
+      return type.replace(/_/g, " ");
+  }
+}
 
 function clientInitials(name: string | undefined): string {
   const parts = (name || "").trim().split(/\s+/).filter(Boolean);
@@ -80,8 +116,10 @@ const ClientManagement = () => {
   const { user, isAuthenticated } = useAuth();
   const { id: globalLocationId } = useGlobalId();
   const [selectedClient, setSelectedClient] = useState<any>(null);
-  const [clients, setClients] = useState<ClientInfoRes[]>([]);
-  const [isLoadingClients, setIsLoadingClients] = useState(false);
+  const [loyaltyByUserId, setLoyaltyByUserId] = useState<Record<number, ClientLoyaltyWallet>>({});
+  const [selectedLoyaltyWallet, setSelectedLoyaltyWallet] = useState<ClientLoyaltyWallet | null>(null);
+  const [isLoadingLoyaltyDetails, setIsLoadingLoyaltyDetails] = useState(false);
+  const [loadingLoyaltyUserId, setLoadingLoyaltyUserId] = useState<number | null>(null);
   const [clientAppointments, setClientAppointments] = useState<BookedAppoinmentRes[]>([]);
   const [appointmentRecords, setAppointmentRecords] = useState<AppointmentRecord[]>([]);
   const [clientEventBookings, setClientEventBookings] = useState<EventBooking[]>([]);
@@ -91,26 +129,50 @@ const ClientManagement = () => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isOnSpotDialogOpen, setIsOnSpotDialogOpen] = useState(false);
   const [mobileInput, setMobileInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   type CrmTabId = "today" | "history" | "timeline" | "events" | "rooms";
   const [crmTab, setCrmTab] = useState<CrmTabId>("today");
   const [clientRoomStays, setClientRoomStays] = useState<OrganisationRoom[]>([]);
   const [roomDetailsTarget, setRoomDetailsTarget] = useState<OrganisationRoom | null>(null);
   const [isRoomDetailsOpen, setIsRoomDetailsOpen] = useState(false);
   const [addRecordRequest, setAddRecordRequest] = useState(0);
+  const mountCreateClientDialog = useMountWhenOpened(isCreateDialogOpen);
+  const mountOnSpotDialog = useMountWhenOpened(isOnSpotDialogOpen);
+  const mountRoomDetailsDialog = useMountWhenOpened(isRoomDetailsOpen);
 
-  const filteredClients = useMemo(() => {
-    const raw = mobileInput.trim().toLowerCase();
-    if (!raw) return clients;
-    const digits = raw.replace(/\D/g, "");
-    return clients.filter((c) => {
-      const mob = (c.mobile || "").replace(/\s/g, "").toLowerCase();
-      const name = (c.username || "").toLowerCase();
-      const mobDigits = mob.replace(/\D/g, "");
-      const nameMatch = name.includes(raw);
-      const mobMatch = digits.length > 0 ? mobDigits.includes(digits) : mob.includes(raw.replace(/\s/g, ""));
-      return nameMatch || mobMatch;
-    });
-  }, [clients, mobileInput]);
+  const organisationId = user?.organisationid || 0;
+  const organisationLocationId = globalLocationId
+    ? Number(globalLocationId)
+    : (user?.locationid || 0);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedSearch(mobileInput.trim());
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [mobileInput]);
+
+  const {
+    data: clientsPages,
+    isLoading: isLoadingClients,
+    refetch: refetchClients,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useOrganisationClients({
+    organisationId,
+    organisationLocationId,
+    search: debouncedSearch,
+    enabled: isAuthenticated,
+  });
+  const clients = useMemo(
+    () => clientsPages?.pages.flat() ?? [],
+    [clientsPages],
+  );
+  const filteredClients = clients;
+  const visibleClients = clients;
+  const invalidateOrganisationClients = useInvalidateOrganisationClients();
 
   const appointmentService = useMemo(() => new AppoinmentService(), []);
   const appointmentRecordService = useMemo(() => new AppointmentRecordService(), []);
@@ -120,114 +182,97 @@ const ClientManagement = () => {
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
   const hospitalityService = useMemo(() => new HospitalityService(), []);
 
+  const mergeWalletIntoLoyaltyMap = useCallback((wallet: ClientLoyaltyWallet) => {
+    if (wallet.client_user_id <= 0) return;
+    setLoyaltyByUserId((prev) => ({ ...prev, [wallet.client_user_id]: wallet }));
+  }, []);
+
+  const loadLoyaltyForClient = useCallback(
+    async (clientUserId: number, clientName?: string, clientMobile?: string) => {
+      if (clientUserId <= 0) return null;
+      const organisationId = resolveOrganisationId(user?.organisationid);
+      if (organisationId <= 0) return null;
+
+      setLoadingLoyaltyUserId(clientUserId);
+      try {
+        const wallets = await loyaltyService.selectCustomerWallets(organisationId, "", 0, clientUserId);
+        const wallet = wallets?.[0];
+        if (wallet) {
+          mergeWalletIntoLoyaltyMap({
+            ...wallet,
+            client_name: wallet.client_name || clientName,
+            client_mobile: wallet.client_mobile || clientMobile,
+          });
+          return wallet;
+        }
+        return null;
+      } catch (loyaltyError) {
+        console.error("Error loading loyalty for client", loyaltyError);
+        return null;
+      } finally {
+        setLoadingLoyaltyUserId((current) => (current === clientUserId ? null : current));
+      }
+    },
+    [mergeWalletIntoLoyaltyMap, user?.organisationid],
+  );
+
+  const openLoyaltyDetails = useCallback(
+    async (clientUserId: number, clientName?: string, clientMobile?: string) => {
+      if (clientUserId <= 0) return;
+      const organisationId = resolveOrganisationId(user?.organisationid);
+      if (organisationId <= 0) return;
+
+      const cached = loyaltyByUserId[clientUserId];
+      setSelectedLoyaltyWallet(
+        cached ?
+          { ...cached, client_name: cached.client_name || clientName, client_mobile: cached.client_mobile || clientMobile }
+        : {
+            client_user_id: clientUserId,
+            client_name: clientName,
+            client_mobile: clientMobile,
+          } as ClientLoyaltyWallet,
+      );
+      setIsLoadingLoyaltyDetails(true);
+      try {
+        const [transactions, rewards] = await Promise.all([
+          loyaltyService.selectTransactions(organisationId, clientUserId),
+          loyaltyService.selectRewardGrants(organisationId, clientUserId),
+        ]);
+        setSelectedLoyaltyWallet((prev) =>
+          prev ?
+            {
+              ...prev,
+              ...cached,
+              client_name: prev.client_name || clientName,
+              client_mobile: prev.client_mobile || clientMobile,
+              recent_transactions: transactions,
+              available_rewards: rewards.filter((r) => r.status === "available"),
+            }
+          : null,
+        );
+      } catch (error) {
+        console.error("Error loading loyalty wallet details", error);
+        toast({
+          title: "Could not load loyalty details",
+          description: "Please try again.",
+          variant: "destructive",
+        });
+      } finally {
+        setIsLoadingLoyaltyDetails(false);
+      }
+    },
+    [loyaltyByUserId, toast, user?.organisationid],
+  );
+
   const [isEventDetailsOpen, setIsEventDetailsOpen] = useState(false);
   const [eventDetailsBooking, setEventDetailsBooking] = useState<EventBooking | null>(null);
   const [eventDetailsFields, setEventDetailsFields] = useState<EventBookingFormField[]>([]);
   const [eventDetailsValues, setEventDetailsValues] = useState<Record<string, any>>({});
   const [isSavingEventDetails, setIsSavingEventDetails] = useState(false);
 
-  const loadClientsList = useCallback(async () => {
-    if (!isAuthenticated) return;
-    setIsLoadingClients(true);
-    try {
-      const req = new ClientsSelectReq();
-
-      // Get organisationlocationid from GlobalIdContext (set from dashboard)
-      // Fallback to user locationid if not set in context
-      const organisationlocationid = globalLocationId
-        ? Number(globalLocationId)
-        : (user?.locationid || 0);
-
-      console.log('📥 Using location ID from GlobalIdContext:', organisationlocationid);
-
-      req.organisationid = user?.organisationid || 0;
-      req.organisationlocationid = organisationlocationid;
-      req.mobilenumber = "";
-      req.include_room_customers = true;
-
-      console.log('🔍 Loading clients with:', {
-        organisationid: req.organisationid,
-        organisationlocationid: req.organisationlocationid,
-        userLocationId: user?.locationid
-      });
-
-      const appointmentClients = await appointmentService.SelectUniqueClients(req);
-      const clientsMap = new Map<number, ClientInfoRes>();
-
-      (appointmentClients || []).forEach((client) => {
-        clientsMap.set(client.userid, client);
-      });
-
-      // Also include users who enrolled in events (even if no service appointments)
-      try {
-        const eventReq: EventSelectReq = {
-          id: 0,
-          organisation_id: user?.organisationid || 0,
-          organisation_location_id: organisationlocationid,
-          status: "",
-          is_public: true
-        };
-        const events = await eventService.select(eventReq);
-
-        for (const event of events || []) {
-          const bookingReq: EventBookingSelectReq = {
-            id: 0,
-            event_id: event.id,
-            user_id: 0,
-            payment_status: "",
-            check_in_status: "",
-            confirmation_status: ""
-          };
-          const bookings = await eventBookingService.select(bookingReq);
-          (bookings || []).forEach((booking) => {
-            if (!booking.user_id || booking.user_id <= 0) return;
-
-            const existingClient = clientsMap.get(booking.user_id);
-            if (existingClient) {
-              // Backfill missing name/mobile from event booking payload if needed
-              if (!existingClient.username && booking.user_name) {
-                existingClient.username = booking.user_name;
-              }
-              if (!existingClient.mobile && booking.user_mobile) {
-                existingClient.mobile = booking.user_mobile;
-              }
-              clientsMap.set(booking.user_id, existingClient);
-              return;
-            }
-
-            const eventClient = new ClientInfoRes();
-            eventClient.userid = booking.user_id;
-            eventClient.username = booking.user_name || `User #${booking.user_id}`;
-            eventClient.mobile = booking.user_mobile || "";
-            eventClient.city = "";
-            clientsMap.set(eventClient.userid, eventClient);
-          });
-        }
-      } catch (eventMergeError) {
-        console.error('Error merging event-enrolled users into client list', eventMergeError);
-      }
-
-      setClients(Array.from(clientsMap.values()));
-    } catch (error) {
-      console.error('Error loading clients', error);
-      toast({ title: "Error", description: "Failed to load clients", variant: "destructive" });
-    } finally {
-      setIsLoadingClients(false);
-    }
-  }, [
-    isAuthenticated,
-    globalLocationId,
-    user?.locationid,
-    user?.organisationid,
-    appointmentService,
-    eventService,
-    eventBookingService,
-    toast
-  ]);
-
-  useEffect(() => {
-    loadClientsList();
-  }, [loadClientsList]);
+  // Only fetch loyalty details when the user opens that client's wallet.
+  // Avoid preloading every wallet in a large organization because it creates
+  // redundant backend work and expensive client-list render churn.
 
   const loadEventBookingFormFields = useCallback(
     async (evt: Event | undefined | null): Promise<EventBookingFormField[]> => {
@@ -360,7 +405,8 @@ const ClientManagement = () => {
         organisation_id: organizationId,
         organisation_location_id: organisationlocationid,
         status: "",
-        is_public: true,
+        is_public: false,
+        include_past: true,
       };
       const orgEvents = (await eventService.select(orgEventsReq)) || [];
 
@@ -370,26 +416,17 @@ const ClientManagement = () => {
       });
       setEventsMap(nextEventsMap);
 
-      const bookingsByEvent = await Promise.all(
-        orgEvents.map(async (evt) => {
-          const req: EventBookingSelectReq = {
-            id: 0,
-            event_id: evt.id,
-            user_id: userId,
-            payment_status: "",
-            check_in_status: "",
-            confirmation_status: "",
-          };
-          try {
-            return (await eventBookingService.select(req)) || [];
-          } catch (e) {
-            console.error(`Error loading bookings for event ${evt.id}`, e);
-            return [];
-          }
-        })
-      );
-
-      const normalizedEventBookings = bookingsByEvent.flat();
+      const bookingReq: EventBookingSelectReq = {
+        id: 0,
+        event_id: 0,
+        user_id: userId,
+        organisation_id: organizationId,
+        organisation_location_id: organisationlocationid,
+        payment_status: "",
+        check_in_status: "",
+        confirmation_status: "",
+      };
+      const normalizedEventBookings = (await eventBookingService.select(bookingReq)) || [];
       setClientEventBookings(normalizedEventBookings);
 
       setClientAppointments(appointments || []);
@@ -444,10 +481,30 @@ const ClientManagement = () => {
   const handleClientClick = async (client: ClientInfoRes) => {
     const isRoomOnly = client.userid < 0;
     setCrmTab(client.is_room_customer && isRoomOnly ? "rooms" : "today");
+
+    setSelectedClient({
+      id: Number(client.userid),
+      name: client.username || "",
+      mobile: client.mobile || "",
+      email: client.guest_email || "",
+      lastVisit: new Date(),
+      totalAppointments: 0,
+      totalSpent: 0,
+      isRoomCustomer: Boolean(client.is_room_customer),
+      isRoomOnly,
+      roomNumber: client.room_number || "",
+      bookingReference: client.booking_reference || "",
+    } as any);
+
     try {
       let stats = { totalAppointments: 0, lastVisit: new Date(), totalSpent: 0 };
       if (client.userid > 0) {
-        stats = await loadClientData(client.userid, user?.organisationid || 0);
+        const organisationId = user?.organisationid || 0;
+        const [loadedStats] = await Promise.all([
+          loadClientData(client.userid, organisationId),
+          loadLoyaltyForClient(client.userid, client.username, client.mobile),
+        ]);
+        stats = loadedStats;
       } else {
         setIsLoadingClientData(true);
         setClientAppointments([]);
@@ -517,9 +574,21 @@ const ClientManagement = () => {
       if (results && results.length > 0) {
         const first = results[0] as BookedAppoinmentRes;
         const userId = first.userid;
-        
-        // Load all client data
-        const stats = await loadClientData(userId, user?.organisationid || 0);
+
+        setSelectedClient({
+          id: Number(userId),
+          name: first.username || "",
+          mobile: first.mobile || mobile,
+          email: "",
+          lastVisit: new Date(),
+          totalAppointments: 0,
+          totalSpent: 0,
+        } as any);
+
+        const [stats] = await Promise.all([
+          loadClientData(userId, user?.organisationid || 0),
+          loadLoyaltyForClient(userId, first.username || "", first.mobile || mobile),
+        ]);
 
         setSelectedClient({
           id: Number(userId),
@@ -528,7 +597,7 @@ const ClientManagement = () => {
           email: "",
           lastVisit: stats.lastVisit,
           totalAppointments: stats.totalAppointments,
-          totalSpent: stats.totalSpent
+          totalSpent: stats.totalSpent,
         } as any);
 
         toast({
@@ -557,7 +626,8 @@ const ClientManagement = () => {
 
   const handleClientCreated = () => {
     // Reload clients list after a new client is created
-    loadClientsList();
+    void invalidateOrganisationClients();
+    void refetchClients();
   };
 
   const handleAddAppointmentRecord = () => {
@@ -570,21 +640,10 @@ const ClientManagement = () => {
   const showDetailPanel = !isMobile || !!selectedClient;
 
   return (
-    <div className={cn(org.page, "flex min-h-0 flex-1 flex-col overflow-hidden")}>
-      <div
-        className={cn(
-          org.pageSection,
-          "flex min-h-0 flex-1 flex-col overflow-hidden px-4 py-3 sm:px-6 lg:px-8",
-        )}
-      >
-        <div
-          className={cn(
-            org.card,
-            "flex min-h-0 flex-1 flex-col overflow-hidden lg:flex-row",
-          )}
-        >
-          {showListPanel ? (
-            <aside className="flex min-h-0 flex-1 flex-col overflow-hidden border-stone-100 lg:h-full lg:w-[22rem] lg:flex-none lg:border-r xl:w-96">
+    <div className={cn(org.page, "flex h-full min-h-0 flex-1 flex-col overflow-hidden bg-[#f8fafc]")}>
+      <div className="flex min-h-0 flex-1 overflow-hidden lg:flex-row">
+        {showListPanel ? (
+          <aside className="flex min-h-0 flex-1 flex-col overflow-hidden border-stone-200 bg-white lg:h-full lg:w-[22rem] lg:flex-none lg:border-r xl:w-96">
               <div className="shrink-0 border-b border-stone-100 p-4 sm:p-5">
                 <form
                   className="flex gap-2"
@@ -621,10 +680,10 @@ const ClientManagement = () => {
               </div>
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-stone-100 bg-appointza-cream/40 px-4 py-3 sm:px-5">
+                <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-stone-200 bg-white px-4 py-3 sm:px-5">
                   <div className="flex items-center gap-2">
                     <h2 className="text-sm font-semibold text-appointza-navy">All customers</h2>
-                    <span className="rounded-full bg-white px-2.5 py-0.5 text-xs font-medium tabular-nums text-stone-600 shadow-sm">
+                    <span className="rounded-full border border-stone-200 bg-white px-2.5 py-0.5 text-xs font-medium tabular-nums text-stone-600">
                       {isLoadingClients ? "…" : filteredClients.length}
                     </span>
                   </div>
@@ -653,55 +712,58 @@ const ClientManagement = () => {
                       No customers match your search.
                     </div>
                   ) : (
-                    <ul className="divide-y divide-stone-100">
-                      {filteredClients.map((c) => {
-                        const isSelected = selectedClient?.id === Number(c.userid);
-                        return (
-                          <li key={c.userid}>
-                            <button
-                              type="button"
-                              onClick={() => void handleClientClick(c)}
-                              className={cn(
-                                "flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors sm:px-5",
-                                isSelected ?
-                                  "border-l-[3px] border-appointza-coral bg-[#FFF0EB] pl-[calc(1rem-3px)] sm:pl-[calc(1.25rem-3px)]"
-                                : "border-l-[3px] border-transparent hover:bg-stone-50"
-                              )}
-                            >
-                              <span
+                    <>
+                      <ul className="divide-y divide-stone-100">
+                        {visibleClients.map((c) => {
+                          const isSelected = selectedClient?.id === Number(c.userid);
+                          return (
+                            <li key={c.userid}>
+                              <button
+                                type="button"
+                                onClick={() => void handleClientClick(c)}
                                 className={cn(
-                                  "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold",
-                                  isSelected ?
-                                    "bg-gradient-coral text-white"
-                                  : "bg-stone-100 text-stone-600"
+                                  "flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors sm:px-5",
+                                  isSelected
+                                    ? "border-l-[3px] border-appointza-coral bg-[#FFF0EB] pl-[calc(1rem-3px)] sm:pl-[calc(1.25rem-3px)]"
+                                    : "border-l-[3px] border-transparent hover:bg-stone-50"
                                 )}
-                                aria-hidden
                               >
-                                {clientInitials(c.username)}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate font-medium text-appointza-navy">
-                                  {c.username || "Unknown"}
-                                </p>
-                                <p className="truncate text-sm text-stone-500">{c.mobile || "—"}</p>
-                              </div>
-                              <div className="flex shrink-0 flex-col items-end gap-1">
-                                {c.is_room_customer ? (
-                                  <Badge variant="secondary" className="text-[10px] uppercase tracking-wide">
-                                    Room guest
-                                  </Badge>
-                                ) : null}
-                                {c.city ? (
-                                  <span className="hidden rounded-full bg-stone-100 px-2.5 py-0.5 text-xs text-stone-600 sm:inline">
-                                    {c.city}
-                                  </span>
-                                ) : null}
-                              </div>
-                            </button>
-                          </li>
-                        );
-                      })}
-                    </ul>
+                                <span
+                                  className={cn(
+                                    "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold",
+                                    isSelected
+                                      ? "bg-gradient-coral text-white"
+                                      : "bg-stone-100 text-stone-600"
+                                  )}
+                                  aria-hidden
+                                >
+                                  {clientInitials(c.username)}
+                                </span>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate font-medium text-appointza-navy">
+                                    {c.username || "Unknown"}
+                                  </p>
+                                  <p className="truncate text-sm text-stone-500">{c.mobile || "—"}</p>
+                                </div>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {hasNextPage ? (
+                        <div className="border-t border-stone-100 p-3">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 w-full text-xs"
+                            disabled={isFetchingNextPage}
+                            onClick={() => void fetchNextPage()}
+                          >
+                            {isFetchingNextPage ? "Loading…" : "Show more"}
+                          </Button>
+                        </div>
+                      ) : null}
+                    </>
                   )}
                 </div>
               </div>
@@ -709,7 +771,7 @@ const ClientManagement = () => {
           ) : null}
 
           {showDetailPanel ? (
-            <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-appointza-cream/30">
+            <main className="flex h-full min-h-0 min-w-0 flex-1 flex-col bg-[#f8fafc]">
               {selectedClient ? (
                 <>
                   <div className="border-b border-stone-100 bg-white p-4 sm:p-6">
@@ -727,7 +789,7 @@ const ClientManagement = () => {
                     ) : null}
                     <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
                       <div className="flex items-start gap-4">
-                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-coral text-lg font-semibold text-white shadow-md shadow-[#FF6B6B]/20">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-xl border border-stone-200 bg-white text-lg font-semibold text-blue-700">
                           {clientInitials(selectedClient.name)}
                         </div>
                         <div className="min-w-0">
@@ -785,8 +847,13 @@ const ClientManagement = () => {
                         </Button>
                       </div>
                     </div>
-                    <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                      <div className="rounded-2xl border border-stone-100 bg-appointza-cream/50 px-4 py-3">
+                    <div
+                      className={cn(
+                        "mt-5 grid gap-3",
+                        selectedClient.isRoomCustomer ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2",
+                      )}
+                    >
+                      <div className="rounded-xl border border-stone-200 bg-white px-4 py-3">
                         <p className="text-xs font-medium text-stone-500">
                           {selectedClient.isRoomCustomer ? "Service visits" : "Total visits"}
                         </p>
@@ -794,7 +861,7 @@ const ClientManagement = () => {
                           {selectedClient.totalAppointments}
                         </p>
                       </div>
-                      <div className="rounded-2xl border border-stone-100 bg-appointza-cream/50 px-4 py-3">
+                      <div className="rounded-xl border border-stone-200 bg-white px-4 py-3">
                         <p className="text-xs font-medium text-stone-500">
                           {selectedClient.isRoomCustomer ? "Latest stay" : "Last visit"}
                         </p>
@@ -802,17 +869,78 @@ const ClientManagement = () => {
                           {format(selectedClient.lastVisit, "MMM d, yyyy")}
                         </p>
                       </div>
-                      <div className="col-span-2 rounded-2xl border border-stone-100 bg-appointza-cream/50 px-4 py-3 sm:col-span-1">
-                        <p className="text-xs font-medium text-stone-500">
-                          {selectedClient.isRoomCustomer ? "Room stays" : "Customer ID"}
-                        </p>
-                        <p className="mt-0.5 text-lg font-semibold tabular-nums text-appointza-navy">
-                          {selectedClient.isRoomCustomer ?
-                            clientRoomStays.length
-                          : `#${selectedClient.id}`}
-                        </p>
-                      </div>
+                      {selectedClient.isRoomCustomer ? (
+                        <div className="rounded-xl border border-stone-200 bg-white px-4 py-3">
+                          <p className="text-xs font-medium text-stone-500">Room stays</p>
+                          <p className="mt-0.5 text-lg font-semibold tabular-nums text-appointza-navy">
+                            {clientRoomStays.length}
+                          </p>
+                        </div>
+                      ) : null}
                     </div>
+                    {!selectedClient.isRoomOnly && selectedClient.id > 0 ? (
+                      <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+                        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                          <p className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                            <Sparkles className="h-4 w-4" aria-hidden />
+                            Loyalty
+                            {loadingLoyaltyUserId === selectedClient.id ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-700" aria-hidden />
+                            ) : null}
+                          </p>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="border-amber-300 bg-white hover:bg-amber-50"
+                            disabled={loadingLoyaltyUserId === selectedClient.id}
+                            onClick={() =>
+                              void openLoyaltyDetails(
+                                selectedClient.id,
+                                selectedClient.name,
+                                selectedClient.mobile,
+                              )
+                            }
+                          >
+                            Details
+                          </Button>
+                        </div>
+                        {loadingLoyaltyUserId === selectedClient.id &&
+                        !loyaltyByUserId[selectedClient.id] ? (
+                          <div className="flex items-center gap-2 py-4 text-sm text-stone-500">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading loyalty data…
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                            <div className="rounded-lg border border-amber-200/80 bg-white px-3 py-2.5">
+                              <p className="text-xs font-medium text-stone-500">Points</p>
+                              <p className="mt-0.5 text-lg font-semibold tabular-nums text-appointza-navy">
+                                {(loyaltyByUserId[selectedClient.id]?.current_points ?? 0).toLocaleString()}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-amber-200/80 bg-white px-3 py-2.5">
+                              <p className="text-xs font-medium text-stone-500">Services</p>
+                              <p className="mt-0.5 text-lg font-semibold tabular-nums text-appointza-navy">
+                                {loyaltyByUserId[selectedClient.id]?.completed_services_count ?? 0}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-amber-200/80 bg-white px-3 py-2.5">
+                              <p className="text-xs font-medium text-stone-500">Tier</p>
+                              <p className="mt-0.5 text-lg font-semibold text-appointza-navy">
+                                {loyaltyByUserId[selectedClient.id]?.current_tier_name || "—"}
+                              </p>
+                            </div>
+                            <div className="rounded-lg border border-amber-200/80 bg-white px-3 py-2.5">
+                              <p className="text-xs font-medium text-stone-500">Spend</p>
+                              <p className="mt-0.5 text-lg font-semibold tabular-nums text-appointza-navy">
+                                ₹{Number(loyaltyByUserId[selectedClient.id]?.total_spend ?? 0).toLocaleString()}
+                              </p>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div className="border-b border-stone-100 bg-white">
@@ -1111,17 +1239,16 @@ const ClientManagement = () => {
                   </div>
                 </>
               ) : (
-                <div className={cn(org.empty, "m-4 flex min-h-0 flex-1 flex-col items-center justify-center sm:m-6")}>
+                <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 text-center">
                   <Users className="h-12 w-12 text-stone-300" aria-hidden />
                   <h3 className="mt-4 text-lg font-semibold text-appointza-navy">Select a customer</h3>
-                  <p className="mt-2 max-w-sm text-center text-sm text-stone-500">
+                  <p className="mt-2 max-w-sm text-sm text-stone-500">
                     Pick someone from the list or search by mobile to view appointments, history, and events.
                   </p>
                 </div>
               )}
             </main>
           ) : null}
-        </div>
       </div>
 
       {/* Event booking details dialog */}
@@ -1222,28 +1349,155 @@ const ClientManagement = () => {
         </DialogContent>
       </Dialog>
 
-      <CreateClientDialog
-        open={isCreateDialogOpen}
-        onOpenChange={setIsCreateDialogOpen}
-        onClientCreated={handleClientCreated}
-      />
+      {mountCreateClientDialog ? (
+        <CreateClientDialog
+          open={isCreateDialogOpen}
+          onOpenChange={setIsCreateDialogOpen}
+          onClientCreated={handleClientCreated}
+        />
+      ) : null}
 
       {/* On-Spot Registration Dialog - create user & book inline, no URL */}
-      <OnSpotRegistrationDialog
-        open={isOnSpotDialogOpen}
-        onOpenChange={setIsOnSpotDialogOpen}
-        onClientCreated={handleClientCreated}
-      />
+      {mountOnSpotDialog ? (
+        <OnSpotRegistrationDialog
+          open={isOnSpotDialogOpen}
+          onOpenChange={setIsOnSpotDialogOpen}
+          onClientCreated={handleClientCreated}
+        />
+      ) : null}
+      <Dialog
+        open={!!selectedLoyaltyWallet}
+        onOpenChange={(open) => !open && setSelectedLoyaltyWallet(null)}
+      >
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedLoyaltyWallet?.client_name || `Customer #${selectedLoyaltyWallet?.client_user_id}`}
+            </DialogTitle>
+            {selectedLoyaltyWallet?.client_mobile ? (
+              <DialogDescription>{selectedLoyaltyWallet.client_mobile}</DialogDescription>
+            ) : null}
+          </DialogHeader>
+          {selectedLoyaltyWallet ? (
+            <div className="space-y-6">
+              {isLoadingLoyaltyDetails ? (
+                <div className="flex items-center justify-center gap-2 py-6 text-sm text-stone-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading loyalty details…
+                </div>
+              ) : null}
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <p className="text-xs text-stone-500">Points</p>
+                  <p className="text-lg font-bold tabular-nums">
+                    {selectedLoyaltyWallet.current_points.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500">Services</p>
+                  <p className="text-lg font-bold tabular-nums">
+                    {selectedLoyaltyWallet.completed_services_count}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500">Tier</p>
+                  <p className="text-lg font-bold">{selectedLoyaltyWallet.current_tier_name || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500">Spend</p>
+                  <p className="text-lg font-bold tabular-nums">
+                    ₹{Number(selectedLoyaltyWallet.total_spend).toLocaleString()}
+                  </p>
+                </div>
+              </div>
 
-      <RoomBookingDetailsDialog
-        room={roomDetailsTarget}
-        open={isRoomDetailsOpen}
-        onClose={() => {
-          setIsRoomDetailsOpen(false);
-          setRoomDetailsTarget(null);
-        }}
-      />
-    </div>
+              <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                <div>
+                  <p className="text-xs text-stone-500">Total earned</p>
+                  <p className="text-base font-semibold tabular-nums">
+                    {selectedLoyaltyWallet.total_points_earned.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-stone-500">Redeemed</p>
+                  <p className="text-base font-semibold tabular-nums">
+                    {selectedLoyaltyWallet.total_points_redeemed.toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <h4 className="mb-2 font-semibold">Available rewards</h4>
+                {(selectedLoyaltyWallet.available_rewards ?? []).length === 0 ? (
+                  <p className="text-sm text-stone-400">No available rewards</p>
+                ) : (
+                  <ul className="space-y-2">
+                    {selectedLoyaltyWallet.available_rewards.map((r) => (
+                      <li
+                        key={r.id}
+                        className="flex justify-between gap-3 rounded-lg border border-stone-200 px-3 py-2 text-sm"
+                      >
+                        <span>
+                          {loyaltyRewardLabel(r.reward_type, r.reward_value, r.max_discount_amount)}
+                        </span>
+                        {r.expires_at ? (
+                          <span className="shrink-0 text-stone-400">
+                            Expires {format(new Date(r.expires_at), "dd MMM yyyy")}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              <div>
+                <h4 className="mb-2 font-semibold">Points history</h4>
+                {(selectedLoyaltyWallet.recent_transactions ?? []).length === 0 ? (
+                  <p className="text-sm text-stone-400">No transactions yet</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Date</TableHead>
+                        <TableHead>Type</TableHead>
+                        <TableHead>Change</TableHead>
+                        <TableHead>Balance</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {selectedLoyaltyWallet.recent_transactions.map((t) => (
+                        <TableRow key={t.id}>
+                          <TableCell className="text-xs">
+                            {t.created_at ? format(new Date(t.created_at), "dd MMM yyyy HH:mm") : "—"}
+                          </TableCell>
+                          <TableCell className="capitalize">{t.transaction_type}</TableCell>
+                          <TableCell className={t.points_delta >= 0 ? "text-emerald-600" : "text-red-600"}>
+                            {t.points_delta >= 0 ? "+" : ""}
+                            {t.points_delta}
+                          </TableCell>
+                          <TableCell>{t.balance_after}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {mountRoomDetailsDialog ? (
+        <RoomBookingDetailsDialog
+          room={roomDetailsTarget}
+          open={isRoomDetailsOpen}
+          onClose={() => {
+            setIsRoomDetailsOpen(false);
+            setRoomDetailsTarget(null);
+          }}
+        />
+      ) : null}    </div>
   );
 };
 

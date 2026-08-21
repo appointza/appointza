@@ -1,12 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
 import {
   CalendarDays,
-  CalendarClock,
   Home,
   Users,
   Briefcase,
   Settings,
-  Calendar,
+  Target,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +44,7 @@ const OrganizationBottomNav = () => {
   const hasDashboardAccess = !isStaff || userpermission?.editandviewDashboard === true;
   const hasAppointmentsAccess = !isStaff || userpermission?.editandviewAppointments === true;
   const hasEventsAccess = !isStaff || userpermission?.editandviewEvents === true;
+  const hasBookingsAccess = hasAppointmentsAccess || hasEventsAccess;
   const hasServicesAccess =
     !isStaff ||
     (userpermission?.editandviewCreateService === true ||
@@ -64,21 +64,7 @@ const OrganizationBottomNav = () => {
       icon: CalendarDays,
       label: 'Bookings',
       shortLabel: 'Bookings',
-      hasAccess: hasAppointmentsAccess,
-    },
-    {
-      to: '/organization/calendar',
-      icon: CalendarClock,
-      label: 'Calendar',
-      shortLabel: 'Calendar',
-      hasAccess: hasAppointmentsAccess,
-    },
-    {
-      to: '/organization/event-bookings',
-      icon: Calendar,
-      label: 'Event Participants',
-      shortLabel: 'Events',
-      hasAccess: hasEventsAccess,
+      hasAccess: hasBookingsAccess,
     },
     {
       to: '/organization/services',
@@ -86,6 +72,13 @@ const OrganizationBottomNav = () => {
       label: 'Services & Events',
       shortLabel: 'Services',
       hasAccess: hasServicesAccess,
+    },
+    {
+      to: '/organization/leads',
+      icon: Target,
+      label: 'Leads',
+      shortLabel: 'Leads',
+      hasAccess: hasClientsAccess,
     },
     {
       to: '/organization/clients',
@@ -107,7 +100,7 @@ const OrganizationBottomNav = () => {
 
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 border-t border-blue-50 bg-white/95 shadow-[0_-8px_30px_-18px_rgba(36,76,170,0.28)] backdrop-blur-xl safe-area-sides lg:hidden"
+      className="fixed bottom-0 left-0 right-0 z-50 border-t border-stone-200 bg-white shadow-none safe-area-sides lg:hidden"
       aria-label="Organization navigation"
     >
       <div className="flex min-h-[3.75rem] w-full overflow-x-auto pb-[env(safe-area-inset-bottom,0px)] pt-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -131,7 +124,7 @@ const OrganizationBottomNav = () => {
               <span
                 className={cn(
                   'flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition-colors',
-                  isActive ? 'bg-gradient-appointza text-white shadow-md shadow-blue-500/20' : 'bg-transparent'
+                  isActive ? 'bg-blue-600 text-white shadow-none' : 'bg-transparent'
                 )}
               >
                 <Icon className="h-[1.125rem] w-[1.125rem] shrink-0" strokeWidth={isActive ? 2.25 : 2} />

@@ -1,31 +1,38 @@
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 
+/** Horizontal padding shared by all profile-settings tabs. */
+export const profileSettingsX = "px-4 md:px-6 lg:px-8";
+
 /** Shared profile-settings card sections (embedded tabs under /organization/profile). */
 export const settingsEmbedded = {
-  shell: cn(org.card, "overflow-hidden rounded-3xl"),
-  sectionHeader:
-    "space-y-1.5 border-b border-blue-50 bg-gradient-to-br from-blue-50/80 via-white to-violet-50/50 p-5 md:p-6",
-  sectionHeaderPlain: "space-y-1.5 border-b border-blue-50 p-5 md:p-6",
-  sectionBody: "p-5 md:p-6",
-  title: "flex items-center gap-3 text-lg font-semibold leading-snug text-appointza-navy md:text-xl",
+  shell: cn(org.card, "w-full overflow-hidden rounded-xl shadow-none"),
+  /** Tab content title — no bottom border; tabs row already divides the page. */
+  sectionHeader: cn(profileSettingsX, "w-full space-y-1.5 bg-white pb-4 pt-5 md:pb-5 md:pt-6"),
+  sectionHeaderPlain: cn(profileSettingsX, "w-full space-y-1.5 bg-white pb-4 pt-5 md:pb-5 md:pt-6"),
+  sectionBody: cn(profileSettingsX, "w-full min-w-0 pb-5 pt-0 md:pb-6"),
+  title: "flex w-full items-center gap-3 text-lg font-semibold leading-snug text-appointza-navy md:text-xl",
   description: "text-sm text-slate-500",
   iconWrap:
     "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600",
-  /** Nested card inside the settings shell — flat section instead of stacked card. */
-  card: (embedded?: boolean, className?: string) =>
-    cn(
-      embedded ?
-        "rounded-2xl border border-blue-50 bg-appointza-cream/40 shadow-none"
-      : cn(org.card, "shadow-sm"),
-      className
-    ),
-  /** List row inside embedded settings. */
+  list: "w-full space-y-3",
+  /** Single grouped list — one border, dividers between rows (no stacked cards). */
+  listGroup: "w-full overflow-hidden rounded-xl border border-stone-200 bg-white divide-y divide-stone-200",
+  listRow:
+    "flex w-full flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-5",
+  /** Standalone row card (non-embedded pages). */
   row: (embedded?: boolean, className?: string) =>
     cn(
-      embedded ?
-        "rounded-2xl border border-blue-50 bg-white p-4 transition-colors hover:border-blue-100 hover:bg-blue-50/40"
-      : "rounded-xl border border-slate-200 bg-white p-4 hover:bg-blue-50/40",
-      className
+      embedded
+        ? settingsEmbedded.listRow
+        : "rounded-xl border border-stone-200 bg-white p-4 hover:bg-blue-50/30",
+      className,
+    ),
+  card: (embedded?: boolean, className?: string) =>
+    cn(
+      embedded
+        ? "w-full rounded-xl border border-stone-200 bg-white shadow-none"
+        : cn(org.card, "w-full shadow-none"),
+      className,
     ),
 } as const;

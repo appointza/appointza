@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/contexts/AuthContext';
 import { PrivilegeUtil } from '@/utils/privilege.util';
 import { OrganisationServicesService } from '@/services/organisationservices.service';
@@ -17,7 +17,10 @@ import {
 } from '@/utils/organizationOnboarding.util';
 import type { OnboardingStepId } from '@/components/onboarding/OrganizationOnboarding';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useOrganisationLocations } from '@/hooks/useOrganisationLocations';
+import {
+  fetchOrganisationLocations,
+  organisationLocationsQueryKey,
+} from '@/hooks/useOrganisationLocations';
 
 export interface OnboardingStatus {
   hasCustomDomain: boolean;
@@ -63,6 +66,7 @@ function resolveNextStep(
 
 export const useOnboardingStatus = () => {
   const { user, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
   const organizationId = user?.organisationid;
   const isStaff = user?.isStaff === true;
   const [timeoutReached, setTimeoutReached] = useState(false);
@@ -76,47 +80,54 @@ export const useOnboardingStatus = () => {
   const cachedComplete =
     !cacheBypass && orgId > 0 && readOnboardingCompleteCache(orgId);
 
-  const locationsQuery = useOrganisationLocations({
-    organisationId: orgId,
-    enabled: !!isAuthenticated && orgId > 0 && !isStaff && !cachedComplete,
-  });
-
   const { data: status, isLoading: onboardingLoading, error, refetch } = useQuery<OnboardingStatus>({
     queryKey: ['onboarding-status', organizationId],
     queryFn: async () => {
+      let timeoutId: ReturnType<typeof setTimeout> | undefined;
       const timeoutPromise = new Promise<OnboardingStatus>((_, reject) => {
-        setTimeout(() => {
+        timeoutId = setTimeout(() => {
           reject(new Error('Onboarding status check timed out'));
         }, 10000);
       });
 
       const fetchPromise = (async () => {
-        const locations = locationsQuery.data ?? [];
-        const hasCustomDomain = locations.some(
-          (loc) => !!normalizeCustomUrlSlug(loc.customurl),
-        );
+        const orgIdValue = organizationId!;
 
+        // Locations via shared RQ key (dedupes with sidebar / Dashboard useOrganisationLocations).
+        // Templates, services, and timings run in parallel with locations.
         const referenceValueService = new ReferenceValueService();
         const templateReq = new ReferenceValueSelectReq();
         templateReq.referencetypeid = ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID;
-        templateReq.organisationid = organizationId!;
-        const orgTemplates = await referenceValueService.select(templateReq);
-        const orgTemplateIds = new Set(
-          (orgTemplates ?? []).map((template) => template.id).filter((id) => id > 0),
-        );
-        const hasWebsite = orgHasWebsiteFromLocations(locations, orgTemplateIds);
+        templateReq.organisationid = orgIdValue;
 
         const servicesService = new OrganisationServicesService();
         const servicesReq = new OrganisationServicesSelectReq();
-        servicesReq.organisationid = organizationId!;
-        const services = await servicesService.select(servicesReq);
-        const hasServices = services && services.length > 0;
+        servicesReq.organisationid = orgIdValue;
 
         const timingService = new OrganisationServiceTimingService();
         const timingReq = new OrganisationServiceTimingSelectReq();
-        timingReq.organisationid = organizationId!;
-        const timings = await timingService.select(timingReq);
-        const hasTiming = timings && timings.length > 0;
+        timingReq.organisationid = orgIdValue;
+
+        const [locations, orgTemplates, services, timings] = await Promise.all([
+          queryClient.fetchQuery({
+            queryKey: organisationLocationsQueryKey(orgIdValue, 0),
+            queryFn: () => fetchOrganisationLocations(orgIdValue, 0),
+            staleTime: 60_000,
+          }),
+          referenceValueService.select(templateReq),
+          servicesService.select(servicesReq),
+          timingService.select(timingReq),
+        ]);
+
+        const hasCustomDomain = (locations ?? []).some(
+          (loc) => !!normalizeCustomUrlSlug(loc.customurl),
+        );
+        const orgTemplateIds = new Set(
+          (orgTemplates ?? []).map((template) => template.id).filter((id) => id > 0),
+        );
+        const hasWebsite = orgHasWebsiteFromLocations(locations ?? [], orgTemplateIds);
+        const hasServices = !!(services && services.length > 0);
+        const hasTiming = !!(timings && timings.length > 0);
 
         const isComplete = hasCustomDomain && hasServices && hasWebsite && hasTiming;
         const nextStep = resolveNextStep(hasCustomDomain, hasServices, hasWebsite, hasTiming);
@@ -137,14 +148,13 @@ export const useOnboardingStatus = () => {
       } catch (fetchError) {
         console.error('❌ Onboarding status check failed or timed out:', fetchError);
         return { ...defaultStatus };
+      } finally {
+        if (timeoutId !== undefined) {
+          clearTimeout(timeoutId);
+        }
       }
     },
-    enabled:
-      !!isAuthenticated &&
-      !!organizationId &&
-      !isStaff &&
-      !cachedComplete &&
-      locationsQuery.isSuccess,
+    enabled: !!isAuthenticated && !!organizationId && !isStaff && !cachedComplete,
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
     retry: 1,
@@ -162,14 +172,15 @@ export const useOnboardingStatus = () => {
   const invalidateAndRefetch = useCallback(() => {
     if (organizationId) {
       clearOnboardingCompleteCache(organizationId);
+      void queryClient.invalidateQueries({
+        queryKey: organisationLocationsQueryKey(organizationId, 0),
+      });
     }
     setCacheBypass(true);
     return refetch().finally(() => setCacheBypass(false));
-  }, [organizationId, refetch]);
+  }, [organizationId, queryClient, refetch]);
 
-  const isLoading = cachedComplete
-    ? false
-    : locationsQuery.isLoading || onboardingLoading;
+  const isLoading = cachedComplete ? false : onboardingLoading;
 
   useEffect(() => {
     if (isLoading && !timeoutReached) {

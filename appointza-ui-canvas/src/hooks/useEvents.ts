@@ -2,11 +2,19 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Event, EventSelectReq, EventDeleteReq } from '@/models/event.model';
 import { useToast } from '@/hooks/use-toast';
 import { EventService } from '@/services/event.service';
+import { invalidatePublicSiteCacheForLocation } from '@/utils/publicSiteCache.util';
 
 export const useEvents = (organizationId?: number, locationId?: number) => {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const service = new EventService();
+
+  const bustPublicSiteCache = (eventLocationId?: number) => {
+    const locId = Number(eventLocationId || locationId || 0);
+    if (locId > 0) {
+      invalidatePublicSiteCacheForLocation(locId);
+    }
+  };
 
   const {
     data: events,
@@ -40,8 +48,9 @@ export const useEvents = (organizationId?: number, locationId?: number) => {
       const eventToSave = { ...eventData } as Event;
       return await service.insert(eventToSave);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      bustPublicSiteCache(variables?.organisation_location_id);
     },
     onError: (error) => {
       toast({
@@ -58,8 +67,9 @@ export const useEvents = (organizationId?: number, locationId?: number) => {
       console.log('Updating event:', eventData);
       return await service.update(eventData);
     },
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      bustPublicSiteCache(variables?.organisation_location_id);
       toast({
         title: "Event Updated",
         description: "Event has been updated successfully.",
@@ -90,6 +100,7 @@ export const useEvents = (organizationId?: number, locationId?: number) => {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['events'] });
+      bustPublicSiteCache(locationId);
       toast({
         title: "Event Deleted",
         description: "Event has been removed successfully.",

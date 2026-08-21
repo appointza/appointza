@@ -1,14 +1,14 @@
 import type {
   HospitalityFoodItem,
+  HospitalityGuestService,
   HospitalityNearbyPlace,
   HospitalityPackage,
   OrganisationHospitalityProfile,
   OrganisationRoom,
 } from "@/models/hospitality.model";
-import { statusLabel } from "@/models/hospitality.model";
 import type { SiteDetailsItem } from "@/models/sitedetail.model";
 import { defaultRoomCode } from "@/utils/roomAmenities.util";
-import { buildRoomBookPath } from "@/utils/templateBookingNav.util";
+import { buildRoomBookPath, buildPackageBookPath } from "@/utils/templateBookingNav.util";
 
 export type TemplateRoomItem = {
   id: string;
@@ -56,7 +56,15 @@ export type TemplateNearbyItem = {
   map_url: string;
 };
 
-const BOOKABLE_STATUSES = new Set(["available"]);
+export type TemplateGuestServiceItem = {
+  name: string;
+  price: string;
+  description: string;
+  category: string;
+  icon: string;
+};
+
+const PUBLIC_BLOCKED_STATUSES = new Set(["maintenance", "blocked"]);
 
 function resolveMediaUrl(value: string, filesApiBaseUrl: string, fallback: string): string {
   const trimmed = (value || "").trim();
@@ -94,10 +102,11 @@ export function buildTemplateRooms(
 ): TemplateRoomItem[] {
   return rooms
     .filter((room) => room.isactive !== false)
+    .filter((room) => !PUBLIC_BLOCKED_STATUSES.has((room.status || "").toLowerCase()))
     .map((room) => {
       const code = roomCode(room);
-      const available = BOOKABLE_STATUSES.has((room.status || "").toLowerCase());
       const name = room.room_name?.trim() || `Room ${room.room_number}`;
+      // Public site always offers Book — availability is checked on the booking page by dates.
       return {
         id: code,
         room_number: room.room_number,
@@ -108,9 +117,9 @@ export function buildTemplateRooms(
         price: room.pricing?.price_per_night ?? 0,
         main_photo: resolveMediaUrl(room.main_photo, filesApiBaseUrl, fallbackImageUrl),
         video_url: room.booking_rules?.video_url ?? "",
-        status: room.status,
-        status_label: statusLabel(room.status),
-        is_available: available,
+        status: "available",
+        status_label: "Available",
+        is_available: true,
         ROOM_BOOK_URL: buildRoomBookPath(organisationId, locationId, code),
       };
     });
@@ -127,10 +136,6 @@ export function buildTemplatePackages(
     .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
     .map((pkg) => {
       const id = pkg.id?.trim() || `name:${pkg.name.trim().toLowerCase()}`;
-      const params = new URLSearchParams();
-      params.set("packageId", id);
-      params.set("organisationId", String(organisationId));
-      params.set("locationId", String(locationId));
       return {
         id,
         name: pkg.name,
@@ -142,7 +147,7 @@ export function buildTemplatePackages(
         max_guests: pkg.max_guests ?? 2,
         room_type: pkg.room_type ?? "",
         includes: (pkg.includes ?? []).join(" · "),
-        PACKAGE_BOOK_URL: `/book?${params.toString()}`,
+        PACKAGE_BOOK_URL: buildPackageBookPath(organisationId, locationId, id),
       };
     });
 }
@@ -168,6 +173,19 @@ export function buildTemplateNearbyPlaces(items: HospitalityNearbyPlace[]): Temp
       icon: item.icon ?? "",
       image_url: item.image_url ?? "",
       map_url: item.map_url ?? "",
+    }));
+}
+
+export function buildTemplateGuestServices(items: HospitalityGuestService[]): TemplateGuestServiceItem[] {
+  return (items || [])
+    .filter((item) => item.is_active !== false && item.name?.trim())
+    .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+    .map((item) => ({
+      name: item.name,
+      price: item.price ?? "",
+      description: item.description ?? "",
+      category: item.category ?? "other",
+      icon: item.icon ?? "",
     }));
 }
 

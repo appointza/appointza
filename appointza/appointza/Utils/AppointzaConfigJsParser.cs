@@ -23,13 +23,11 @@ namespace appointza.Utils
             // Server project working directory
             paths.Add(Path.GetFullPath(Path.Combine(cwd, "wwwroot", "config.js")));
 
-            // Monorepo: run from appointza with appointzabuild next to the repo root
-            paths.Add(Path.GetFullPath(Path.Combine(cwd, "..", "..", "appointzabuild", "production", "wwwroot", "config.js")));
-            // Same but explicit production folder (optional twin at repo root; build script may sync)
-            paths.Add(Path.GetFullPath(Path.Combine(cwd, "..", "..", "appointzabuild", "production", "config.js")));
-            // bin/Debug/netX.0 -> repo root is 5 levels up (…/appointza_Server/appointza)
-            paths.Add(Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "appointzabuild", "production", "wwwroot", "config.js")));
-            paths.Add(Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "appointzabuild", "production", "config.js")));
+            // Monorepo: Appointza production build output
+            paths.Add(Path.GetFullPath(Path.Combine(cwd, "..", "..", "appointzabuild", "appointzaproduction", "wwwroot", "config.js")));
+            paths.Add(Path.GetFullPath(Path.Combine(cwd, "..", "..", "appointzabuild", "appointzaproduction", "config.js")));
+            paths.Add(Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "appointzabuild", "appointzaproduction", "wwwroot", "config.js")));
+            paths.Add(Path.GetFullPath(Path.Combine(baseDir, "..", "..", "..", "..", "..", "appointzabuild", "appointzaproduction", "config.js")));
 
             return DeduplicateExisting(paths);
         }

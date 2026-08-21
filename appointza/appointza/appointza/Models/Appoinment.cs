@@ -217,6 +217,9 @@ public string notes { get; set; }
         public string mobilenumber { get; set; }
         /// <summary>When true, include guests from active organisation room bookings.</summary>
         public bool include_room_customers { get; set; }
+        /// <summary>0 = return all rows (legacy). When take &gt; 0, apply OFFSET skip LIMIT take.</summary>
+        public int skip { get; set; }
+        public int take { get; set; }
     }
 
     public class ClientInfoRes

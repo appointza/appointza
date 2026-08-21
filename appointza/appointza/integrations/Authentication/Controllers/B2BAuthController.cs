@@ -236,9 +236,7 @@ namespace appointza.integrations.Authentication.Controllers
             {
                 ("appointza-client", "appointza-secret") => true,
                 ("latrexa-client", "latrexa-secret") => true,
-                ("momantza-client", "momantza-secret") => true,
                 ("campusza-client", "campusza-secret") => true,
-                ("crm-client", "crm-secret") => true,
                 _ => false
             };
         }

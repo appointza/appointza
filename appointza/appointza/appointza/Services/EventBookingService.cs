@@ -45,12 +45,26 @@ namespace appointza.Services
         public async Task<List<EventBooking>> SelectTransaction(IDb db, EventBookingSelectReq req)
         {
             List<EventBooking> result = new List<EventBooking>();
-            string query = @"
+            bool scopeByOrganisation = req.organisation_id > 0 || req.organisation_location_id > 0;
+            string query = scopeByOrganisation
+                ? @"
                 SELECT 
                     eb.id, eb.event_id, eb.user_id, eb.number_of_people, eb.total_amount, 
                     eb.payment_status, eb.payment_reference, eb.check_in_status, eb.confirmation_status, eb.notes, 
                     eb.created_at, eb.updated_at, eb.isactive,
-                    u.name as user_name, u.mobile as user_mobile
+                    u.name as user_name, u.mobile as user_mobile,
+                    e.event_name as event_name
+                FROM event_bookings eb
+                INNER JOIN events e ON e.id = eb.event_id AND e.isactive = TRUE
+                LEFT JOIN users u ON eb.user_id = u.id
+                "
+                : @"
+                SELECT 
+                    eb.id, eb.event_id, eb.user_id, eb.number_of_people, eb.total_amount, 
+                    eb.payment_status, eb.payment_reference, eb.check_in_status, eb.confirmation_status, eb.notes, 
+                    eb.created_at, eb.updated_at, eb.isactive,
+                    u.name as user_name, u.mobile as user_mobile,
+                    '' as event_name
                 FROM event_bookings eb
                 LEFT JOIN users u ON eb.user_id = u.id
                 ";
@@ -74,6 +88,16 @@ namespace appointza.Services
             {
                 queryBuilder.AddParameter("eb.user_id", "=", "user_id", req.user_id, DbTypes.Types.Long);
             }
+
+            if (req.organisation_id > 0)
+            {
+                queryBuilder.AddParameter("e.organisation_id", "=", "organisation_id", req.organisation_id, DbTypes.Types.Integer);
+            }
+
+            if (req.organisation_location_id > 0)
+            {
+                queryBuilder.AddParameter("e.organisation_location_id", "=", "organisation_location_id", req.organisation_location_id, DbTypes.Types.Integer);
+            }
             
             if (!string.IsNullOrWhiteSpace(req.payment_status))
             {
@@ -89,8 +113,35 @@ namespace appointza.Services
             {
                 queryBuilder.AddParameter("eb.confirmation_status", "=", "confirmation_status", req.confirmation_status, DbTypes.Types.String);
             }
+
+            if (!string.IsNullOrWhiteSpace(req.search))
+            {
+                var searchValue = $"%{req.search.Trim()}%";
+                if (scopeByOrganisation)
+                {
+                    queryBuilder.AddParameter(
+                        "(u.name ILIKE @search OR u.mobile ILIKE @search OR e.event_name ILIKE @search)",
+                        "search",
+                        searchValue,
+                        DbTypes.Types.String);
+                }
+                else
+                {
+                    queryBuilder.AddParameter(
+                        "(u.name ILIKE @search OR u.mobile ILIKE @search)",
+                        "search",
+                        searchValue,
+                        DbTypes.Types.String);
+                }
+            }
             
             queryBuilder.AddOrderBy(QueryBuilder.Order.DESC, "eb.created_at");
+            if (req.take > 0)
+            {
+                var take = Math.Min(req.take, 200);
+                var skip = req.skip < 0 ? 0 : req.skip;
+                queryBuilder.AddLimitOffset(take, skip);
+            }
             var command = queryBuilder.GetCommand(db);
             
             using (DbDataReader reader = await db.Execute(command))
@@ -113,6 +164,7 @@ namespace appointza.Services
                     temp.isactive = reader["isactive"] == DBNull.Value ? true : Convert.ToBoolean(reader["isactive"]);
                     temp.user_name = reader["user_name"] == DBNull.Value ? "" : reader["user_name"].ToString();
                     temp.user_mobile = reader["user_mobile"] == DBNull.Value ? "" : reader["user_mobile"].ToString();
+                    temp.event_name = reader["event_name"] == DBNull.Value ? "" : reader["event_name"].ToString();
                     
                     result.Add(temp);
                 }

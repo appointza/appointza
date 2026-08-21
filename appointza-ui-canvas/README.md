@@ -105,7 +105,7 @@ Legend: **Public** = no login required. **Auth** = requires login. **Org** = org
 | --- | --- | --- |
 | **Dashboard** | `/user`, `/user/dashboard` | Personal home: appointment stats, upcoming visits, spend summary, reviews for completed services. |
 | **Appointments** | `/user/appointments` | Upcoming and past bookings; filters; cancel; record payments; view service/location details. |
-| **Profile** | `/user/profile` | Edit profile and photo; sign out; account deletion flow; shortcuts (e.g. Momantza/Campusza) when enabled. |
+| **Profile** | `/user/profile` | Edit profile and photo; sign out; account deletion flow. |
 | **Settings** | `/user/settings` | Account preferences (notifications, privacy tabs). |
 | **Browse events** | `/user/events` | Public, active events with search/filters; opens booking for a chosen event. |
 | **Event booking** | `/user/events/:eventId/book` | Book seats: headcount, names, org-defined form fields, optional Razorpay checkout. |
@@ -132,10 +132,10 @@ Redirects: `/profile` → `/user/profile`, `/settings` → `/user/settings`.
 | **Templates & booking links** | `/organization/templates` (use `?tab=booking` for URL tools) | Visual template selection and **shareable booking URLs** (including encrypted/custom patterns) per location. |
 | **Booking page shortcut** | `/organization/booking-page` | Redirects to `/organization/templates?tab=booking`. |
 | **Organization settings** | `/organization/settings` | Org-level notifications, preferences, privacy (tabs). |
-| **Reference & form values** | `/organization/reference-values` | Reference lists/types used in the product; **event booking form** field builder. |
-| **Organization profile & hub** | `/organization/profile` | Tabbed hub: profile, embedded hours, staff, locations, templates, payment, reference values, account (visibility depends on **staff permissions**). |
+| **Organization profile & hub** | `/organization/profile` | Tabbed hub: profile, embedded hours, staff, locations, templates, payment, wallet, and account (visibility depends on **staff permissions**). |
 | **Payment settings** | `/organization/payment-settings` | Payment gateways (e.g. Razorpay): keys, environment, webhooks, test flows. |
-| **Clients (CRM)** | `/organization/clients` | Client search, timelines, history, today’s appointment, create client, links to walk-in booking. |
+| **Leads** | `/organization/leads` | Contact-form enquiries, lead search, details, and integration URLs. |
+| **Clients** | `/organization/clients` | Client search, timelines, history, today’s appointment, create client, links to walk-in booking. |
 | **On-spot registration** | `/organization/clients/on-spot-registration` | Register a walk-in (OTP when needed) and book a service or event immediately. |
 | **Book for client** | `/organization/clients/:clientId/book` | Staff books a service or event for an existing client. |
 
@@ -145,7 +145,6 @@ Redirects: `/profile` → `/user/profile`, `/settings` → `/user/settings`.
 
 | Screen name | Route(s) | Description |
 | --- | --- | --- |
-| **Momantza booking (embedded)** | `/momantza/booking` | Full-screen wrapper that loads the **Momantza** admin/mobile booking URL in an iframe (URL derived from `organisationdomain` in user context when present). App shell sidebar/bottom nav hidden. |
 | **Campusza staff hub** | `/campusza/staff` | Campusza-oriented menu of staff actions (UI entry points; paths shown inside may be placeholders for future routes). Shell nav hidden. |
 
 ### Source files vs routes
@@ -188,29 +187,35 @@ npm i
 npm run dev
 ```
 
-## Global URL Configuration (Web + Android + Server)
+## Global URL configuration
 
-Use one command before build instead of searching/replacing URLs manually:
+Edit **`public/config.js`** directly, or run:
 
 ```sh
 npm run set:url -- https://your-domain.com
 ```
 
-This updates:
-- UI runtime config files in `public/`
-- Android copied runtime config files in `android/app/src/main/assets/www/` (if present)
-- Vite env files (`.env`, `.env.development`, `.env.production`)
-- Server base URL settings in `PlanItNoww_Server/PlanItNoww/appsettings*.json`
+This updates `public/config.js` (and Android assets if present). Same file is used for **dev** (`npm run dev`) and **production** (`npm run build` / `.\build-appointza.ps1`).
 
-Then build and sync:
+**Full deploy (from repo root):**
+
+```powershell
+.\build-appointza.ps1
+```
+
+**UI dev only** (from this folder):
 
 ```sh
-npm run build
+npm run dev
+```
+
+**Capacitor** (after a full build):
+
+```sh
 npm run cap:sync
 ```
 
-Build output location:
-- Web UI build always goes to `../appointzabuild/production/wwwroot/`
+Build output: `../appointzabuild/appointzaproduction/wwwroot/`
 
 **Edit a file directly in GitHub**
 

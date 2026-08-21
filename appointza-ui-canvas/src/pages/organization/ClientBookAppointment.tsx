@@ -16,11 +16,12 @@ import {
   Clock,
   Check,
   Loader2,
+  BedDouble,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { org } from "@/lib/orgTheme";
 import { getServiceEffectivePriceForDate } from "@/utils/servicePricing.util";
-import OrganizationLayout from "@/components/layout/OrganizationLayout";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGlobalId } from "@/contexts/GlobalIdContext";
@@ -38,6 +39,9 @@ import { Event, EventSelectReq } from "@/models/event.model";
 import { EventBooking } from "@/models/eventbooking.model";
 import { AppoinmentFinal, SelectedSerivice } from "@/models/appoinment.model";
 import { encodeEventBookingNotes } from "@/utils/eventBookingNotes.util";
+import { hospitalityService } from "@/services/hospitality.service";
+import type { OrganisationType } from "@/models/organisation.model";
+import { ClientHospitalityBookingPanel } from "@/components/organization/ClientHospitalityBookingPanel";
 
 const ClientBookAppointment = () => {
   const { clientId } = useParams<{ clientId: string }>();
@@ -76,7 +80,12 @@ const ClientBookAppointment = () => {
     return new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
   };
 
-  const [bookingType, setBookingType] = useState<"service" | "event">("service");
+  type BookingType = "service" | "event" | "stay";
+  const [bookingType, setBookingType] = useState<BookingType>("service");
+  const [organisationType, setOrganisationType] = useState<OrganisationType>("service");
+
+  const showHospitalityBooking =
+    organisationType === "hospitality" || organisationType === "both";
 
   // Service booking state
   const [services, setServices] = useState<OrganisationServices[]>([]);
@@ -108,12 +117,20 @@ const ClientBookAppointment = () => {
     }
   }, [clientUserId, navigate, toast]);
 
+  useEffect(() => {
+    if (organisationId === 0) return;
+    void hospitalityService.getProfile(organisationId).then((profile) => {
+      setOrganisationType(profile.organisation_type ?? "service");
+    });
+  }, [organisationId]);
+
   const loadServices = useCallback(async () => {
     if (organisationId === 0) return;
     setIsLoadingServices(true);
     try {
       const req = new OrganisationServicesSelectReq();
       req.organisationid = organisationId;
+      req.organisationlocationid = organisationLocationId;
       req.id = 0;
       const response = await organisationServicesService.select(req);
       const active = (response || []).filter((s) => s.isactive);
@@ -128,7 +145,7 @@ const ClientBookAppointment = () => {
     } finally {
       setIsLoadingServices(false);
     }
-  }, [organisationId, organisationServicesService, toast]);
+  }, [organisationId, organisationLocationId, organisationServicesService, toast]);
 
   const loadTimeSlots = useCallback(async () => {
     if (organisationId === 0 || organisationLocationId === 0) return;
@@ -373,8 +390,12 @@ const ClientBookAppointment = () => {
   };
 
   return (
-    <OrganizationLayout>
-      <div className="space-y-6 max-w-4xl mx-auto">
+    <div
+      className={cn(
+        org.pageSection,
+        "w-full max-w-none space-y-6 px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] pt-4 sm:px-6 md:pb-8 md:pt-5",
+      )}
+    >
         <div className="flex items-center gap-4">
           <Button
             variant="ghost"
@@ -386,7 +407,7 @@ const ClientBookAppointment = () => {
           <div>
             <h1 className="text-2xl font-bold">Book for Client</h1>
             <p className="text-muted-foreground">
-              Create appointment or book event for this client
+              Book a service, event, or stay for this client
             </p>
           </div>
         </div>
@@ -402,16 +423,30 @@ const ClientBookAppointment = () => {
           </CardContent>
         </Card>
 
-        <Tabs value={bookingType} onValueChange={(v) => setBookingType(v as "service" | "event")}>
-          <TabsList className="grid w-full grid-cols-2">
-            <TabsTrigger value="service" className="flex items-center gap-2">
-              <CalendarIcon className="h-4 w-4" />
-              Book Service
+        <Tabs
+          value={bookingType}
+          onValueChange={(v) => setBookingType(v as BookingType)}
+        >
+          <TabsList
+            className={cn(
+              "grid w-full h-auto",
+              showHospitalityBooking ? "grid-cols-3" : "grid-cols-2",
+            )}
+          >
+            <TabsTrigger value="service" className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <CalendarIcon className="h-4 w-4 shrink-0" />
+              Service
             </TabsTrigger>
-            <TabsTrigger value="event" className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4" />
-              Book Event
+            <TabsTrigger value="event" className="flex items-center gap-1.5 text-xs sm:text-sm">
+              <CalendarDays className="h-4 w-4 shrink-0" />
+              Event
             </TabsTrigger>
+            {showHospitalityBooking ? (
+              <TabsTrigger value="stay" className="flex items-center gap-1.5 text-xs sm:text-sm">
+                <BedDouble className="h-4 w-4 shrink-0" />
+                Room / Package
+              </TabsTrigger>
+            ) : null}
           </TabsList>
 
           <TabsContent value="service" className="space-y-6 mt-6">
@@ -701,9 +736,24 @@ const ClientBookAppointment = () => {
               </>
             )}
           </TabsContent>
+
+          {showHospitalityBooking ? (
+            <TabsContent value="stay" className="space-y-6 mt-6">
+              <ClientHospitalityBookingPanel
+                organisationId={organisationId}
+                organisationLocationId={organisationLocationId}
+                clientName={clientName}
+                clientMobile={clientMobile}
+                onSuccess={() =>
+                  navigate("/organization/clients", {
+                    state: { selectedClientId: clientUserId },
+                  })
+                }
+              />
+            </TabsContent>
+          ) : null}
         </Tabs>
-      </div>
-    </OrganizationLayout>
+    </div>
   );
 };
 

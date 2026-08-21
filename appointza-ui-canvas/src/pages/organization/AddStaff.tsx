@@ -13,10 +13,9 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { StaffService } from "@/services/staff.service";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import { UsersSelectReq, UsersLoginReq, Users, UsersPermissionData as UsersPermissionDataFromUsers, UsersPermissionGroupData } from "@/models/users.model";
 import { Staff, UsersPermissionData } from "@/models/staff.model";
-import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
 
 const AddStaff = () => {
   const { user, isAuthenticated } = useAuth();
@@ -26,15 +25,14 @@ const AddStaff = () => {
   // API services
   const usersService = useMemo(() => new UsersService(), []);
   const staffService = useMemo(() => new StaffService(), []);
-  const organisationLocationService = useMemo(() => new OrganisationLocationService(), []);
-
-  // State
+  const { data: locations = [], isLoading } = useOrganisationLocations({
+    organisationId: organizationId,
+    enabled: isAuthenticated && organizationId > 0,
+  });
   const [searchMobile, setSearchMobile] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [foundUser, setFoundUser] = useState<Users | null>(null);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
@@ -54,44 +52,11 @@ const AddStaff = () => {
     editandviewBusinessvalues: false,
   });
 
-  // Load locations
-  const loadLocations = useCallback(async () => {
-    if (!isAuthenticated || !organizationId) return;
-    
-    setIsLoading(true);
-    try {
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await organisationLocationService.select(req);
-      
-      if (response && Array.isArray(response) && response.length > 0) {
-        setLocations(response);
-        setSelectedLocationId(response[0].id);
-      } else {
-        setLocations([]);
-        toast({
-          title: "No Locations",
-          description: "No business locations found. Please add a location first.",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      console.error('Error loading locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load business locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, organizationId, organisationLocationService, toast]);
-
-  // Load locations on component mount
   useEffect(() => {
-    loadLocations();
-  }, [loadLocations]);
+    if (locations.length > 0 && selectedLocationId <= 0) {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [locations, selectedLocationId]);
 
   // Search user by mobile number
   const searchUserByMobile = async () => {

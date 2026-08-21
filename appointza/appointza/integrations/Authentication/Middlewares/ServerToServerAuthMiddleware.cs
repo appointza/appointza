@@ -97,11 +97,9 @@ namespace appointza.integrations.Authentication.Middlewares
                 {
                     "https://appointza.com",
                     "https://latrexa.com",
-                    "https://momantza.com",
                     "https://campusza.com",
                     "appointza.com",
                     "latrexa.com",
-                    "momantza.com",
                     "campusza.com",
                     "https://localhost:5000",
                     "https://localhost:7117",

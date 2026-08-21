@@ -1,8 +1,6 @@
 import { ReactNode } from "react";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
-import { settingsEmbedded } from "@/lib/settingsEmbedded";
 
 interface OrganizationPageShellProps {
   title?: string;
@@ -26,11 +24,7 @@ export const OrganizationPageShell = ({
   embedded = false,
 }: OrganizationPageShellProps) => {
   if (embedded) {
-    return (
-      <Card className={cn(settingsEmbedded.shell, className)}>
-        <CardContent className="p-0">{children}</CardContent>
-      </Card>
-    );
+    return <div className={cn("min-w-0 w-full", className)}>{children}</div>;
   }
 
   return (

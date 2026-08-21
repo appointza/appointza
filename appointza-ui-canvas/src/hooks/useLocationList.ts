@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { LocationWrapperService } from '../services/locationWrapper.service';
-import { LocationDetail } from '../services/location.service';
+import { useState, useEffect, useCallback } from 'react';
+import { LocationService, LocationDetail } from '../services/location.service';
 import { useAuth } from '../contexts/AuthContext';
 
 /**
- * Hook for getting location lists with automatic staff user filtering
+ * Location list from dashboard selection (localStorage) — no OrganisationLocation/Select call.
  */
 export const useLocationList = () => {
   const { user, isAuthenticated } = useAuth();
@@ -12,73 +11,76 @@ export const useLocationList = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const locationWrapperService = useMemo(() => new LocationWrapperService(), []);
-
-  // Load locations
-  const loadLocations = useCallback(async () => {
+  const loadLocations = useCallback(() => {
     if (!isAuthenticated || !user) {
       setLocations([]);
+      setError(null);
       return;
     }
 
     setIsLoading(true);
     setError(null);
-
     try {
-      console.log('🔍 Loading locations for user:', user);
-      const locationList = await locationWrapperService.getLocations(user);
-      setLocations(locationList);
-      console.log('✅ Locations loaded:', locationList);
+      setLocations(LocationService.getStoredLocations(user));
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Failed to load locations';
+      const errorMessage = err instanceof Error ? err.message : 'Failed to read stored locations';
       setError(errorMessage);
-      console.error('❌ Error loading locations:', err);
+      setLocations([]);
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, user, locationWrapperService]);
+  }, [isAuthenticated, user]);
 
-  // Get single location by ID
-  const getLocationById = useCallback(async (locationId: number): Promise<LocationDetail | null> => {
-    if (!isAuthenticated || !user) {
-      return null;
-    }
+  const getLocationById = useCallback(
+    (locationId: number): LocationDetail | null => {
+      if (!isAuthenticated || !user) return null;
+      if (LocationService.isStaff(user)) {
+        const staffId = user.organisationlocationid || user.locationid || 0;
+        if (staffId !== locationId) return null;
+      }
+      return locations.find((loc) => loc.id === locationId) ?? null;
+    },
+    [isAuthenticated, user, locations],
+  );
 
-    try {
-      return await locationWrapperService.getLocationById(locationId, user);
-    } catch (err) {
-      console.error('❌ Error getting location by ID:', err);
-      return null;
-    }
-  }, [isAuthenticated, user, locationWrapperService]);
+  const canAccessLocation = useCallback(
+    (locationId: number): boolean => {
+      if (!user) return false;
+      if (LocationService.isStaff(user)) {
+        const staffId = user.organisationlocationid || user.locationid || 0;
+        return staffId === locationId;
+      }
+      return locations.some((loc) => loc.id === locationId);
+    },
+    [user, locations],
+  );
 
-  // Check if user can access a location
-  const canAccessLocation = useCallback((locationId: number): boolean => {
-    if (!user) return false;
-    return locationWrapperService.canAccessLocation(locationId, user);
-  }, [user, locationWrapperService]);
-
-  // Get accessible location IDs
   const getAccessibleLocationIds = useCallback((): number[] => {
-    if (!user) return [];
-    return locationWrapperService.getAccessibleLocationIds(user);
-  }, [user, locationWrapperService]);
+    return locations.map((loc) => loc.id);
+  }, [locations]);
 
-  // Get location display name
-  const getLocationDisplayName = useCallback(async (locationId: number): Promise<string> => {
-    if (!user) return 'No Location';
-    return await locationWrapperService.getLocationDisplayName(locationId, user);
-  }, [user, locationWrapperService]);
+  const getLocationDisplayName = useCallback((locationId: number): string => {
+    const location = locations.find((loc) => loc.id === locationId) ?? null;
+    return LocationService.getLocationDisplayName(location);
+  }, [locations]);
 
-  // Get full address
-  const getFullAddress = useCallback(async (locationId: number): Promise<string> => {
-    if (!user) return 'No Address';
-    return await locationWrapperService.getFullAddress(locationId, user);
-  }, [user, locationWrapperService]);
+  const getFullAddress = useCallback((locationId: number): string => {
+    const location = locations.find((loc) => loc.id === locationId) ?? null;
+    return LocationService.getFullAddress(location);
+  }, [locations]);
 
-  // Load locations on mount and when user changes
   useEffect(() => {
     loadLocations();
+  }, [loadLocations]);
+
+  useEffect(() => {
+    const handleLocationChanged = () => loadLocations();
+    window.addEventListener('organizationlocationidChanged', handleLocationChanged);
+    window.addEventListener('userContextUpdated', handleLocationChanged);
+    return () => {
+      window.removeEventListener('organizationlocationidChanged', handleLocationChanged);
+      window.removeEventListener('userContextUpdated', handleLocationChanged);
+    };
   }, [loadLocations]);
 
   return {
@@ -90,6 +92,6 @@ export const useLocationList = () => {
     canAccessLocation,
     getAccessibleLocationIds,
     getLocationDisplayName,
-    getFullAddress
+    getFullAddress,
   };
 };

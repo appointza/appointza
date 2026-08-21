@@ -22,6 +22,7 @@ namespace appointza.Services
                 using (IDb db = await dbprovider.GetDb())
                 {
                     await db.Connect();
+                    await EnsureLocationColumnTransaction(db);
                     result = await this.SelectTransaction(db, req);
                 }
             return result;
@@ -30,7 +31,7 @@ namespace appointza.Services
         {
             List<OrganisationServices> result = new List<OrganisationServices>();
                 string query = @"
-                SELECT OrganisationServices.id,OrganisationServices.prize,OrganisationServices.weekday_price,OrganisationServices.weekend_price,OrganisationServices.is_price_different,OrganisationServices.timetaken,OrganisationServices.servicesids,OrganisationServices.Iscombo,OrganisationServices.offerprize,OrganisationServices.Servicename,OrganisationServices.code,OrganisationServices.version,OrganisationServices.show_price,OrganisationServices.createdby,OrganisationServices.createdon,OrganisationServices.modifiedby,OrganisationServices.modifiedon,OrganisationServices.attributes,OrganisationServices.isactive,OrganisationServices.issuspended,OrganisationServices.organisationid,OrganisationServices.isfactory,OrganisationServices.rating,OrganisationServices.notes
+                SELECT OrganisationServices.id,OrganisationServices.prize,OrganisationServices.weekday_price,OrganisationServices.weekend_price,OrganisationServices.is_price_different,OrganisationServices.timetaken,OrganisationServices.servicesids,OrganisationServices.Iscombo,OrganisationServices.offerprize,OrganisationServices.Servicename,OrganisationServices.code,OrganisationServices.version,OrganisationServices.show_price,OrganisationServices.createdby,OrganisationServices.createdon,OrganisationServices.modifiedby,OrganisationServices.modifiedon,OrganisationServices.attributes,OrganisationServices.isactive,OrganisationServices.issuspended,OrganisationServices.organisationid,OrganisationServices.organisationlocationid,OrganisationServices.isfactory,OrganisationServices.rating,OrganisationServices.notes
                 FROM OrganisationServices
                 ";
                 var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
@@ -44,6 +45,10 @@ namespace appointza.Services
                 if (req.organisationid > 0)
                 {
                     queryBuilder.AddParameter("OrganisationServices.organisationid", "=", "organisationid", req.organisationid, DbTypes.Types.Long);
+                }
+                if (req.organisationlocationid > 0)
+                {
+                    queryBuilder.AddParameter("OrganisationServices.organisationlocationid", "=", "organisationlocationid", req.organisationlocationid, DbTypes.Types.Long);
                 }
             }
             else
@@ -80,6 +85,8 @@ temp.attributes_json = reader["attributes"] == DBNull.Value ? "null" : reader["a
  temp.isactive = reader["isactive"] == DBNull.Value ? false : Convert.ToBoolean(reader["isactive"]);
  temp.issuspended = reader["issuspended"] == DBNull.Value ? false : Convert.ToBoolean(reader["issuspended"]);
  temp.organisationid = reader["organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationid"]);
+ temp.organisationlocationid = HasColumn(reader, "organisationlocationid") && reader["organisationlocationid"] != DBNull.Value
+     ? Convert.ToInt64(reader["organisationlocationid"]) : 0;
  temp.isfactory = reader["isfactory"] == DBNull.Value ? false : Convert.ToBoolean(reader["isfactory"]);
  temp.rating = reader["rating"] == DBNull.Value ? null : (decimal?)Convert.ToDecimal(reader["rating"]);
 temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
@@ -93,6 +100,7 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
                 using (IDb db = await dbprovider.GetDb())
                 {
                     await db.Connect();
+                    await EnsureLocationColumnTransaction(db);
                     await this.InsertTransaction(db, organisationservices);
                 }
             return organisationservices;
@@ -101,10 +109,10 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
         {
                 String query = @"
                 INSERT INTO OrganisationServices (
-                    prize,weekday_price,weekend_price,is_price_different,timetaken,servicesids,Iscombo,offerprize,Servicename,code,version,show_price,createdby,createdon,modifiedby,modifiedon,attributes,isactive,issuspended,organisationid,isfactory,rating,notes
+                    prize,weekday_price,weekend_price,is_price_different,timetaken,servicesids,Iscombo,offerprize,Servicename,code,version,show_price,createdby,createdon,modifiedby,modifiedon,attributes,isactive,issuspended,organisationid,organisationlocationid,isfactory,rating,notes
                 )
                 VALUES (
-                   @prize,@weekday_price,@weekend_price,@is_price_different,@timetaken,@servicesids,@Iscombo,@offerprize,@Servicename,@code,@version,@show_price,@createdby,@createdon,@modifiedby,@modifiedon,@attributes,@isactive,@issuspended,@organisationid,@isfactory,@rating,@notes
+                   @prize,@weekday_price,@weekend_price,@is_price_different,@timetaken,@servicesids,@Iscombo,@offerprize,@Servicename,@code,@version,@show_price,@createdby,@createdon,@modifiedby,@modifiedon,@attributes,@isactive,@issuspended,@organisationid,@organisationlocationid,@isfactory,@rating,@notes
                 )
                 RETURNING id;
                 ";
@@ -137,6 +145,7 @@ db.AddParameter(command, "attributes", DbTypes.Types.Json).Value = organisations
 db.AddParameter(command, "isactive", DbTypes.Types.Boolean).Value = organisationservices.isactive;
 db.AddParameter(command, "issuspended", DbTypes.Types.Boolean).Value = organisationservices.issuspended;
 db.AddParameter(command, "organisationid", DbTypes.Types.Long).Value = organisationservices.organisationid;
+db.AddParameter(command, "organisationlocationid", DbTypes.Types.Long).Value = organisationservices.organisationlocationid;
 db.AddParameter(command, "isfactory", DbTypes.Types.Boolean).Value = organisationservices.isfactory;
 db.AddParameter(command, "rating", DbTypes.Types.Decimal).Value = organisationservices.rating.HasValue ? (object)organisationservices.rating.Value : DBNull.Value;
 db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisationservices.notes) ? "" : organisationservices.notes;
@@ -164,7 +173,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                 String query = @"
                 UPDATE OrganisationServices
                     SET 
-                        prize = @prize,weekday_price = @weekday_price,weekend_price = @weekend_price,is_price_different = @is_price_different,timetaken = @timetaken,servicesids = @servicesids,Iscombo = @Iscombo,offerprize = @offerprize,Servicename = @Servicename,code = @code,show_price = @show_price,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,organisationid = @organisationid,isfactory = @isfactory,rating = @rating,notes = @notes,
+                        prize = @prize,weekday_price = @weekday_price,weekend_price = @weekend_price,is_price_different = @is_price_different,timetaken = @timetaken,servicesids = @servicesids,Iscombo = @Iscombo,offerprize = @offerprize,Servicename = @Servicename,code = @code,show_price = @show_price,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,organisationid = @organisationid,organisationlocationid = @organisationlocationid,isfactory = @isfactory,rating = @rating,notes = @notes,
                         version = version + 1
                 ";
                 
@@ -200,6 +209,7 @@ db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = organisat
 db.AddParameter(command, "attributes", DbTypes.Types.Json).Value = organisationservices.attributes_json;
 db.AddParameter(command, "issuspended", DbTypes.Types.Boolean).Value = organisationservices.issuspended;
 db.AddParameter(command, "organisationid", DbTypes.Types.Long).Value = organisationservices.organisationid;
+db.AddParameter(command, "organisationlocationid", DbTypes.Types.Long).Value = organisationservices.organisationlocationid;
 db.AddParameter(command, "isfactory", DbTypes.Types.Boolean).Value = organisationservices.isfactory;
 db.AddParameter(command, "rating", DbTypes.Types.Decimal).Value = organisationservices.rating.HasValue ? (object)organisationservices.rating.Value : DBNull.Value;
 db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrEmpty(organisationservices.notes) ? "" : organisationservices.notes;
@@ -248,6 +258,141 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                     result = true;
                 }
             return result;
+        }
+
+        public async Task<List<PublicServiceCatalogueItem>> SelectPublicCatalogue(OrganisationServicesSelectReq req)
+        {
+            req ??= new OrganisationServicesSelectReq();
+            var result = new List<PublicServiceCatalogueItem>();
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                await EnsureLocationColumnTransaction(db);
+
+                string query = @"
+                SELECT
+                    OrganisationServices.id,
+                    OrganisationServices.prize,
+                    OrganisationServices.weekday_price,
+                    OrganisationServices.weekend_price,
+                    OrganisationServices.is_price_different,
+                    OrganisationServices.timetaken,
+                    OrganisationServices.servicesids,
+                    OrganisationServices.Iscombo,
+                    OrganisationServices.offerprize,
+                    OrganisationServices.Servicename,
+                    OrganisationServices.code,
+                    OrganisationServices.version,
+                    OrganisationServices.show_price,
+                    OrganisationServices.createdby,
+                    OrganisationServices.createdon,
+                    OrganisationServices.modifiedby,
+                    OrganisationServices.modifiedon,
+                    OrganisationServices.attributes,
+                    OrganisationServices.isactive,
+                    OrganisationServices.issuspended,
+                    OrganisationServices.organisationid,
+                    OrganisationServices.organisationlocationid,
+                    OrganisationServices.isfactory,
+                    OrganisationServices.rating,
+                    OrganisationServices.notes,
+                    Organisation.name AS organisationName,
+                    Organisation.imageid AS organisationImageId,
+                    OrganisationLocation.city AS organisationLocationCity,
+                    OrganisationLocation.state AS organisationLocationState
+                FROM OrganisationServices
+                INNER JOIN Organisation ON Organisation.id = OrganisationServices.organisationid
+                INNER JOIN OrganisationLocation ON OrganisationLocation.id = OrganisationServices.organisationlocationid
+                ";
+
+                var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
+                queryBuilder.AddParameter("OrganisationServices.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
+                queryBuilder.AddParameter("Organisation.isactive", "=", "orgisactive", true, DbTypes.Types.Boolean);
+                queryBuilder.AddParameter("OrganisationLocation.isactive", "=", "locisactive", true, DbTypes.Types.Boolean);
+
+                if (req.organisationid > 0)
+                {
+                    queryBuilder.AddParameter("OrganisationServices.organisationid", "=", "organisationid", req.organisationid, DbTypes.Types.Long);
+                }
+                if (req.organisationlocationid > 0)
+                {
+                    queryBuilder.AddParameter("OrganisationServices.organisationlocationid", "=", "organisationlocationid", req.organisationlocationid, DbTypes.Types.Long);
+                }
+                if (!string.IsNullOrWhiteSpace(req.search))
+                {
+                    queryBuilder.AddParameter(
+                        "(OrganisationServices.Servicename ILIKE @search OR Organisation.name ILIKE @search OR OrganisationLocation.city ILIKE @search)",
+                        "search",
+                        $"%{req.search.Trim()}%",
+                        DbTypes.Types.String);
+                }
+
+                queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "OrganisationServices.id");
+                var take = req.take > 0 ? Math.Min(req.take, 500) : 300;
+                var skip = req.skip < 0 ? 0 : req.skip;
+                queryBuilder.AddLimitOffset(take, skip);
+
+                var command = queryBuilder.GetCommand(db);
+                using (DbDataReader reader = await db.Execute(command))
+                {
+                    while (await reader.ReadAsync())
+                    {
+                        var temp = new PublicServiceCatalogueItem();
+                        temp.id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]);
+                        temp.prize = reader["prize"] == DBNull.Value ? 0 : Convert.ToInt64(reader["prize"]);
+                        temp.weekday_price = reader["weekday_price"] == DBNull.Value ? 0 : Convert.ToInt64(reader["weekday_price"]);
+                        temp.weekend_price = reader["weekend_price"] == DBNull.Value ? 0 : Convert.ToInt64(reader["weekend_price"]);
+                        temp.is_price_different = reader["is_price_different"] == DBNull.Value ? false : Convert.ToBoolean(reader["is_price_different"]);
+                        temp.timetaken = reader["timetaken"] == DBNull.Value ? 0 : Convert.ToInt64(reader["timetaken"]);
+                        temp.servicesids_json = reader["servicesids"] == DBNull.Value ? "null" : reader["servicesids"].ToString();
+                        temp.Iscombo = reader["Iscombo"] == DBNull.Value ? false : Convert.ToBoolean(reader["Iscombo"]);
+                        temp.offerprize = reader["offerprize"] == DBNull.Value ? 0 : Convert.ToInt64(reader["offerprize"]);
+                        temp.Servicename = reader["Servicename"] == DBNull.Value ? "" : reader["Servicename"].ToString();
+                        temp.code = reader["code"] == DBNull.Value ? "" : reader["code"].ToString();
+                        temp.version = reader["version"] == DBNull.Value ? 0 : Convert.ToInt32(reader["version"]);
+                        temp.show_price = reader["show_price"] == DBNull.Value ? true : Convert.ToBoolean(reader["show_price"]);
+                        temp.createdby = reader["createdby"] == DBNull.Value ? 0 : Convert.ToInt64(reader["createdby"]);
+                        temp.createdon = reader["createdon"] == DBNull.Value ? Base.GetMinimumDate() : Convert.ToDateTime(reader["createdon"]);
+                        temp.modifiedby = reader["modifiedby"] == DBNull.Value ? 0 : Convert.ToInt64(reader["modifiedby"]);
+                        temp.modifiedon = reader["modifiedon"] == DBNull.Value ? Base.GetMinimumDate() : Convert.ToDateTime(reader["modifiedon"]);
+                        temp.attributes_json = reader["attributes"] == DBNull.Value ? "null" : reader["attributes"].ToString();
+                        temp.isactive = reader["isactive"] == DBNull.Value ? false : Convert.ToBoolean(reader["isactive"]);
+                        temp.issuspended = reader["issuspended"] == DBNull.Value ? false : Convert.ToBoolean(reader["issuspended"]);
+                        temp.organisationid = reader["organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationid"]);
+                        temp.organisationlocationid = HasColumn(reader, "organisationlocationid") && reader["organisationlocationid"] != DBNull.Value
+                            ? Convert.ToInt64(reader["organisationlocationid"]) : 0;
+                        temp.isfactory = reader["isfactory"] == DBNull.Value ? false : Convert.ToBoolean(reader["isfactory"]);
+                        temp.rating = reader["rating"] == DBNull.Value ? null : (decimal?)Convert.ToDecimal(reader["rating"]);
+                        temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
+                        temp.organisationName = reader["organisationName"] == DBNull.Value ? "" : reader["organisationName"].ToString();
+                        temp.organisationImageId = reader["organisationImageId"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationImageId"]);
+                        temp.organisationLocationCity = reader["organisationLocationCity"] == DBNull.Value ? "" : reader["organisationLocationCity"].ToString();
+                        temp.organisationLocationState = reader["organisationLocationState"] == DBNull.Value ? "" : reader["organisationLocationState"].ToString();
+                        result.Add(temp);
+                    }
+                }
+            }
+            return result;
+        }
+
+        static bool HasColumn(DbDataReader reader, string columnName)
+        {
+            for (var i = 0; i < reader.FieldCount; i++)
+            {
+                if (string.Equals(reader.GetName(i), columnName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        public Task EnsureLocationColumnAsync(IDb db) => EnsureLocationColumnTransaction(db);
+
+        static async Task EnsureLocationColumnTransaction(IDb db)
+        {
+            DbCommand cmd = db.GetCommand(@"
+                ALTER TABLE organisationservices
+                ADD COLUMN IF NOT EXISTS organisationlocationid BIGINT NOT NULL DEFAULT 0");
+            await db.ExecuteNonQuery(cmd);
         }
     }
 }

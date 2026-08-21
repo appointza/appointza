@@ -499,7 +499,8 @@ db.AddParameter(command, "whatsapp_mobile", DbTypes.Types.String).Value = String
                     )
                 )
                 FROM public.OrganisationServices os
-                WHERE os.organisationid = o.id 
+                WHERE os.organisationid = o.id
+                AND os.organisationlocationid = ol.id
                 AND os.isactive = true
             ) AS Services,
             (
@@ -1039,6 +1040,54 @@ CROSS JOIN revenue_total rt";
             return null;
         }
 
+        /// <summary>
+        /// Resolve a public booking location by organisationlocation.customurl slug (no isverified gate).
+        /// </summary>
+        public async Task<PublicSiteLocationResolve?> ResolvePublicSiteByCustomUrl(string customUrl)
+        {
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            return await ResolvePublicSiteByCustomUrlTransaction(db, customUrl);
+        }
+
+        public async Task<PublicSiteLocationResolve?> ResolvePublicSiteByCustomUrlTransaction(IDb db, string customUrl)
+        {
+            var normalizedSlug = PrepareCustomUrlSlug(customUrl);
+            if (string.IsNullOrEmpty(normalizedSlug))
+            {
+                return null;
+            }
+
+            const string query = @"
+                SELECT id, organisationid, orgloctempid::text AS orgloctempid, templateid, customurl
+                FROM OrganisationLocation
+                WHERE isactive = true
+                  AND customurl IS NOT NULL
+                  AND TRIM(customurl) <> ''";
+
+            using DbCommand command = db.GetCommand(query);
+            using DbDataReader reader = await db.Execute(command);
+            while (await reader.ReadAsync())
+            {
+                var stored = reader["customurl"] == DBNull.Value ? "" : reader["customurl"].ToString() ?? "";
+                if (!SlugHelper.CustomUrlSlugMatches(stored, normalizedSlug))
+                {
+                    continue;
+                }
+
+                return new PublicSiteLocationResolve
+                {
+                    id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]),
+                    organisationid = reader["organisationid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["organisationid"]),
+                    orgloctempid = reader["orgloctempid"] == DBNull.Value ? "" : reader["orgloctempid"].ToString() ?? "",
+                    templateid = reader["templateid"] == DBNull.Value ? 0 : Convert.ToInt64(reader["templateid"]),
+                    customurl = stored,
+                };
+            }
+
+            return null;
+        }
+
         public async Task<long> GetLocationIdByOrgLocTempId(string orgloctempid)
         {
             if (string.IsNullOrWhiteSpace(orgloctempid))
@@ -1077,6 +1126,44 @@ CROSS JOIN revenue_total rt";
             }
 
             return 0;
+        }
+
+        public async Task<string> GetOrgLocTempIdByLocationId(long locationId)
+        {
+            if (locationId <= 0)
+            {
+                return "";
+            }
+
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            return await GetOrgLocTempIdByLocationIdTransaction(db, locationId);
+        }
+
+        public async Task<string> GetOrgLocTempIdByLocationIdTransaction(IDb db, long locationId)
+        {
+            if (locationId <= 0)
+            {
+                return "";
+            }
+
+            const string query = @"
+                SELECT orgloctempid::text AS orgloctempid
+                FROM OrganisationLocation
+                WHERE id = @locationId
+                  AND isactive = true
+                LIMIT 1";
+
+            using DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "locationId", DbTypes.Types.Long).Value = locationId;
+
+            using DbDataReader reader = await db.Execute(command);
+            if (await reader.ReadAsync())
+            {
+                return reader["orgloctempid"] == DBNull.Value ? "" : reader["orgloctempid"].ToString() ?? "";
+            }
+
+            return "";
         }
 
         /// <summary>

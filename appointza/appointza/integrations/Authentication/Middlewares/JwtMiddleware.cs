@@ -58,13 +58,6 @@ namespace appointza.Authentication.Middlewares
                     return;
                 }
 
-                var stayUser = AppointzaStayAuthService.JwtTokenToAppointzaStayUser(token, applicationsettings.jwtsecret);
-                if (stayUser != null)
-                {
-                    httpcontextaccessor.HttpContext!.Items["appointzastay_usercontext"] = stayUser;
-                    return;
-                }
-
                 httpcontextaccessor.HttpContext!.Items["usercontext"] = authService.JwtTokenToUserContext(token);
             }
             catch (Exception)

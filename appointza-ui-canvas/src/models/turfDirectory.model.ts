@@ -13,4 +13,5 @@ export type TurfVenue = {
   QueryState: string;
 };
 
-export const TURF_DIRECTORY_DATA_URL = "/data/turf_tamil_nadu.json";
+export const TURF_DIRECTORY_INDEX_URL = "/data/turf_tamil_nadu_index.json";
+export const TURF_DIRECTORY_CITY_URL = (file: string) => `/data/turf_tamil_nadu/${file}`;

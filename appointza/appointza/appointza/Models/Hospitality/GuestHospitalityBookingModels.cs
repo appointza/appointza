@@ -121,5 +121,7 @@ namespace appointza.Models.Hospitality
         public List<string> amenities { get; set; } = [];
         public string main_photo { get; set; } = "";
         public List<string> gallery_photos { get; set; } = [];
+        /// <summary>True when the Index check-in/out window does not overlap an existing stay.</summary>
+        public bool available_for_dates { get; set; } = true;
     }
 }

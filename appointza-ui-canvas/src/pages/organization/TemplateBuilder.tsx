@@ -16,8 +16,8 @@ import {
 import {
   ArrowLeft,
   Code2,
-  Database,
   Eye,
+  Images,
   Layers,
   Loader2,
   Plus,
@@ -35,21 +35,21 @@ import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboard
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 import { ReferenceValueService } from "@/services/referencevalue.service";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
-import { SiteDetailsService } from "@/services/siteDetails.service";
+import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
 import { EventService } from "@/services/event.service";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import { SiteDetailsService } from "@/services/siteDetails.service";
 import { SiteDetailsItem } from "@/models/sitedetail.model";
 import {
   OrganisationLocation,
-  OrganisationLocationSelectReq,
   UpdateLocationTemplateIdReq,
 } from "@/models/organisationlocation.model";
 import TemplateVariablesCopyDialog from "@/components/templateBuilder/TemplateVariablesCopyDialog";
-import LocationTemplateMediaDialog from "@/components/templateBuilder/LocationTemplateMediaDialog";
+import { LocationTemplateMediaPanel } from "@/components/templateBuilder/LocationTemplateMediaPanel";
 import { HeroBlockPalette } from "@/components/templateBuilder/HeroBlockPalette";
 import { TemplateBuilderStructurePanel } from "@/components/templateBuilder/TemplateBuilderStructurePanel";
 import { TemplateBuilderBlockEditor } from "@/components/templateBuilder/TemplateBuilderBlockEditor";
-import { OrgAssetPanel } from "@/components/templateBuilder/OrgAssetPanel";
 import { ORG_TEMPLATE_ASSETS_IDENTIFIER } from "@/types/orgAssets.types";
 import type { TemplateBuilderProject } from "@/types/templateBuilder.types";
 import { TEMPLATE_BUILDER_CATEGORIES } from "@/utils/templateBuilder/catalog";
@@ -68,7 +68,7 @@ const TEMPLATE_REFERENCE_TYPE_ID = 5;
 const HOME_PAGE_ID = "home";
 
 type BuilderMode = "blocks" | "html";
-type LeftTab = "blocks" | "assets";
+type LeftTab = "blocks" | "media";
 type RightTab = "sections" | "settings";
 
 function notesHasBlocksProject(notes: string | null | undefined): boolean {
@@ -114,7 +114,6 @@ function TemplateBuilderInner() {
   const [savedTemplates, setSavedTemplates] = useState<ReferenceValue[]>([]);
   const [isLoadingList, setIsLoadingList] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [previewLocationId, setPreviewLocationId] = useState(0);
   const [previewSiteData, setPreviewSiteData] = useState<SiteDetailsItem | null>(null);
   const [previewEvents, setPreviewEvents] = useState<unknown[]>([]);
@@ -129,6 +128,11 @@ function TemplateBuilderInner() {
 
   const organisationId = user?.organisationid ?? 0;
   const userLocationId = user?.organisationlocationid ?? user?.locationid ?? 0;
+  const { data: locations = [] } = useOrganisationLocations({
+    organisationId,
+    staffLocationId: user?.locationid || 0,
+    enabled: !!user,
+  });
   const selectedLocation = useMemo(
     () => locations.find((location) => location.id === previewLocationId) ?? null,
     [locations, previewLocationId],
@@ -137,6 +141,17 @@ function TemplateBuilderInner() {
   const homePage = project.pages[HOME_PAGE_ID] ?? createDefaultProject().pages[HOME_PAGE_ID];
   const blocks = homePage.blocks;
   const selectedBlock = blocks.find((b) => b.id === selectedBlockId) ?? null;
+
+  // Debounce block tree so generateTemplateHtml does not run on every keystroke.
+  const [debouncedHomePage, setDebouncedHomePage] = useState(homePage);
+  const [debouncedTemplateName, setDebouncedTemplateName] = useState(templateName);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setDebouncedHomePage(homePage);
+      setDebouncedTemplateName(templateName);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [homePage, templateName]);
 
   const setBlocks = useCallback(
     (updater: (prev: typeof blocks) => typeof blocks) => {
@@ -154,14 +169,21 @@ function TemplateBuilderInner() {
     [],
   );
 
-  const blocksHtml = useMemo(
-    () => generateTemplateHtml(homePage, templateName || homePage.name || "Booking page"),
-    [homePage, templateName],
-  );
+  const blocksHtml = useMemo(() => {
+    // Skip expensive HTML generation while preview is hidden (save regenerates on demand).
+    if (!showPreview && builderMode === "blocks") {
+      return "";
+    }
+    return generateTemplateHtml(
+      debouncedHomePage,
+      debouncedTemplateName || debouncedHomePage.name || "Booking page",
+    );
+  }, [builderMode, debouncedHomePage, debouncedTemplateName, showPreview]);
 
   const sourceHtml = builderMode === "blocks" ? blocksHtml : html;
 
   const previewHtml = useMemo(() => {
+    if (!showPreview) return "";
     if (!sourceHtml.trim()) return "";
     if (!previewSiteData) {
       return `<!DOCTYPE html><html><body style="font-family:sans-serif;padding:2rem;color:#57534e"><p>Loading preview data…</p></body></html>`;
@@ -170,7 +192,7 @@ function TemplateBuilderInner() {
       ...previewSiteData,
       events: previewEvents,
     } as SiteDetailsItem);
-  }, [sourceHtml, previewSiteData, previewEvents]);
+  }, [previewEvents, previewSiteData, showPreview, sourceHtml]);
 
   useEffect(() => {
     if (selectedBlock) {
@@ -178,36 +200,16 @@ function TemplateBuilderInner() {
     }
   }, [selectedBlock?.id, selectedBlock?.data]);
 
-  const fetchLocations = useCallback(async () => {
-    if (!user) return;
-    try {
-      const req = new OrganisationLocationSelectReq();
-      if (user.organisationid && user.organisationid > 0) {
-        req.organisationid = user.organisationid;
-      } else if (user.locationid && user.locationid > 0) {
-        req.organisationlocationid = user.locationid;
-      } else {
-        return;
-      }
-
-      const response = await locationService.select(req);
-      if (!response?.length) {
-        setLocations([]);
-        return;
-      }
-
-      setLocations(response);
-      const preferred =
-        (userLocationId > 0 && response.some((loc) => loc.id === userLocationId)
-          ? userLocationId
-          : response[0].id) ?? 0;
-      setPreviewLocationId((current) =>
-        current > 0 && response.some((loc) => loc.id === current) ? current : preferred,
-      );
-    } catch {
-      toast({ title: "Could not load locations for preview", variant: "destructive" });
-    }
-  }, [locationService, toast, user, userLocationId]);
+  useEffect(() => {
+    if (!locations.length) return;
+    const preferred =
+      (userLocationId > 0 && locations.some((loc) => loc.id === userLocationId)
+        ? userLocationId
+        : locations[0].id) ?? 0;
+    setPreviewLocationId((current) =>
+      current > 0 && locations.some((loc) => loc.id === current) ? current : preferred,
+    );
+  }, [locations, userLocationId]);
 
   const fetchPreviewData = useCallback(async () => {
     if (previewLocationId <= 0) {
@@ -251,10 +253,6 @@ function TemplateBuilderInner() {
       setIsLoadingPreviewData(false);
     }
   }, [eventService, previewLocationId, siteService, toast]);
-
-  useEffect(() => {
-    void fetchLocations();
-  }, [fetchLocations]);
 
   useEffect(() => {
     void fetchPreviewData();
@@ -494,6 +492,10 @@ function TemplateBuilderInner() {
       });
       await fetchSavedTemplates();
 
+      if (previewLocationId > 0) {
+        invalidatePublicSiteCacheForLocation(previewLocationId);
+      }
+
       if (!isComplete && assignedLocationName && previewLocationId > 0) {
         await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
         toast({
@@ -514,7 +516,19 @@ function TemplateBuilderInner() {
   };
 
   const openPreviewTab = () => {
-    const blob = new Blob([previewHtml], { type: "text/html" });
+    const htmlForTab =
+      builderMode === "blocks"
+        ? generateTemplateHtml(homePage, templateName || homePage.name || "Booking page")
+        : html;
+    if (!htmlForTab.trim()) return;
+    const rendered =
+      previewSiteData ?
+        renderSiteTemplateHtml(htmlForTab, {
+          ...previewSiteData,
+          events: previewEvents,
+        } as SiteDetailsItem)
+      : htmlForTab;
+    const blob = new Blob([rendered], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener,noreferrer");
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -668,29 +682,6 @@ function TemplateBuilderInner() {
             locationId={selectedLocation?.id}
             locationName={selectedLocation?.name}
           />
-          <LocationTemplateMediaDialog
-            organisationId={organisationId || selectedLocation?.organisationid || 0}
-            location={selectedLocation}
-            onSaved={(savedLocation) => {
-              setLocations((current) =>
-                current.map((location) =>
-                  location.id === savedLocation.id ? savedLocation : location,
-                ),
-              );
-              setPreviewSiteData((current) =>
-                current
-                  ? {
-                      ...current,
-                      locationdetail: {
-                        ...current.locationdetail,
-                        images: savedLocation.images ?? [],
-                        attributes: savedLocation.attributes ?? {},
-                      },
-                    }
-                  : current,
-              );
-            }}
-          />
           <Button variant="outline" size="sm" className="h-8" onClick={handleNew}>
             <Sparkles className="mr-1.5 h-3.5 w-3.5" />
             New
@@ -796,7 +787,7 @@ function TemplateBuilderInner() {
               {(
                 [
                   { id: "blocks" as const, label: "Add sections", icon: Plus },
-                  { id: "assets" as const, label: "Images", icon: Database },
+                  { id: "media" as const, label: "Media", icon: Images },
                 ] as const
               ).map((tab) => (
                 <button
@@ -816,17 +807,51 @@ function TemplateBuilderInner() {
               ))}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
-              {leftTab === "assets" ? (
-                <OrgAssetPanel />
+              {leftTab === "media" ? (
+                <LocationTemplateMediaPanel
+                  organisationId={organisationId || selectedLocation?.organisationid || 0}
+                  location={selectedLocation}
+                  onSaved={(savedLocation) => {
+                    setLocations((current) =>
+                      current.map((location) =>
+                        location.id === savedLocation.id ? savedLocation : location,
+                      ),
+                    );
+                    setPreviewSiteData((current) =>
+                      current
+                        ? {
+                            ...current,
+                            locationdetail: {
+                              ...current.locationdetail,
+                              images: savedLocation.images ?? [],
+                              attributes: savedLocation.attributes ?? {},
+                            },
+                          }
+                        : current,
+                    );
+                  }}
+                />
               ) : (
                 <div className="space-y-5">
+                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-emerald-900">
+                    <p className="font-semibold">Build with live data</p>
+                    <p className="mt-0.5 text-emerald-800/90">
+                      Green “Live data” blocks pull from your Services, Events, Hours, Gallery, and Hospitality pages.
+                      Use <span className="font-medium">Copy AI prompts</span> for a full variable list.
+                    </p>
+                  </div>
                   {TEMPLATE_BUILDER_CATEGORIES.map((cat) => (
                     <div key={cat.name}>
                       {cat.name === "Hero / Banner" ? (
                         <HeroBlockPalette blocks={cat.blocks} onAdd={handleAddBlock} />
                       ) : (
                         <>
-                          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-stone-500">
+                          <p
+                            className={cn(
+                              "mb-2 text-[11px] font-semibold uppercase tracking-wide",
+                              cat.name.startsWith("Live") ? "text-emerald-700" : "text-stone-500",
+                            )}
+                          >
                             {cat.name}
                           </p>
                           <div className="space-y-1.5">
@@ -835,9 +860,21 @@ function TemplateBuilderInner() {
                                 key={bt.type}
                                 type="button"
                                 onClick={() => handleAddBlock(bt.type)}
-                                className="flex w-full items-start gap-2 rounded-xl border border-stone-200 bg-white px-2.5 py-2 text-left transition hover:border-orange-300 hover:bg-orange-50/40"
+                                className={cn(
+                                  "flex w-full items-start gap-2 rounded-xl border bg-white px-2.5 py-2 text-left transition hover:border-orange-300 hover:bg-orange-50/40",
+                                  bt.mode === "appointza"
+                                    ? "border-emerald-100"
+                                    : "border-stone-200",
+                                )}
                               >
-                                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-stone-100 text-stone-600">
+                                <span
+                                  className={cn(
+                                    "mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-lg",
+                                    bt.mode === "appointza"
+                                      ? "bg-emerald-50 text-emerald-700"
+                                      : "bg-stone-100 text-stone-600",
+                                  )}
+                                >
                                   <Plus className="h-3.5 w-3.5" />
                                 </span>
                                 <span className="min-w-0">

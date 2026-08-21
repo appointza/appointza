@@ -1,17 +1,14 @@
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.FileProviders;
 using appointza;
 using appointza.Authentication.Middlewares;
 using appointza.integrations.Authentication.Middlewares;
 using appointza.Middlewares;
 using appointza.Utils;
-using appointza.Data.AppointzaStay;
-using appointza.Services.AppointzaStay;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// CONFIGURATION: align server with the same config.js the SPA loads (appointzabuild/production/wwwroot/config.js)
+// CONFIGURATION: align server with the same config.js the SPA loads (public/config.js → wwwroot/config.js)
 if (AppointzaConfigJsParser.TryLoad(out var configJsBaseUrl, out var configJsTemplateUrl, out var configJsPath))
 {
     var pairs = new List<KeyValuePair<string, string?>>
@@ -62,7 +59,6 @@ builder.Services.AddCors(options =>
 builder.Services.AddHealthChecks()
     .AddNpgSql(appSettings.postgresqlconnection, name: "postgresql")
     .AddNpgSql(appSettings.campusza_postgresqlconnection, name: "campusza-postgresql")
-    .AddNpgSql(appSettings.appointzastay_postgresqlconnection, name: "appointzastay-postgresql")
     .AddRedis(appSettings.redis?.connection_string ?? "localhost:6379", name: "redis");
 
 builder.Services.AddMemoryCache();
@@ -80,31 +76,7 @@ builder.Services.AddScoped<IDbProvider, PostgreSQLProvider>();
 builder.Services.AddScoped<ICampuszaDbProvider, CampuszaDbProvider>();
 builder.Services.AddCustomServices();
 
-// B2B Services
-builder.Services.AddHttpClient<appointza.integrations.Authentication.Services.IB2BClientService, appointza.integrations.Authentication.Services.B2BClientService>();
-
 var app = builder.Build();
-
-// AppointzaStay PostgreSQL schema bootstrap
-if (!string.IsNullOrWhiteSpace(appSettings.appointzastay_postgresqlconnection))
-{
-    var stayBootstrap = await PostgresBootstrap.EnsureSchemaAsync(
-        appSettings.appointzastay_postgresqlconnection,
-        Path.Combine(app.Environment.ContentRootPath, "appointzastay"),
-        app.Logger);
-    if (stayBootstrap.Connected && stayBootstrap.SchemaReady)
-    {
-        var dataStore = app.Services.GetRequiredService<AppDataStore>();
-        var stats = dataStore.GetStats();
-        app.Logger.LogInformation(
-            "AppointzaStay data loaded — {Orgs} orgs, {Users} users, {Rooms} rooms, {Customers} customers, {Bookings} bookings",
-            stats.Organisations, stats.Users, stats.Rooms, stats.Customers, stats.Bookings);
-    }
-    else
-    {
-        app.Logger.LogWarning("AppointzaStay PostgreSQL not ready: {Message}", stayBootstrap.Message);
-    }
-}
 
 // SWAGGER / STATIC FILES
 app.UseSwagger();
@@ -131,8 +103,6 @@ if (!Directory.Exists(wwwrootPath))
 
 var wwwrootProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(wwwrootPath);
 
-// Rewrite /stay/ → /stay/index.html (and same for other SPA folders) before static files.
-// Without this, bare /stay/ falls through to the root Appointza SPA and shows its 404 page.
 app.UseDefaultFiles(new DefaultFilesOptions
 {
     FileProvider = wwwrootProvider,
@@ -146,31 +116,10 @@ app.UseStaticFiles(new StaticFileOptions
     RequestPath = ""
 });
 
-var uploadServeDirectories = StayStaticFiles.UploadServeDirectories(app.Environment);
-var uploadProviders = uploadServeDirectories
-    .Select(path => new PhysicalFileProvider(path) as IFileProvider)
-    .ToList();
-if (uploadProviders.Count > 0)
-{
-    app.UseStaticFiles(new StaticFileOptions
-    {
-        FileProvider = uploadProviders.Count == 1
-            ? uploadProviders[0]
-            : new CompositeFileProvider(uploadProviders),
-        RequestPath = "/uploads",
-    });
-    foreach (var uploadsPath in uploadServeDirectories)
-        Console.WriteLine($"✅ Upload static files: /uploads → {uploadsPath}");
-}
-
-var uploadSyncCount = StayStaticFiles.SyncUploadsToPrimary(app.Environment);
-if (uploadSyncCount > 0)
-    Console.WriteLine($"✅ Synced {uploadSyncCount} upload(s) into {StayStaticFiles.UploadOrgDirectory(app.Environment)}");
-
-// Product UIs: /appointza, /campusza, /webzys, /stay
+// Product UIs: /appointza, /campusza, /webzys
 // DefaultFiles so /webzys/ (trailing slash, no file) serves that SPA's index.html
 // instead of falling through to the root Appointza SPA.
-foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "stay" })
+foreach (var spaSegment in new[] { "appointza", "campusza", "webzys" })
 {
     var spaPhysicalPath = Path.Combine(wwwrootPath, spaSegment);
     if (!Directory.Exists(spaPhysicalPath))
@@ -208,6 +157,9 @@ app.UseMiddleware<ServerToServerAuthMiddleware>();
 // ✅ MIDDLEWARE FOR /api/user
 app.UseMiddleware<JwtMiddleware>();
 
+// ERROR HANDLING — before endpoints so exceptions from controllers are caught
+app.UseMiddleware<ErrorHandlerMiddleware>();
+
 // MAP CONTROLLERS
 app.MapControllers();
 
@@ -220,15 +172,22 @@ var multiPortRootSpa = File.Exists(rootIndexHtml);
 if (multiPortRootSpa)
 {
     // Multi-port deploy: Appointza UI at wwwroot root (e.g. http://localhost:5000/)
-    app.MapFallbackToFile("/{**slug}", "index.html");
+    // Must use the same FileProvider as UseStaticFiles — default WebRoot is not our build output.
+    app.MapFallbackToFile(
+        "index.html",
+        new StaticFileOptions
+        {
+            FileProvider = wwwrootProvider,
+            RequestPath = "",
+        });
     Console.WriteLine("✅ Multi-port SPA: Appointza UI at / (wwwroot/index.html)");
 }
 else
 {
-    // Combined path deploy: /appointza, /campusza, /webzys, /stay under one host
+    // Combined path deploy: /appointza, /campusza, /webzys under one host
     app.MapGet("/", () => Results.Redirect("/appointza/"));
 
-    foreach (var spaSegment in new[] { "appointza", "campusza", "webzys", "stay" })
+    foreach (var spaSegment in new[] { "appointza", "campusza", "webzys" })
     {
         var indexPhysical = Path.Combine(wwwrootPath, spaSegment, "index.html");
         if (!File.Exists(indexPhysical))
@@ -246,14 +205,6 @@ else
         app.MapFallbackToFile($"/{segment}/{{**slug}}", indexRelative);
     }
 
-    app.MapGet("/appointzastay", () => Results.Redirect("/stay/", permanent: false));
-    app.MapGet("/appointzastay/{**slug}", (string? slug) =>
-        Results.Redirect(string.IsNullOrEmpty(slug) ? "/stay/" : $"/stay/{slug}", permanent: false));
 }
-
-// Do NOT MapFallbackToFile("index.html") at wwwroot root in combined mode — steals /stay/, /webzys/, etc.
-
-// ERROR HANDLING
-app.UseMiddleware<ErrorHandlerMiddleware>();
 
 app.Run();

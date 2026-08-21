@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,7 +21,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { AppoinmentService } from "@/services/appoinment.service";
-import { BookedAppoinmentRes, AppoinmentSelectReq, UpdateStatusReq, UpdatePaymentReq } from "@/models/appoinment.model";
+import { BookedAppoinmentRes, UpdateStatusReq, UpdatePaymentReq } from "@/models/appoinment.model";
+import { useBookedAppointments } from "@/hooks/useBookedAppointments";
 
 /** Shared shell — soft elevation, warm hover, top accent (matches Appointza / Explore tone). */
 const appointmentCardClassName =
@@ -34,13 +35,19 @@ const UserAppointments = () => {
   // API services
   const appointmentService = useMemo(() => new AppoinmentService(), []);
 
+  const {
+    data: appointmentsData,
+    isLoading,
+    refetch: refetchAppointments,
+  } = useBookedAppointments({
+    userId: user?.id,
+    enabled: isAuthenticated && !!user?.id,
+  });
+
   // State
-  const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [appointments, setAppointments] = useState<BookedAppoinmentRes[]>([]);
-  const [upcomingAppointments, setUpcomingAppointments] = useState<BookedAppoinmentRes[]>([]);
-  const [previousAppointments, setPreviousAppointments] = useState<BookedAppoinmentRes[]>([]);
   const [activeTab, setActiveTab] = useState<'upcoming' | 'previous'>('upcoming');
+  const [visibleCount, setVisibleCount] = useState(40);
   
   // Filter states
   const [selectedStatus, setSelectedStatus] = useState<string>('ALL');
@@ -59,6 +66,26 @@ const UserAppointments = () => {
   const [selectedPaymentType, setSelectedPaymentType] = useState('Cash');
   const [paymentName, setPaymentName] = useState('');
   const [paymentCode, setPaymentCode] = useState('');
+
+  const { upcomingAppointments, previousAppointments } = useMemo(() => {
+    const response = appointmentsData ?? [];
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    const upcoming = response.filter((appointment) => {
+      const appointmentDate = new Date(appointment.appoinmentdate);
+      appointmentDate.setHours(0, 0, 0, 0);
+      return appointmentDate >= now;
+    });
+
+    const previous = response.filter((appointment) => {
+      const appointmentDate = new Date(appointment.appoinmentdate);
+      appointmentDate.setHours(0, 0, 0, 0);
+      return appointmentDate < now;
+    });
+
+    return { upcomingAppointments: upcoming, previousAppointments: previous };
+  }, [appointmentsData]);
 
   // Status pill — matches mock (e.g. green "Upcoming" on confirmed future visits)
   const getStatusPresentation = (appointment: BookedAppoinmentRes, tab: "upcoming" | "previous") => {
@@ -87,79 +114,11 @@ const UserAppointments = () => {
     };
   };
 
-  // Load appointments
-  const loadAppointments = useCallback(async () => {
-    if (!isAuthenticated || !user?.id) {
-      console.log('❌ UserAppointments: Not authenticated or no user ID');
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-    try {
-      console.log('🔍 Loading user appointments for user ID:', user.id);
-      
-      const req = new AppoinmentSelectReq();
-      req.userid = user.id;
-      
-      const response = await appointmentService.SelectBookedAppoinment(req);
-      console.log('✅ User appointments API response:', response);
-      
-      if (response) {
-        setAppointments(response);
-        
-        // Separate appointments into upcoming and previous
-        const now = new Date();
-        now.setHours(0, 0, 0, 0); // Set to start of today
-        
-        const upcoming = response.filter(appointment => {
-          const appointmentDate = new Date(appointment.appoinmentdate);
-          appointmentDate.setHours(0, 0, 0, 0);
-          return appointmentDate >= now;
-        });
-        
-        const previous = response.filter(appointment => {
-          const appointmentDate = new Date(appointment.appoinmentdate);
-          appointmentDate.setHours(0, 0, 0, 0);
-          return appointmentDate < now;
-        });
-
-        setUpcomingAppointments(upcoming);
-        setPreviousAppointments(previous);
-      } else {
-        console.log('⚠️ No appointments returned, setting empty arrays');
-        setAppointments([]);
-        setUpcomingAppointments([]);
-        setPreviousAppointments([]);
-      }
-    } catch (error) {
-      console.error('❌ Error loading appointments:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status
-      });
-      
-      // Set empty data instead of showing error
-      setAppointments([]);
-      setUpcomingAppointments([]);
-      setPreviousAppointments([]);
-      
-      toast({
-        title: "Warning",
-        description: "Could not load appointments. Showing empty list.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, user?.id, appointmentService, toast]);
-
   // Handle refresh
   const handleRefresh = async () => {
     setIsRefreshing(true);
     try {
-      await loadAppointments();
+      await refetchAppointments();
     } catch (error) {
       console.error('Error refreshing appointments:', error);
     } finally {
@@ -190,7 +149,6 @@ const UserAppointments = () => {
     }
 
     try {
-      setIsLoading(true);
       const req = new UpdateStatusReq();
       req.appoinmentid = selectedAppointment.id;
       req.statuscode = 'CANCELLED';
@@ -198,7 +156,7 @@ const UserAppointments = () => {
       await appointmentService.UpdateStatus(req);
       
       // Refresh the appointments list
-      await loadAppointments();
+      await refetchAppointments();
       
       // Close the dialog
       setShowCancelDialog(false);
@@ -217,8 +175,6 @@ const UserAppointments = () => {
         description: "Failed to cancel appointment",
         variant: "destructive"
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -234,7 +190,6 @@ const UserAppointments = () => {
     }
 
     try {
-      setIsLoading(true);
       const req = new UpdatePaymentReq();
       req.appoinmentid = selectedAppointment.id;
       req.paymenttype = selectedPaymentType;
@@ -252,7 +207,7 @@ const UserAppointments = () => {
       await appointmentService.UpdatePayment(req);
       
       // Refresh the appointments list
-      await loadAppointments();
+      await refetchAppointments();
       
       // Close the dialog
       setShowPaymentDialog(false);
@@ -274,8 +229,6 @@ const UserAppointments = () => {
         description: "Failed to update payment",
         variant: "destructive"
       });
-    } finally {
-      setIsLoading(false);
     }
   };
 
@@ -311,12 +264,11 @@ const UserAppointments = () => {
     return time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
-  // Load data on mount
   useEffect(() => {
-    loadAppointments();
-  }, [loadAppointments]);
+    setVisibleCount(40);
+  }, [activeTab, selectedStatus, dateRange.start, dateRange.end]);
 
-  if (isLoading) {
+  if (isLoading && !appointmentsData) {
     return (
       <div className="flex min-h-[40vh] w-full max-w-full items-center justify-center overflow-x-hidden px-4 py-12">
         <div className="relative w-full max-w-sm overflow-hidden rounded-2xl border border-zinc-100 bg-white px-6 py-10 text-center shadow-[0_2px_24px_-6px_rgba(15,23,42,0.1)] sm:max-w-none sm:rounded-[1.25rem] sm:px-12 sm:py-14">
@@ -334,8 +286,9 @@ const UserAppointments = () => {
 
   const currentAppointments = activeTab === 'upcoming' ? upcomingAppointments : previousAppointments;
   const filteredAppointments = getFilteredAppointments(currentAppointments);
+  const visibleAppointments = filteredAppointments.slice(0, visibleCount);
 
-  const appointmentServicesTotal = (a: BookedAppoinmentRes) =>
+    const appointmentServicesTotal = (a: BookedAppoinmentRes) =>
     a.attributes?.servicelist?.reduce((sum, s) => sum + (Number(s.serviceprice) || 0), 0) ?? 0;
 
   return (
@@ -377,142 +330,156 @@ const UserAppointments = () => {
 
           <SegmentTabsContent value="upcoming">
             {filteredAppointments.length > 0 ? (
-              <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
-                {filteredAppointments.map((appointment) => {
-                  const statusPresentation = getStatusPresentation(appointment, "upcoming");
-                  const total = appointmentServicesTotal(appointment);
-                  return (
-                    <article key={appointment.id} className={cn(appointmentCardClassName, "appointment-card")}>
-                      <div
-                        className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
-                        aria-hidden
-                      />
-                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight text-zinc-900 sm:text-xl">
-                            {new Date(appointment.appoinmentdate).toLocaleDateString("en-US", {
-                              weekday: "short",
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </p>
-                          <p className="mt-1.5 flex items-center gap-2 text-sm text-zinc-500">
-                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                              <Clock className="size-3.5 shrink-0" aria-hidden />
-                            </span>
-                            <span className="font-medium text-zinc-600">
-                              {formatTime(appointment.fromtime)} – {formatTime(appointment.totime)}
-                            </span>
-                          </p>
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
+                  {visibleAppointments.map((appointment) => {
+                    const statusPresentation = getStatusPresentation(appointment, "upcoming");
+                    const total = appointmentServicesTotal(appointment);
+                    return (
+                      <article key={appointment.id} className={cn(appointmentCardClassName, "appointment-card")}>
+                        <div
+                          className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
+                          aria-hidden
+                        />
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight text-zinc-900 sm:text-xl">
+                              {new Date(appointment.appoinmentdate).toLocaleDateString("en-US", {
+                                weekday: "short",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </p>
+                            <p className="mt-1.5 flex items-center gap-2 text-sm text-zinc-500">
+                              <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                                <Clock className="size-3.5 shrink-0" aria-hidden />
+                              </span>
+                              <span className="font-medium text-zinc-600">
+                                {formatTime(appointment.fromtime)} – {formatTime(appointment.totime)}
+                              </span>
+                            </p>
+                          </div>
+                          <span className={cn("w-fit shrink-0 self-start sm:self-center", statusPresentation.className)}>
+                            {statusPresentation.label}
+                          </span>
                         </div>
-                        <span className={cn("w-fit shrink-0 self-start sm:self-center", statusPresentation.className)}>
-                          {statusPresentation.label}
-                        </span>
-                      </div>
 
-                      <h3 className="mb-0.5 line-clamp-2 text-sm font-semibold text-orange-600">
-                        {appointment.organisationname}
-                      </h3>
-                      <p className="mb-4 flex items-start gap-2 text-sm leading-snug text-zinc-500">
-                        <MapPin className="mt-0.5 size-3.5 shrink-0 text-zinc-400" aria-hidden />
-                        <span>{appointment.city || "No location specified"}</span>
-                      </p>
-
-                      {appointment.staffname ? (
-                        <p className="mb-3 flex items-center gap-2 text-sm text-zinc-600">
-                          <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-50 text-zinc-400 ring-1 ring-zinc-100/80">
-                            <User className="size-3.5 shrink-0" aria-hidden />
-                          </span>
-                          <span>
-                            <span className="text-zinc-400">Staff · </span>
-                            {appointment.staffname}
-                          </span>
+                        <h3 className="mb-0.5 line-clamp-2 text-sm font-semibold text-orange-600">
+                          {appointment.organisationname}
+                        </h3>
+                        <p className="mb-4 flex items-start gap-2 text-sm leading-snug text-zinc-500">
+                          <MapPin className="mt-0.5 size-3.5 shrink-0 text-zinc-400" aria-hidden />
+                          <span>{appointment.city || "No location specified"}</span>
                         </p>
-                      ) : null}
 
-                      {appointment.attributes?.servicelist && appointment.attributes.servicelist.length > 0 ? (
-                        <div className="mb-4 min-h-0">
-                          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">Services</p>
-                          <div className="space-y-2">
-                            {appointment.attributes.servicelist.map((service, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50/60 px-3.5 py-2.5 transition-colors hover:bg-zinc-50"
-                              >
-                                <p className="min-w-0 flex-1 text-sm font-medium text-zinc-800 break-words leading-snug">
-                                  {service.servicename}
-                                </p>
-                                <p className="shrink-0 text-sm font-semibold tabular-nums text-zinc-900">
-                                  ₹{service.serviceprice}
-                                </p>
-                              </div>
-                            ))}
+                        {appointment.staffname ? (
+                          <p className="mb-3 flex items-center gap-2 text-sm text-zinc-600">
+                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-50 text-zinc-400 ring-1 ring-zinc-100/80">
+                              <User className="size-3.5 shrink-0" aria-hidden />
+                            </span>
+                            <span>
+                              <span className="text-zinc-400">Staff · </span>
+                              {appointment.staffname}
+                            </span>
+                          </p>
+                        ) : null}
+
+                        {appointment.attributes?.servicelist && appointment.attributes.servicelist.length > 0 ? (
+                          <div className="mb-4 min-h-0">
+                            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">Services</p>
+                            <div className="space-y-2">
+                              {appointment.attributes.servicelist.map((service, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50/60 px-3.5 py-2.5 transition-colors hover:bg-zinc-50"
+                                >
+                                  <p className="min-w-0 flex-1 text-sm font-medium text-zinc-800 break-words leading-snug">
+                                    {service.servicename}
+                                  </p>
+                                  <p className="shrink-0 text-sm font-semibold tabular-nums text-zinc-900">
+                                    ₹{service.serviceprice}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ) : null}
+                        ) : null}
 
-                      {appointment.ispaid ? (
-                        <div className="mb-3 inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/60">
-                          <CheckCircle className="size-3.5 shrink-0 text-emerald-600" />
-                          Paid
-                        </div>
-                      ) : null}
-
-                      {(() => {
-                        const showCancel =
-                          appointment.statuscode !== "CANCELLED" && appointment.statuscode !== "COMPLETED";
-                        const showFooter = total > 0 || showCancel;
-                        return showFooter ? (
-                          <div className="mt-auto space-y-4 border-t border-zinc-100 pt-5">
-                            {total > 0 ? (
-                              <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50/90 px-3.5 py-3 ring-1 ring-zinc-100/90">
-                                <span className="text-sm font-medium text-zinc-600">Total</span>
-                                <span className="text-lg font-semibold tabular-nums tracking-tight text-zinc-900">
-                                  ₹{total.toLocaleString("en-IN")}
-                                </span>
-                              </div>
-                            ) : null}
-                            {showCancel ? (
-                              <Button
-                                onClick={() => {
-                                  setSelectedAppointment(appointment);
-                                  setShowCancelDialog(true);
-                                }}
-                                variant="outline"
-                                className="w-full min-h-[48px] rounded-2xl border-red-200/90 bg-white py-3.5 text-sm font-medium text-red-600 shadow-sm transition-all hover:border-red-300 hover:bg-red-50/80 hover:text-red-700 touch-manipulation"
-                              >
-                                <span className="inline-flex items-center justify-center gap-2">
-                                  <Trash2 className="size-4 shrink-0 opacity-80" />
-                                  Cancel appointment
-                                </span>
-                              </Button>
-                            ) : null}
+                        {appointment.ispaid ? (
+                          <div className="mb-3 inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/60">
+                            <CheckCircle className="size-3.5 shrink-0 text-emerald-600" />
+                            Paid
                           </div>
-                        ) : (
-                          <div className="flex-grow" />
-                        );
-                      })()}
+                        ) : null}
 
-                      {false &&
-                        !appointment.ispaid &&
-                        appointment.statuscode !== "CANCELLED" && (
-                          <Button
-                            onClick={() => {
-                              setSelectedAppointment(appointment);
-                              setPaymentAmount(appointmentServicesTotal(appointment).toString() || "");
-                              setShowPaymentDialog(true);
-                            }}
-                            variant="outline"
-                            className="mt-2 w-full sm:w-auto text-green-600 border-green-600 hover:bg-green-50 text-xs h-8"
-                          >
-                            <CreditCard className="h-3.5 w-3.5 mr-1.5" />
-                            Pay Now
-                          </Button>
-                        )}
-                    </article>
-                  );
-                })}
-              </div>
+                        {(() => {
+                          const showCancel =
+                            appointment.statuscode !== "CANCELLED" && appointment.statuscode !== "COMPLETED";
+                          const showFooter = total > 0 || showCancel;
+                          return showFooter ? (
+                            <div className="mt-auto space-y-4 border-t border-zinc-100 pt-5">
+                              {total > 0 ? (
+                                <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50/90 px-3.5 py-3 ring-1 ring-zinc-100/90">
+                                  <span className="text-sm font-medium text-zinc-600">Total</span>
+                                  <span className="text-lg font-semibold tabular-nums tracking-tight text-zinc-900">
+                                    ₹{total.toLocaleString("en-IN")}
+                                  </span>
+                                </div>
+                              ) : null}
+                              {showCancel ? (
+                                <Button
+                                  onClick={() => {
+                                    setSelectedAppointment(appointment);
+                                    setShowCancelDialog(true);
+                                  }}
+                                  variant="outline"
+                                  className="w-full min-h-[48px] rounded-2xl border-red-200/90 bg-white py-3.5 text-sm font-medium text-red-600 shadow-sm transition-all hover:border-red-300 hover:bg-red-50/80 hover:text-red-700 touch-manipulation"
+                                >
+                                  <span className="inline-flex items-center justify-center gap-2">
+                                    <Trash2 className="size-4 shrink-0 opacity-80" />
+                                    Cancel appointment
+                                  </span>
+                                </Button>
+                              ) : null}
+                            </div>
+                          ) : (
+                            <div className="flex-grow" />
+                          );
+                        })()}
+
+                        {false &&
+                          !appointment.ispaid &&
+                          appointment.statuscode !== "CANCELLED" && (
+                            <Button
+                              onClick={() => {
+                                setSelectedAppointment(appointment);
+                                setPaymentAmount(appointmentServicesTotal(appointment).toString() || "");
+                                setShowPaymentDialog(true);
+                              }}
+                              variant="outline"
+                              className="mt-2 w-full sm:w-auto text-green-600 border-green-600 hover:bg-green-50 text-xs h-8"
+                            >
+                              <CreditCard className="h-3.5 w-3.5 mr-1.5" />
+                              Pay Now
+                            </Button>
+                          )}
+                      </article>
+                    );
+                  })}
+                </div>
+                {visibleAppointments.length < filteredAppointments.length ? (
+                  <div className="mt-6 flex justify-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 rounded-2xl text-sm"
+                      onClick={() => setVisibleCount((n) => n + 40)}
+                    >
+                      Show more ({filteredAppointments.length - visibleAppointments.length} remaining)
+                    </Button>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="mx-auto w-full max-w-md overflow-hidden rounded-2xl border border-dashed border-zinc-200/90 bg-gradient-to-b from-zinc-50/90 via-white to-white px-4 py-10 text-center shadow-[0_2px_24px_-8px_rgba(15,23,42,0.08)] sm:rounded-[1.25rem] sm:px-8 sm:py-14">
                 <div
@@ -537,91 +504,105 @@ const UserAppointments = () => {
 
           <SegmentTabsContent value="previous">
             {filteredAppointments.length > 0 ? (
-              <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
-                {filteredAppointments.map((appointment) => {
-                  const statusPresentation = getStatusPresentation(appointment, "previous");
-                  const total = appointmentServicesTotal(appointment);
-                  return (
-                    <article key={appointment.id} className={cn(appointmentCardClassName, "appointment-card")}>
-                      <div
-                        className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
-                        aria-hidden
-                      />
-                      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-                        <div className="min-w-0 flex-1">
-                          <p className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight text-zinc-900 sm:text-xl">
-                            {new Date(appointment.appoinmentdate).toLocaleDateString("en-US", {
-                              weekday: "short",
-                              month: "short",
-                              day: "numeric",
-                            })}
-                          </p>
-                          <p className="mt-1.5 flex items-center gap-2 text-sm text-zinc-500">
-                            <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
-                              <Clock className="size-3.5 shrink-0" aria-hidden />
-                            </span>
-                            <span className="font-medium text-zinc-600">
-                              {formatTime(appointment.fromtime)} – {formatTime(appointment.totime)}
-                            </span>
-                          </p>
-                        </div>
-                        <span className={cn("w-fit shrink-0 self-start sm:self-center", statusPresentation.className)}>
-                          {statusPresentation.label}
-                        </span>
-                      </div>
-
-                      <h3 className="mb-0.5 line-clamp-2 text-sm font-semibold text-orange-600">
-                        {appointment.organisationname}
-                      </h3>
-                      <p className="mb-4 flex items-start gap-2 text-sm leading-snug text-zinc-500">
-                        <MapPin className="mt-0.5 size-3.5 shrink-0 text-zinc-400" aria-hidden />
-                        <span>{appointment.city || "No location specified"}</span>
-                      </p>
-
-                      {appointment.attributes?.servicelist && appointment.attributes.servicelist.length > 0 ? (
-                        <div className="mb-4 min-h-0">
-                          <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">Services</p>
-                          <div className="space-y-2">
-                            {appointment.attributes.servicelist.map((service, index) => (
-                              <div
-                                key={index}
-                                className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50/60 px-3.5 py-2.5 transition-colors hover:bg-zinc-50"
-                              >
-                                <p className="min-w-0 flex-1 text-sm font-medium text-zinc-800 break-words leading-snug">
-                                  {service.servicename}
-                                </p>
-                                <p className="shrink-0 text-sm font-semibold tabular-nums text-zinc-900">
-                                  ₹{service.serviceprice}
-                                </p>
-                              </div>
-                            ))}
+              <>
+                <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
+                  {visibleAppointments.map((appointment) => {
+                    const statusPresentation = getStatusPresentation(appointment, "previous");
+                    const total = appointmentServicesTotal(appointment);
+                    return (
+                      <article key={appointment.id} className={cn(appointmentCardClassName, "appointment-card")}>
+                        <div
+                          className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
+                          aria-hidden
+                        />
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+                          <div className="min-w-0 flex-1">
+                            <p className="line-clamp-2 text-lg font-semibold leading-snug tracking-tight text-zinc-900 sm:text-xl">
+                              {new Date(appointment.appoinmentdate).toLocaleDateString("en-US", {
+                                weekday: "short",
+                                month: "short",
+                                day: "numeric",
+                              })}
+                            </p>
+                            <p className="mt-1.5 flex items-center gap-2 text-sm text-zinc-500">
+                              <span className="inline-flex size-7 items-center justify-center rounded-lg bg-zinc-100 text-zinc-500">
+                                <Clock className="size-3.5 shrink-0" aria-hidden />
+                              </span>
+                              <span className="font-medium text-zinc-600">
+                                {formatTime(appointment.fromtime)} – {formatTime(appointment.totime)}
+                              </span>
+                            </p>
                           </div>
+                          <span className={cn("w-fit shrink-0 self-start sm:self-center", statusPresentation.className)}>
+                            {statusPresentation.label}
+                          </span>
                         </div>
-                      ) : null}
 
-                      {appointment.ispaid ? (
-                        <div className="mb-3 inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/60">
-                          <CheckCircle className="size-3.5 shrink-0 text-emerald-600" />
-                          Paid
-                        </div>
-                      ) : null}
+                        <h3 className="mb-0.5 line-clamp-2 text-sm font-semibold text-orange-600">
+                          {appointment.organisationname}
+                        </h3>
+                        <p className="mb-4 flex items-start gap-2 text-sm leading-snug text-zinc-500">
+                          <MapPin className="mt-0.5 size-3.5 shrink-0 text-zinc-400" aria-hidden />
+                          <span>{appointment.city || "No location specified"}</span>
+                        </p>
 
-                      {total > 0 ? (
-                        <div className="mt-auto border-t border-zinc-100 pt-5">
-                          <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50/90 px-3.5 py-3 ring-1 ring-zinc-100/90">
-                            <span className="text-sm font-medium text-zinc-600">Total</span>
-                            <span className="text-lg font-semibold tabular-nums tracking-tight text-zinc-900">
-                              ₹{total.toLocaleString("en-IN")}
-                            </span>
+                        {appointment.attributes?.servicelist && appointment.attributes.servicelist.length > 0 ? (
+                          <div className="mb-4 min-h-0">
+                            <p className="mb-2.5 text-xs font-semibold uppercase tracking-wider text-zinc-400">Services</p>
+                            <div className="space-y-2">
+                              {appointment.attributes.servicelist.map((service, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between gap-3 rounded-2xl border border-zinc-100 bg-zinc-50/60 px-3.5 py-2.5 transition-colors hover:bg-zinc-50"
+                                >
+                                  <p className="min-w-0 flex-1 text-sm font-medium text-zinc-800 break-words leading-snug">
+                                    {service.servicename}
+                                  </p>
+                                  <p className="shrink-0 text-sm font-semibold tabular-nums text-zinc-900">
+                                    ₹{service.serviceprice}
+                                  </p>
+                                </div>
+                              ))}
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div className="flex-grow" />
-                      )}
-                    </article>
-                  );
-                })}
-              </div>
+                        ) : null}
+
+                        {appointment.ispaid ? (
+                          <div className="mb-3 inline-flex w-fit items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800 ring-1 ring-emerald-200/60">
+                            <CheckCircle className="size-3.5 shrink-0 text-emerald-600" />
+                            Paid
+                          </div>
+                        ) : null}
+
+                        {total > 0 ? (
+                          <div className="mt-auto border-t border-zinc-100 pt-5">
+                            <div className="flex items-center justify-between gap-3 rounded-xl bg-zinc-50/90 px-3.5 py-3 ring-1 ring-zinc-100/90">
+                              <span className="text-sm font-medium text-zinc-600">Total</span>
+                              <span className="text-lg font-semibold tabular-nums tracking-tight text-zinc-900">
+                                ₹{total.toLocaleString("en-IN")}
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex-grow" />
+                        )}
+                      </article>
+                    );
+                  })}
+                </div>
+                {visibleAppointments.length < filteredAppointments.length ? (
+                  <div className="mt-6 flex justify-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="h-10 rounded-2xl text-sm"
+                      onClick={() => setVisibleCount((n) => n + 40)}
+                    >
+                      Show more ({filteredAppointments.length - visibleAppointments.length} remaining)
+                    </Button>
+                  </div>
+                ) : null}
+              </>
             ) : (
               <div className="mx-auto w-full max-w-md overflow-hidden rounded-2xl border border-dashed border-zinc-200/90 bg-gradient-to-b from-zinc-50/90 via-white to-white px-4 py-10 text-center shadow-[0_2px_24px_-8px_rgba(15,23,42,0.08)] sm:rounded-[1.25rem] sm:px-8 sm:py-14">
                 <div

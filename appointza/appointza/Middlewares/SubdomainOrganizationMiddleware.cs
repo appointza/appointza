@@ -5,8 +5,8 @@ using Microsoft.AspNetCore.Hosting;
 namespace appointza.Middlewares
 {
     /// <summary>
-    /// Resolves organisation from custom URL subdomain and serves SPA index.html when needed.
-    /// Example: awonderonesurprise.appointza.com
+    /// Resolves organisation from custom URL subdomain and redirects to /template/{orgloctempid}.
+    /// Example: awonderonesurprise.localhost:5000 → /template/{guid}
     /// </summary>
     public class SubdomainOrganizationMiddleware
     {
@@ -19,7 +19,10 @@ namespace appointza.Middlewares
             _logger = logger;
         }
 
-        public async Task InvokeAsync(HttpContext context, OrganisationService organisationService)
+        public async Task InvokeAsync(
+            HttpContext context,
+            OrganisationService organisationService,
+            OrganisationLocationService organisationLocationService)
         {
             try
             {
@@ -50,6 +53,39 @@ namespace appointza.Middlewares
                     {
                         _logger.LogWarning("No organization found for custom URL: {CustomUrl}", customUrlSlug);
                         context.Items["OrganizationId"] = 0;
+                    }
+
+                    // Server-side redirect: subdomain root → same renderer as /template/{orgloctempid}
+                    if (HttpMethods.IsGet(context.Request.Method))
+                    {
+                        var path = context.Request.Path.Value ?? "";
+                        if (path == "/" || string.IsNullOrEmpty(path))
+                        {
+                            var publicSite = await organisationLocationService.ResolvePublicSiteByCustomUrl(customUrlSlug);
+                            var orgLocTempId = publicSite?.orgloctempid?.Trim() ?? "";
+
+                            if (string.IsNullOrEmpty(orgLocTempId) && organization?.organisationlocationid > 0)
+                            {
+                                orgLocTempId = (await organisationLocationService.GetOrgLocTempIdByLocationId(
+                                    organization.organisationlocationid)).Trim();
+                            }
+
+                            if (!string.IsNullOrEmpty(orgLocTempId))
+                            {
+                                var target = $"/template/{Uri.EscapeDataString(orgLocTempId)}";
+                                _logger.LogInformation(
+                                    "Redirecting subdomain {CustomUrl} to {Target}",
+                                    customUrlSlug,
+                                    target);
+                                context.Response.Redirect(target, permanent: false);
+                                return;
+                            }
+
+                            _logger.LogWarning(
+                                "Subdomain {CustomUrl} matched but orgloctempid is missing on location {LocationId}",
+                                customUrlSlug,
+                                publicSite?.id ?? organization?.organisationlocationid ?? 0);
+                        }
                     }
                 }
                 else

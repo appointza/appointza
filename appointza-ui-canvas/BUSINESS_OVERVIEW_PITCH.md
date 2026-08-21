@@ -61,7 +61,7 @@ Replace generic claims with **your** real pricing, geography, and ICP.
 
 ## Product notes (cross-cutting)
 
-**Multi-brand routes (e.g. Momantza / Campusza-style):** Describe as **sibling brands or vertical wedges** on **shared booking infrastructure**, unless stacks are genuinely separate.
+**Multi-brand routes (for example Campusza):** Describe as **sibling brands or vertical wedges** on **shared booking infrastructure**, unless stacks are genuinely separate.
 
 **Custom domains / templates (`/template/…`, `/public/org/…`, similar):** Position as **hosted commerce frontends** so merchants publish without rebuilding core booking logic.
 

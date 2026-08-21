@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { getFirebaseMessaging, getVapidKey } from '@/config/firebase.config';
+import { getFirebaseMessaging, getVapidKey, initializeFirebase } from '@/config/firebase.config';
 import { getToken, onMessage, Messaging } from 'firebase/messaging';
 import { UsersService } from './users.service';
 
@@ -213,7 +213,8 @@ class PushNotificationService {
         }
       }
 
-      // Get Firebase messaging instance
+      // Ensure Firebase app + messaging exist (may not have been booted on marketing pages)
+      initializeFirebase();
       const messaging = getFirebaseMessaging();
       if (!messaging) {
         console.warn('⚠️ Firebase Messaging not available');

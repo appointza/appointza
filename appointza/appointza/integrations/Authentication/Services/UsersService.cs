@@ -405,42 +405,39 @@ namespace appointza.Authentication.Services
         }
         public async Task<bool> DeleteOrganisationPermananetTransaction(IDb db, Organisationdeletereq req)
         {
-            var result = false;
-
             var user = (await SelectTransaction(db, new UsersSelectReq { id = req.userid }))
-        .FirstOrDefault();
-            if(user.otp == req.otp)
-            {
-                await organisationservice.DeleteTransaction(db, new OrganisationDeleteReq
-                {
-                    id = req.organisationid
-                });
+                .FirstOrDefault();
 
-                await organisationlocationservice.DeleteTransaction(db, new OrganisationLocationDeleteReq
-                {
-                    orgnaisationid = req.organisationid
-                });
-
-                //var user = (await SelectTransaction(db, new UsersSelectReq
-                //{
-                //    id = req.userid
-                //})).FirstOrDefault();
-
-                if (user != null)
-                {
-                    user.locationid = 0;
-                    user.organisationid = 0;
-                    await UpdateTransaction(db, user);
-                }
-
-                result = true;
-                return result;
-            }
-            else
+            if (user == null)
             {
                 throw new AppException(AppException.ErrorCodes.UsersNotFound);
             }
-         
+
+            if (user.otpexpirationtime.CompareTo(DateTime.UtcNow) < 0)
+            {
+                throw new AppException(AppException.ErrorCodes.OtpExpired);
+            }
+
+            if (user.otp != req.otp)
+            {
+                throw new AppException(AppException.ErrorCodes.OtpInvalid);
+            }
+
+            await organisationservice.DeleteTransaction(db, new OrganisationDeleteReq
+            {
+                id = req.organisationid
+            });
+
+            await organisationlocationservice.DeleteTransaction(db, new OrganisationLocationDeleteReq
+            {
+                orgnaisationid = req.organisationid
+            });
+
+            user.locationid = 0;
+            user.organisationid = 0;
+            await UpdateTransaction(db, user);
+
+            return true;
         }
 
         public async Task<bool> Deleteuserpermanent(Organisationdeletereq users)
@@ -455,38 +452,40 @@ namespace appointza.Authentication.Services
         }
         public async Task<bool> DeleteuserpermanentTransaction(IDb db, Organisationdeletereq req)
         {
-            var result = false;
-
             var user = (await SelectTransaction(db, new UsersSelectReq { id = req.userid }))
-           .FirstOrDefault();
-            if (user.otp == req.otp)
+                .FirstOrDefault();
+
+            if (user == null)
             {
-                await organisationservice.DeleteTransaction(db, new OrganisationDeleteReq
-                {
-                    id = req.organisationid
-                });
-
-                await organisationlocationservice.DeleteTransaction(db, new OrganisationLocationDeleteReq
-                {
-                    orgnaisationid = req.organisationid
-                });
-
-                await DeleteTransaction(db, new UsersDeleteReq
-                {
-                    id = req.userid
-                });
-
-                result = true;
-                return result;
+                throw new AppException(AppException.ErrorCodes.UsersNotFound);
             }
-            else
-            {
 
+            if (user.otpexpirationtime.CompareTo(DateTime.UtcNow) < 0)
+            {
+                throw new AppException(AppException.ErrorCodes.OtpExpired);
+            }
+
+            if (user.otp != req.otp)
+            {
                 throw new AppException(AppException.ErrorCodes.OtpInvalid);
-               
             }
 
-          
+            await organisationservice.DeleteTransaction(db, new OrganisationDeleteReq
+            {
+                id = req.organisationid
+            });
+
+            await organisationlocationservice.DeleteTransaction(db, new OrganisationLocationDeleteReq
+            {
+                orgnaisationid = req.organisationid
+            });
+
+            await DeleteTransaction(db, new UsersDeleteReq
+            {
+                id = req.userid
+            });
+
+            return true;
         }
 
         public async Task<bool> UpdatePushToken(long userId, string pushToken, string platform)

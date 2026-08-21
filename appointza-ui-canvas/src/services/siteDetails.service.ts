@@ -34,6 +34,37 @@ export class SiteDetailsService {
     return resp.item;
   }
 
+  /**
+   * Single public API: server resolves GUID, loads site + events, binds template, returns HTML.
+   */
+  async getPublicHtml(orgloctempid: string) {
+    const resp = await this.http.get<
+      ActionRes<{
+        organisationid?: number;
+        organisationlocationid?: number;
+        orgloctempid?: string;
+        templateid?: number;
+        html?: string;
+        versionKey?: string;
+      }>
+    >(`${this.baseurl}/GetPublicHtml/${encodeURIComponent(orgloctempid)}`, true);
+    return resp.item;
+  }
+
+  async getPublicHtmlByLocation(locationId: number) {
+    const resp = await this.http.get<
+      ActionRes<{
+        organisationid?: number;
+        organisationlocationid?: number;
+        orgloctempid?: string;
+        templateid?: number;
+        html?: string;
+        versionKey?: string;
+      }>
+    >(`${this.baseurl}/GetPublicHtmlByLocation/${locationId}`, true);
+    return resp.item;
+  }
+
   async resolveTemplateByCustomUrl(customUrl: string) {
     let postdata: ActionReq<{ customUrl: string }> = new ActionReq<{ customUrl: string }>();
     postdata.item = { customUrl };

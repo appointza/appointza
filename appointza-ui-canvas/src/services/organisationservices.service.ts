@@ -4,6 +4,7 @@ import {
   OrganisationServices,
   OrganisationServicesDeleteReq,
   OrganisationServicesSelectReq,
+  PublicServiceCatalogueItem,
 } from '../models/organisationservices.model';
 import { AxiosHelperUtils } from '../utils/axioshelper.utils';
 import { environment } from '../utils/environment';
@@ -24,6 +25,16 @@ export class OrganisationServicesService {
         postdata.item = req;
         let resp = await this.http.post<ActionRes<Array<OrganisationServices>>>(
             this.baseurl + '/select', 
+            postdata
+        );
+        return resp.item;
+    }
+
+    async selectPublicCatalogue(req: OrganisationServicesSelectReq) {
+        const postdata: ActionReq<OrganisationServicesSelectReq> = new ActionReq<OrganisationServicesSelectReq>();
+        postdata.item = req;
+        const resp = await this.http.post<ActionRes<Array<PublicServiceCatalogueItem>>>(
+            this.baseurl + '/SelectPublicCatalogue',
             postdata
         );
         return resp.item;

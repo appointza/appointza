@@ -287,6 +287,8 @@ namespace appointza.Models.Hospitality
         public long id { get; set; }
         public long organisation_id { get; set; }
         public string status { get; set; } = "available";
+        public string source { get; set; } = "api";
+        public string notes { get; set; } = "";
     }
 
     public class OrganisationRoomIdReq
@@ -295,15 +297,51 @@ namespace appointza.Models.Hospitality
         public long organisation_id { get; set; }
     }
 
+    public class OrganisationRoomStatusEvent
+    {
+        public long id { get; set; }
+        public long organisation_id { get; set; }
+        public long organisation_location_id { get; set; }
+        public long organisation_room_id { get; set; }
+        public string booking_id { get; set; } = "";
+        public string from_status { get; set; } = "";
+        public string to_status { get; set; } = "";
+        public string event_type { get; set; } = "";
+        public long? changed_by_user_id { get; set; }
+        public string changed_by_name { get; set; } = "";
+        public string source { get; set; } = "api";
+        public string notes { get; set; } = "";
+        public DateTime occurred_at { get; set; }
+        public DateTime created_at { get; set; }
+    }
+
+    public class OrganisationRoomStatusEventSelectReq
+    {
+        public long organisation_id { get; set; }
+        public long organisation_room_id { get; set; }
+        public string booking_id { get; set; } = "";
+        public int limit { get; set; } = 50;
+    }
+
     public class OrganisationRoomStatusBoardRes
     {
         public long organisation_id { get; set; }
         public string today { get; set; } = "";
         public string as_of { get; set; } = "";
         public long? selected_id { get; set; }
+        public OrganisationRoom? selected_room { get; set; }
         public Dictionary<string, int> counts { get; set; } = new();
+        /// <summary>Ready-to-render status chips (server-computed for as_of date).</summary>
+        public List<OrganisationRoomStatusSummaryItem> status_summary { get; set; } = [];
         public List<OrganisationRoomStatusFloorGroup> floors { get; set; } = [];
         public List<OrganisationRoom> rooms { get; set; } = [];
+    }
+
+    public class OrganisationRoomStatusSummaryItem
+    {
+        public string value { get; set; } = "";
+        public string label { get; set; } = "";
+        public int count { get; set; }
     }
 
     public class OrganisationRoomStatusFloorGroup

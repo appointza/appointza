@@ -1,4 +1,5 @@
 using appointza.Models;
+using appointza.Models.Loyalty;
 using appointza.Authentication.Services;
 using appointza.Sms.Services;
 using appointza.Sms.Models;
@@ -27,8 +28,9 @@ namespace appointza.Services
         OrganisationLocationService organisationLocationService;
         Sms.Services.SmsService smsService;
         CreditWalletService creditWalletService;
+        OrganisationLoyaltyService organisationLoyaltyService;
 
-        public AppoinmentService(IDbProvider dbprovider, IQueryBuilderProvider querybuilderprovider, RequestState requeststate, ReferenceValueService referenceValueService, ReferenceTypeService referenceTypeService, /* PaymentService paymentService, */ TimelineService timelineService, WhatsAppMsg.Services.WhatsAppService whatsAppService, UsersService usersService, OrganisationService organisationService, OrganisationLocationService organisationLocationService, Sms.Services.SmsService smsService, CreditWalletService creditWalletService)
+        public AppoinmentService(IDbProvider dbprovider, IQueryBuilderProvider querybuilderprovider, RequestState requeststate, ReferenceValueService referenceValueService, ReferenceTypeService referenceTypeService, /* PaymentService paymentService, */ TimelineService timelineService, WhatsAppMsg.Services.WhatsAppService whatsAppService, UsersService usersService, OrganisationService organisationService, OrganisationLocationService organisationLocationService, Sms.Services.SmsService smsService, CreditWalletService creditWalletService, OrganisationLoyaltyService organisationLoyaltyService)
         {
             this.dbprovider = dbprovider;
             this.querybuilderprovider = querybuilderprovider;
@@ -44,6 +46,7 @@ namespace appointza.Services
             this.organisationLocationService = organisationLocationService;
             this.smsService = smsService;
             this.creditWalletService = creditWalletService;
+            this.organisationLoyaltyService = organisationLoyaltyService;
         }
         public async Task<List<Appoinment>> Select(AppoinmentSelectReq req)
         {
@@ -621,6 +624,7 @@ namespace appointza.Services
 
             int oldStatus = appoinment.status;
             appoinment.status = (int)req.statusid;
+            string oldStatusCode = appoinment.statuscode ?? "";
             appoinment.statuscode = req.statuscode;
 
             await this.UpdateTransaction(db, appoinment);
@@ -720,6 +724,38 @@ namespace appointza.Services
             {
                 // Log error but don't fail the status update
                 Console.WriteLine($"Error sending status SMS notification: {ex.Message}");
+            }
+
+            // Award loyalty points and evaluate reward rules when appointment is completed
+            try
+            {
+                var newStatusCode = (req.statuscode ?? "").Trim();
+                if (string.Equals(newStatusCode, "COMPLETED", StringComparison.OrdinalIgnoreCase)
+                    && !string.Equals(oldStatusCode, "COMPLETED", StringComparison.OrdinalIgnoreCase))
+                {
+                    decimal amountSpent = 0;
+                    long serviceId = 0;
+                    if (appoinment.attributes?.servicelist != null && appoinment.attributes.servicelist.Any())
+                    {
+                        amountSpent = appoinment.attributes.servicelist.Sum(s => s.serviceprice);
+                        serviceId = appoinment.attributes.servicelist.First().id;
+                    }
+
+                    await organisationLoyaltyService.EvaluateServiceCompletion(new LoyaltyEvaluateCompletionReq
+                    {
+                        organisation_id = appoinment.organizationid,
+                        client_user_id = appoinment.userid,
+                        appointment_id = appoinment.id,
+                        service_id = serviceId,
+                        amount_spent = amountSpent,
+                        is_cancelled = false,
+                        is_refunded = false,
+                    });
+                }
+            }
+            catch (Exception loyaltyEx)
+            {
+                Console.WriteLine($"Error evaluating loyalty for appointment {req.appoinmentid}: {loyaltyEx.Message}");
             }
 
             return result;
@@ -1289,43 +1325,63 @@ namespace appointza.Services
         {
             List<ClientInfoRes> result = new List<ClientInfoRes>();
 
-            string query = @"
-                SELECT 
-                    u.id AS userid,
-                    u.name AS username,
-                    u.mobile,
-                    ol.city
-                FROM Appoinment a
-                LEFT JOIN users u ON u.id = a.userid
-                LEFT JOIN organisationlocation ol ON ol.id = a.organisationlocationid
-                WHERE a.isactive = TRUE
-            ";
-
-            // Build dynamic filters
             bool hasOrganisationId = req.organisationid > 0;
             bool hasLocation = req.organisationlocationid > 0;
             bool hasMobileFilter = !string.IsNullOrWhiteSpace(req.mobilenumber);
+            int take = req.take > 0 ? Math.Min(req.take, 200) : 0;
+            int skip = req.skip < 0 ? 0 : req.skip;
 
-            // Filter by organisationlocationid (primary filter - can be used alone)
+            string appointmentWhere = "a.isactive = TRUE AND u.id IS NOT NULL";
+            string eventWhere = "eb.isactive = TRUE AND e.isactive = TRUE AND u.id IS NOT NULL";
             if (hasLocation)
             {
-                query += " AND a.organisationlocationid = @organisationlocationid";
+                appointmentWhere += " AND a.organisationlocationid = @organisationlocationid";
+                eventWhere += " AND e.organisation_location_id = @organisationlocationid";
             }
-            
-            // Filter by organisationid (optional - only if provided)
             if (hasOrganisationId)
             {
-                query += " AND a.organisationid = @organisationid";
+                appointmentWhere += " AND a.organisationid = @organisationid";
+                eventWhere += " AND e.organisation_id = @organisationid";
             }
-            
-            // Mobile/name search filter
             if (hasMobileFilter)
             {
-                query += " AND (u.mobile LIKE @mobilenumber OR u.name LIKE @mobilenumber)";
+                appointmentWhere += " AND (u.mobile ILIKE @mobilenumber OR u.name ILIKE @mobilenumber)";
+                eventWhere += " AND (u.mobile ILIKE @mobilenumber OR u.name ILIKE @mobilenumber)";
             }
 
-            // Group to ensure unique users
-            query += "\n GROUP BY u.id, u.name, u.mobile, ol.city\n ORDER BY u.name ASC";
+            string query = $@"
+                SELECT userid, username, mobile, city FROM (
+                    SELECT 
+                        u.id AS userid,
+                        u.name AS username,
+                        u.mobile,
+                        ol.city
+                    FROM Appoinment a
+                    LEFT JOIN users u ON u.id = a.userid
+                    LEFT JOIN organisationlocation ol ON ol.id = a.organisationlocationid
+                    WHERE {appointmentWhere}
+                    GROUP BY u.id, u.name, u.mobile, ol.city
+
+                    UNION
+
+                    SELECT
+                        u.id AS userid,
+                        u.name AS username,
+                        u.mobile,
+                        '' AS city
+                    FROM event_bookings eb
+                    INNER JOIN events e ON e.id = eb.event_id
+                    LEFT JOIN users u ON u.id = eb.user_id
+                    WHERE {eventWhere}
+                    GROUP BY u.id, u.name, u.mobile
+                ) clients
+                ORDER BY username ASC
+            ";
+
+            if (take > 0)
+            {
+                query += " LIMIT @take OFFSET @skip";
+            }
 
             var command = db.GetCommand(query);
             
@@ -1341,6 +1397,11 @@ namespace appointza.Services
             if (hasMobileFilter)
             {
                 db.AddParameter(command, "mobilenumber", DbTypes.Types.String).Value = $"%{req.mobilenumber}%";
+            }
+            if (take > 0)
+            {
+                db.AddParameter(command, "take", DbTypes.Types.Integer).Value = take;
+                db.AddParameter(command, "skip", DbTypes.Types.Integer).Value = skip;
             }
 
             using (DbDataReader reader = await db.Execute(command))
@@ -1461,7 +1522,12 @@ namespace appointza.Services
 
                 var duplicateRoom = result.Any(c => c.room_id == roomClient.room_id && c.is_room_customer);
                 if (!duplicateRoom)
+                {
+                    // Paginated lists must not append the full room-guest set onto every page.
+                    if (req.take > 0)
+                        continue;
                     result.Add(roomClient);
+                }
             }
 
             result.Sort((a, b) => string.Compare(a.username, b.username, StringComparison.OrdinalIgnoreCase));

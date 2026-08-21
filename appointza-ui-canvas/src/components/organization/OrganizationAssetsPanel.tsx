@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Copy, Loader2, RefreshCw, Trash2, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 import { cn } from "@/lib/utils";
@@ -62,118 +61,108 @@ export function OrganizationAssetsPanel() {
   };
 
   return (
-    <div className={cn(org.pageSection, "space-y-4 pt-0")}>
-      <Card className={cn(org.card, "border-stone-100")}>
-        <CardContent className="space-y-4 p-4 sm:p-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-sm text-stone-600">
-              Upload images for your organisation — use them in templates, hospitality content, and
-              marketing pages. Each image gets a file id you can reference elsewhere.
-            </p>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <input
-                ref={inputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(event) => {
-                  void handleUpload(event.target.files);
-                  event.target.value = "";
-                }}
-              />
-              <Button
-                type="button"
-                className={org.btnPrimary}
-                disabled={uploading || isSaving}
-                onClick={() => inputRef.current?.click()}
-              >
-                {uploading ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Upload className="mr-2 h-4 w-4" />
-                )}
-                Upload images
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isLoading || isSaving}
-                onClick={() => void refresh()}
-              >
-                <RefreshCw className="mr-2 h-4 w-4" />
-                Refresh
-              </Button>
-            </div>
-          </div>
-
-          {isLoading ? (
-            <div className={org.loading}>
-              <Loader2 className="h-6 w-6 animate-spin text-appointza-coral" />
-            </div>
-          ) : assets.length === 0 ? (
-            <div className={org.empty}>
-              <Upload className="mx-auto mb-3 h-12 w-12 text-stone-300" aria-hidden />
-              <p className="font-medium text-appointza-navy">No images yet</p>
-              <p className="mt-1 text-stone-500">Upload images to build your organisation asset library.</p>
-              <Button
-                type="button"
-                className={cn(org.btnPrimary, "mt-4")}
-                disabled={uploading || isSaving}
-                onClick={() => inputRef.current?.click()}
-              >
-                <Upload className="mr-2 h-4 w-4" />
-                Upload images
-              </Button>
-            </div>
+    <div className={cn(org.pageSection, "space-y-4 pb-6 pt-0")}>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            void handleUpload(event.target.files);
+            event.target.value = "";
+          }}
+        />
+        <Button
+          type="button"
+          className={org.btnPrimary}
+          disabled={uploading || isSaving}
+          onClick={() => inputRef.current?.click()}
+        >
+          {uploading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
           ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-              {assets.map((asset) => (
-                <div
-                  key={asset.id}
-                  className="group overflow-hidden rounded-2xl border border-stone-100 bg-white shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <div className="relative aspect-square bg-stone-50">
-                    <img
-                      src={getImageUrl(asset.id)}
-                      alt={asset.name}
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                  </div>
-                  <div className="space-y-2 border-t border-stone-100 px-3 py-2.5">
-                    <p className="truncate text-sm font-medium text-appointza-navy" title={asset.name}>
-                      {asset.name}
-                    </p>
-                    <div className="flex items-center justify-between gap-2">
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 truncate font-mono text-xs text-[#E85D4C] hover:underline"
-                        onClick={() => void copyId(asset.id)}
-                        title="Copy file id"
-                      >
-                        <Copy className="h-3 w-3 shrink-0" />
-                        id: {asset.id}
-                      </button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0 text-stone-400 hover:text-red-600"
-                        disabled={isSaving}
-                        onClick={() => void removeAsset(asset.id)}
-                        aria-label={`Remove ${asset.name}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+            <Upload className="mr-2 h-4 w-4" />
           )}
-        </CardContent>
-      </Card>
+          Upload images
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={isLoading || isSaving}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Refresh
+        </Button>
+      </div>
+
+      {isLoading ? (
+        <div className={org.loading}>
+          <Loader2 className="h-6 w-6 animate-spin text-appointza-coral" />
+        </div>
+      ) : assets.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-stone-200 py-12 text-center text-sm text-stone-500">
+          <Upload className="mb-3 h-12 w-12 text-stone-300" aria-hidden />
+          <p className="font-medium text-appointza-navy">No images yet</p>
+          <p className="mt-1">Upload images to build your organisation asset library.</p>
+          <Button
+            type="button"
+            className={cn(org.btnPrimary, "mt-4")}
+            disabled={uploading || isSaving}
+            onClick={() => inputRef.current?.click()}
+          >
+            <Upload className="mr-2 h-4 w-4" />
+            Upload images
+          </Button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {assets.map((asset) => (
+            <div
+              key={asset.id}
+              className="group overflow-hidden rounded-xl border border-stone-200 bg-white shadow-none"
+            >
+              <div className="relative aspect-square bg-stone-50">
+                <img
+                  src={getImageUrl(asset.id)}
+                  alt={asset.name}
+                  className="h-full w-full object-cover"
+                  loading="lazy"
+                />
+              </div>
+              <div className="space-y-2 border-t border-stone-200 px-3 py-2.5">
+                <p className="truncate text-sm font-medium text-appointza-navy" title={asset.name}>
+                  {asset.name}
+                </p>
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1 truncate font-mono text-xs text-[#E85D4C] hover:underline"
+                    onClick={() => void copyId(asset.id)}
+                    title="Copy file id"
+                  >
+                    <Copy className="h-3 w-3 shrink-0" />
+                    id: {asset.id}
+                  </button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-stone-400 hover:text-red-600"
+                    disabled={isSaving}
+                    onClick={() => void removeAsset(asset.id)}
+                    aria-label={`Remove ${asset.name}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

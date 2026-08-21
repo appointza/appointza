@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  BedDouble,
   ClipboardList,
   FileText,
   Loader2,
@@ -11,10 +10,8 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useOrganisationLocationScope } from "@/hooks/useOrganisationLocationScope";
-import { RoomDefinitionsPanel } from "@/components/organization/RoomDefinitionsPanel";
 import { RoomStatusPanel } from "@/components/organization/RoomStatusPanel";
 import { HospitalityPoliciesPanel } from "@/components/organization/HospitalityPoliciesPanel";
 import {
@@ -32,10 +29,8 @@ import {
   OrganisationHospitalityProfile,
 } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
-import { cn } from "@/lib/utils";
 
 type HospitalitySection =
-  | "room-definitions"
   | "room-status"
   | "policies"
   | "packages"
@@ -57,12 +52,6 @@ const SECTIONS: {
   description: string;
   icon: typeof Package;
 }[] = [
-  {
-    id: "room-definitions",
-    label: "Room definitions",
-    description: "Manage bookable rooms for your property.",
-    icon: BedDouble,
-  },
   {
     id: "room-status",
     label: "Room status",
@@ -101,11 +90,12 @@ const SECTIONS: {
   },
 ];
 
-function parseSection(value: string | null): HospitalitySection {
+function parseSection(value: string | null): HospitalitySection | "room-definitions" {
+  if (value === "room-definitions") return "room-definitions";
   if (value && SECTIONS.some((section) => section.id === value)) {
     return value as HospitalitySection;
   }
-  return "room-definitions";
+  return "room-status";
 }
 
 const hospitalityTabTriggerClass =
@@ -160,20 +150,15 @@ type HospitalityProfilePanelProps = {
 
 export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePanelProps) {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const {
-    locations,
-    locationId,
-    selectedLocation,
-    loading: locationsLoading,
-  } = useOrganisationLocationScope(organisationId);
-  const locationLabel =
-    selectedLocation?.name?.trim() ||
-    [selectedLocation?.city, selectedLocation?.country].filter(Boolean).join(", ") ||
-    "";
-  const activeSection = parseSection(searchParams.get("section"));
-  const selectedRoomIdParam = searchParams.get("id");
+  const { locationId, locationLabel } = useOrganisationLocationScope(organisationId);
+  const requestedSection = parseSection(searchParams.get("section"));
+  const selectedRoomIdParam = searchParams.get("id") || searchParams.get("roomId");
   const selectedRoomId = selectedRoomIdParam ? Number(selectedRoomIdParam) : undefined;
+  const redirectToRoomsCatalog = requestedSection === "room-definitions";
+  const activeSection: HospitalitySection =
+    requestedSection === "room-definitions" ? "room-status" : requestedSection;
 
   const [contentLoading, setContentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -182,17 +167,25 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
   const [foodMenu, setFoodMenu] = useState<HospitalityFoodItem[]>([]);
   const [nearbyPlaces, setNearbyPlaces] = useState<HospitalityNearbyPlace[]>([]);
   const [guestServices, setGuestServices] = useState<HospitalityGuestService[]>([]);
+  const loadedForOrgRef = useRef(0);
+
+  const applyProfile = useCallback((data: OrganisationHospitalityProfile) => {
+    setProfile(data);
+    setPackages(data.packages ?? []);
+    setFoodMenu(data.food_menu ?? []);
+    setNearbyPlaces(data.nearby_places ?? []);
+    setGuestServices(data.guest_services ?? []);
+  }, []);
 
   const loadProfile = useCallback(async () => {
     if (organisationId <= 0) return;
+    if (loadedForOrgRef.current === organisationId) return;
+
     setContentLoading(true);
     try {
       const data = await hospitalityService.getProfile(organisationId);
-      setProfile(data);
-      setPackages(data.packages ?? []);
-      setFoodMenu(data.food_menu ?? []);
-      setNearbyPlaces(data.nearby_places ?? []);
-      setGuestServices(data.guest_services ?? []);
+      loadedForOrgRef.current = organisationId;
+      applyProfile(data);
     } catch (error) {
       toast({
         title: "Could not load hospitality profile",
@@ -202,7 +195,27 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
     } finally {
       setContentLoading(false);
     }
-  }, [organisationId, toast]);
+  }, [organisationId, applyProfile, toast]);
+
+  useEffect(() => {
+    if (organisationId <= 0) {
+      loadedForOrgRef.current = 0;
+      setProfile(null);
+      setPackages([]);
+      setFoodMenu([]);
+      setNearbyPlaces([]);
+      setGuestServices([]);
+      return;
+    }
+    if (loadedForOrgRef.current !== organisationId) {
+      loadedForOrgRef.current = 0;
+      setProfile(null);
+      setPackages([]);
+      setFoodMenu([]);
+      setNearbyPlaces([]);
+      setGuestServices([]);
+    }
+  }, [organisationId]);
 
   useEffect(() => {
     if (CONTENT_SECTIONS.has(activeSection)) {
@@ -215,7 +228,7 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
       setSearchParams(
         (prev) => {
           const next = new URLSearchParams(prev);
-          next.set("section", "room-definitions");
+          next.set("section", "room-status");
           return next;
         },
         { replace: true },
@@ -247,19 +260,24 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
       (prev) => {
         const next = new URLSearchParams(prev);
         next.set("section", section);
-        if (section === "room-definitions" && roomId) {
-          next.set("roomId", String(roomId));
-        } else if (section === "room-status" && roomId) {
+        if (section === "room-status" && roomId) {
           next.set("id", String(roomId));
           next.delete("roomId");
         } else {
           next.delete("id");
-          if (section !== "room-definitions") next.delete("roomId");
+          next.delete("roomId");
         }
         return next;
       },
       { replace: true },
     );
+  };
+
+  const openRoomDefinitions = (roomId?: number) => {
+    const next = new URLSearchParams();
+    next.set("kind", "rooms");
+    if (roomId && roomId > 0) next.set("roomId", String(roomId));
+    navigate(`/organization/services?${next.toString()}`);
   };
 
   const persistContent = async (
@@ -282,11 +300,8 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
       if (payload.guest_services) req.guest_services = payload.guest_services;
 
       const updated = await hospitalityService.saveContent(req);
-      setProfile(updated);
-      setPackages(updated.packages ?? []);
-      setFoodMenu(updated.food_menu ?? []);
-      setNearbyPlaces(updated.nearby_places ?? []);
-      setGuestServices(updated.guest_services ?? []);
+      loadedForOrgRef.current = organisationId;
+      applyProfile(updated);
       toast({
         title: "Saved",
         description: `${SECTIONS.find((s) => s.id === section)?.label} updated.`,
@@ -309,52 +324,19 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
     );
   }
 
+  if (redirectToRoomsCatalog) {
+    const next = new URLSearchParams();
+    next.set("kind", "rooms");
+    if (selectedRoomId && selectedRoomId > 0) next.set("roomId", String(selectedRoomId));
+    return <Navigate to={`/organization/services?${next.toString()}`} replace />;
+  }
+
   return (
     <Tabs
       value={activeSection}
       onValueChange={(v) => setSection(v as HospitalitySection)}
       className="flex flex-col gap-4"
     >
-      {/* <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0 flex-1 space-y-1">
-          <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">Business location</p>
-          {locationsLoading ?
-            <div className="flex items-center gap-2 text-sm text-stone-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading locations…
-            </div>
-          : locations.length === 0 ?
-            <Card>
-              <CardContent className="py-6 text-sm text-stone-500">
-                Add a business location under Settings → Location before managing hospitality content.
-              </CardContent>
-            </Card>
-          : locationId <= 0 ?
-            <p className="text-sm text-stone-600">
-              Select a location on the{" "}
-              <Link to="/organization/dashboard" className="font-medium text-[#E85D4C] hover:underline">
-                Dashboard
-              </Link>{" "}
-              to manage hospitality content.
-            </p>
-          : <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-stone-800">
-                <MapPin className="h-4 w-4 shrink-0 text-[#E85D4C]" />
-                {locationLabel || `Location #${locationId}`}
-              </p>
-              {locations.length > 1 ? (
-                <Link
-                  to="/organization/dashboard"
-                  className="text-xs font-medium text-[#E85D4C] hover:underline"
-                >
-                  Change on Dashboard
-                </Link>
-              ) : null}
-            </div>
-          }
-        </div>
-      </div> */}
-
       <TabsList className="inline-flex h-auto w-full min-w-0 max-w-full flex-row flex-wrap justify-start gap-1 overflow-x-auto bg-white p-1 shadow-sm [scrollbar-width:thin]">
         {SECTIONS.map((section) => {
           const Icon = section.icon;
@@ -369,31 +351,28 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
 
       <div className="min-w-0 flex-1">
         {SECTIONS.map((section) => (
-          <TabsContent
-            key={section.id}
-            value={section.id}
-            forceMount={section.id === "room-definitions" ? true : undefined}
-            className={cn(
-              "mt-0 space-y-4",
-              section.id === "room-definitions" && activeSection !== "room-definitions" && "hidden",
-            )}
-          >
+          <TabsContent key={section.id} value={section.id} className="mt-0 space-y-4">
             <p className="text-sm text-stone-600">{section.description}</p>
-
-            {section.id === "room-definitions" ?
-              <RoomDefinitionsPanel
-                locationId={locationId}
-                locationName={locationLabel}
-                onOpenRoomStatus={(roomId) => setSection("room-status", roomId)}
-              />
-            : null}
+            {section.id === "room-status" ? (
+              <p className="text-xs text-stone-500">
+                To add or edit rooms, open{" "}
+                <button
+                  type="button"
+                  className="font-semibold text-[#E85D4C] underline-offset-2 hover:underline"
+                  onClick={() => openRoomDefinitions()}
+                >
+                  Services → Rooms
+                </button>
+                .
+              </p>
+            ) : null}
 
             {section.id === "room-status" && activeSection === "room-status" ?
               <RoomStatusPanel
                 locationId={locationId}
                 locationName={locationLabel}
                 selectedRoomId={selectedRoomId}
-                onEditRoom={(roomId) => setSection("room-definitions", roomId)}
+                onEditRoom={(roomId) => openRoomDefinitions(roomId)}
               />
             : null}
 
@@ -402,7 +381,10 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
                 organisationId={organisationId}
                 profile={profile}
                 loading={contentLoading}
-                onSaved={setProfile}
+                onSaved={(updated) => {
+                  loadedForOrgRef.current = organisationId;
+                  applyProfile(updated);
+                }}
               />
             : null}
 

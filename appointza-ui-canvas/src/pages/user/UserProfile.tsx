@@ -16,15 +16,12 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { User, Save, Loader2, LogOut, Building2, RefreshCw, ArrowLeft, Trash2 } from "lucide-react";
+import { User, Save, Loader2, LogOut, ArrowLeft, Trash2 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { FilesService } from "@/services/files.service";
 import { Users, UsersSelectReq, Organisationdeletereq } from "@/models/users.model";
-import OrganizationSwitchModal, {
-  type SwitchableOrganization,
-} from "@/components/organization/OrganizationSwitchModal";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { ProfilePhotoSection } from "@/components/user/ProfilePhotoSection";
 import {
@@ -81,7 +78,6 @@ const UserProfile = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [otp, setOtp] = useState("");
-  const [showOrgSwitchModal, setShowOrgSwitchModal] = useState(false);
 
   const profileImageId = useMemo(() => {
     void profileImageVersion;
@@ -115,16 +111,6 @@ const UserProfile = () => {
       },
       { replace: true },
     );
-  };
-
-  const handleOrganizationSwitch = (org: SwitchableOrganization) => {
-    if (org === "momantza") {
-      navigate("/momantza/booking");
-    } else if (org === "campusza") {
-      navigate("/campusza/staff");
-    } else if (org === "crm") {
-      navigate("/crm");
-    }
   };
 
   const updateUserContext = useCallback(async (userData: Users) => {
@@ -490,30 +476,6 @@ const UserProfile = () => {
                 </div>
               </div>
 
-              <div className="border-t border-stone-100">
-                <div className={profileCardHeaderClass}>
-                  <CardTitle className={cn("flex items-center gap-3", profileCardTitleClass)}>
-                    <span className={profileSectionIconWrap}>
-                      <Building2 className="h-5 w-5" />
-                    </span>
-                    <span>Switch Organization</span>
-                  </CardTitle>
-                  <CardDescription className={profileCardDescClass}>
-                    Switch to Momantza, Campusza, or CRM to access their features
-                  </CardDescription>
-                </div>
-                <div className={cn(profileCardContentClass, "pb-6 md:pb-8")}>
-                  <Button
-                    type="button"
-                    onClick={() => setShowOrgSwitchModal(true)}
-                    className={cn(org.btnOutline, "min-h-11 w-full touch-manipulation md:w-auto")}
-                  >
-                    <RefreshCw className="mr-2 h-4 w-4 text-[#E85D4C]" />
-                    Switch Organization
-                  </Button>
-                </div>
-              </div>
-
               <div className="border-t border-stone-100 bg-gradient-to-r from-[#FFF8F5] to-white p-4 md:p-6">
                 <div className="flex flex-col-reverse gap-2 md:flex-row md:justify-end md:gap-3">
                   <Button
@@ -542,11 +504,6 @@ const UserProfile = () => {
             </CardContent>
           </Card>
 
-          <OrganizationSwitchModal
-            open={showOrgSwitchModal}
-            onOpenChange={setShowOrgSwitchModal}
-            onSelect={handleOrganizationSwitch}
-          />
         </div>
       </TabsContent>
 

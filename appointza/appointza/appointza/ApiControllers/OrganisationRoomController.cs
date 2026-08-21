@@ -149,5 +149,29 @@ namespace appointza.Controllers
                 return BadRequest(new ActionRes<bool> { error = ex.Message });
             }
         }
+
+        [HttpPost("SelectStatusEvents")]
+        public async Task<ActionResult<ActionRes<List<OrganisationRoomStatusEvent>>>> SelectStatusEvents(
+            ActionReq<OrganisationRoomStatusEventSelectReq>? req)
+        {
+            if (req?.item == null || req.item.organisation_id <= 0 || req.item.organisation_room_id <= 0)
+            {
+                return BadRequest(new ActionRes<List<OrganisationRoomStatusEvent>>
+                {
+                    error = "organisation_id and organisation_room_id are required.",
+                });
+            }
+
+            try
+            {
+                var items = await organisationRoomService.SelectStatusEvents(req.item);
+                return Ok(new ActionRes<List<OrganisationRoomStatusEvent>> { item = items });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "SelectStatusEvents failed");
+                return BadRequest(new ActionRes<List<OrganisationRoomStatusEvent>> { error = ex.Message });
+            }
+        }
     }
 }

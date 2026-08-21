@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Loader2, MapPin, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -40,8 +40,8 @@ export function RoomStatusPanel({
   const organisationId = user?.organisationid ?? 0;
 
   const [loading, setLoading] = useState(true);
-  const [board, setBoard] = useState<(OrganisationRoomStatusBoardRes | null)>(null);
-  const [selectedRoom, setSelectedRoom] = useState<(OrganisationRoom | null)>(null);
+  const [board, setBoard] = useState<OrganisationRoomStatusBoardRes | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<OrganisationRoom | null>(null);
   const [busy, setBusy] = useState(false);
 
   const loadBoard = useCallback(async () => {
@@ -59,9 +59,7 @@ export function RoomStatusPanel({
         room_id: selectedRoomId,
       });
       setBoard(data);
-      if (selectedRoomId && data?.rooms) {
-        setSelectedRoom(data.rooms.find((r) => r.id === selectedRoomId) ?? null);
-      }
+      setSelectedRoom(data?.selected_room ?? null);
     } catch (error) {
       toast({
         title: "Could not load room status",
@@ -76,17 +74,6 @@ export function RoomStatusPanel({
   useEffect(() => {
     void loadBoard();
   }, [loadBoard]);
-
-  const counts = board?.counts ?? {};
-
-  const statusSummary = useMemo(
-    () =>
-      ROOM_STATUSES.map((s) => ({
-        ...s,
-        count: counts[s.value] ?? 0,
-      })),
-    [counts],
-  );
 
   const runAction = async (action: () => Promise<boolean>, successMessage: string) => {
     setBusy(true);
@@ -147,12 +134,13 @@ export function RoomStatusPanel({
         <p className="flex items-center gap-1.5 text-sm text-stone-600">
           <MapPin className="h-4 w-4 shrink-0 text-[#E85D4C]" />
           Status for <span className="font-medium text-stone-800">{locationName}</span>
+          {board?.as_of ? <span className="text-stone-400">· {board.as_of}</span> : null}
         </p>
       : null}
 
       <div className="flex flex-wrap gap-2">
-        {statusSummary.map((item) => (
-          <Badge key={item.value} variant="outline" className={cn("px-3 py-1", item.className)}>
+        {(board?.status_summary ?? []).map((item) => (
+          <Badge key={item.value} variant="outline" className={cn("px-3 py-1", statusClassName(item.value))}>
             {item.label}: {item.count}
           </Badge>
         ))}

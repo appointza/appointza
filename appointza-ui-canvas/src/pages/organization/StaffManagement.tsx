@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -15,10 +15,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { StaffService } from "@/services/staff.service";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
+import { useStaff } from "@/hooks/useStaff";
+import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import { useMountWhenOpened } from "@/hooks/useMountWhenOpened";
 import { UsersSelectReq, UsersLoginReq, Users, UsersPermissionData, UsersPermissionGroupData } from "@/models/users.model";
 import { Staff, StaffSelectReq, StaffUser } from "@/models/staff.model";
-import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
@@ -32,11 +33,21 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
   // API services
   const usersService = useMemo(() => new UsersService(), []);
   const staffService = useMemo(() => new StaffService(), []);
-  const organisationLocationService = useMemo(() => new OrganisationLocationService(), []);
+
+  const {
+    staff: staffList,
+    isLoading: isLoadingStaff,
+    refetch: refetchStaff,
+  } = useStaff(isAuthenticated ? organizationId : undefined);
+
+  const { data: locationsData } = useOrganisationLocations({
+    organisationId: organizationId,
+    staffLocationId: user?.locationid || 0,
+    enabled: isAuthenticated && !!organizationId,
+  });
+  const locations = locationsData ?? [];
 
   // State for staff list
-  const [staffList, setStaffList] = useState<StaffUser[]>([]);
-  const [isLoadingStaff, setIsLoadingStaff] = useState(false);
   const [staffToDelete, setStaffToDelete] = useState<{ id: number; name: string; userid: number } | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
@@ -44,9 +55,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
   const [searchMobile, setSearchMobile] = useState('');
   const [isSearching, setIsSearching] = useState(false);
   const [foundUser, setFoundUser] = useState<any>(null);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
-  const [isLoading, setIsLoading] = useState(false);
   const [isAdding, setIsAdding] = useState(false);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
@@ -70,81 +79,17 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
   // State for editing staff
   const [editingStaff, setEditingStaff] = useState<StaffUser | null>(null);
   const [showEditDialog, setShowEditDialog] = useState(false);
+  const mountEditStaffDialog = useMountWhenOpened(showEditDialog);
 
   // State for active tab
   const [activeTab, setActiveTab] = useState<string>("list");
 
-  // Load staff list
-  const loadStaffList = useCallback(async () => {
-    if (!isAuthenticated || !organizationId) return;
-    
-    setIsLoadingStaff(true);
-    try {
-      console.log('🔍 Loading staff list for organization:', organizationId);
-      const req = new StaffSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await staffService.SelectStaffDetail(req);
-      console.log('✅ Staff list API response:', response);
-      
-      if (response && response.length > 0) {
-        setStaffList(response);
-      } else {
-        setStaffList([]);
-      }
-    } catch (error) {
-      console.error('❌ Error loading staff list:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load staff list",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoadingStaff(false);
-    }
-  }, [isAuthenticated, organizationId, staffService, toast]);
-
-  // Load locations
-  const loadLocations = useCallback(async () => {
-    if (!isAuthenticated || !organizationId) return;
-    
-    setIsLoading(true);
-    try {
-      console.log('🔍 Loading locations for organization:', organizationId);
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await organisationLocationService.select(req);
-      console.log('✅ Locations API response:', response);
-      
-      if (response && response.length > 0) {
-        setLocations(response);
-        setSelectedLocationId(response[0].id);
-      } else {
-        setLocations([]);
-        toast({
-          title: "No Locations",
-          description: "No business locations found. Please add a location first.",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      console.error('❌ Error loading locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to load business locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [isAuthenticated, organizationId, organisationLocationService, toast]);
-
-  // Load data on component mount
+  // Sync default location when locations load
   useEffect(() => {
-    loadStaffList();
-    loadLocations();
-  }, [loadStaffList, loadLocations]);
+    if (locations.length > 0 && selectedLocationId === 0) {
+      setSelectedLocationId(locations[0].id);
+    }
+  }, [locations, selectedLocationId]);
 
   // Search user by mobile number
   const searchUserByMobile = async () => {
@@ -356,7 +301,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
           editandviewBusinessvalues: false,
         });
         
-        await loadStaffList();
+        await refetchStaff();
       } else {
         throw new Error('Update failed');
       }
@@ -447,7 +392,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
         });
         
         // Reload staff list
-        await loadStaffList();
+        await refetchStaff();
       } else {
         toast({
           title: "Error",
@@ -509,7 +454,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
         });
         
         // Reload staff list
-        await loadStaffList();
+        await refetchStaff();
       } else {
         toast({
           title: "Error",
@@ -564,7 +509,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
           <TabsList
             className={cn(
               embedded ?
-                cn(org.segmentGroup, "inline-flex w-full max-w-md gap-1 bg-white p-1 shadow-sm")
+                cn(org.segmentGroup, "inline-flex w-full max-w-full gap-1 border border-stone-200 bg-white p-1 shadow-none")
               : undefined
             )}
           >
@@ -572,7 +517,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
               value="list"
               className={cn(
                 embedded &&
-                  "flex-1 rounded-xl font-semibold data-[state=active]:bg-gradient-coral data-[state=active]:text-white"
+                  "flex-1 rounded-xl font-semibold data-[state=active]:bg-none data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none"
               )}
             >
               Staff List
@@ -581,7 +526,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
               value="add"
               className={cn(
                 embedded &&
-                  "flex-1 rounded-xl font-semibold data-[state=active]:bg-gradient-coral data-[state=active]:text-white"
+                  "flex-1 rounded-xl font-semibold data-[state=active]:bg-none data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none"
               )}
             >
               Add Staff
@@ -590,7 +535,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
           {/* Staff List Tab */}
           <TabsContent value="list">
-            <Card className={settingsEmbedded.card(embedded)}>
+            <Card className={cn(settingsEmbedded.card(embedded), "w-full rounded-2xl border-stone-200 bg-white shadow-none")}>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2 text-appointza-navy">
                   <UsersIcon className="h-5 w-5 text-blue-600" />
@@ -621,7 +566,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
                     {staffList.map((staff) => (
                       <div
                         key={staff.id}
-                        className="flex flex-col gap-3 rounded-2xl border border-blue-50 bg-white p-4 shadow-[0_8px_24px_-18px_rgba(39,72,154,0.28)] transition-all hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-[0_14px_32px_-20px_rgba(56,80,170,0.34)] sm:flex-row sm:items-center sm:justify-between sm:gap-4"
+                        className="flex flex-col gap-3 rounded-xl border border-stone-200 bg-white p-4 shadow-none transition-colors hover:border-blue-200 sm:flex-row sm:items-center sm:justify-between sm:gap-4"
                       >
                         <div className="flex min-w-0 flex-1 items-start gap-3 sm:items-center sm:gap-4">
                           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-100">
@@ -675,7 +620,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
           <TabsContent value="add">
             <div className="space-y-6">
               {/* Search Section */}
-              <Card className="shadow-sm">
+              <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <Search className="h-5 w-5 text-blue-600" />
@@ -715,7 +660,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
               {/* Found User Display */}
               {foundUser && (
-                <Card className="shadow-sm border-green-200">
+                <Card className="rounded-2xl border-green-200 bg-white shadow-none">
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2 text-green-600">
                       <CheckCircle className="h-5 w-5" />
@@ -751,7 +696,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
               {/* Location Selection */}
               {foundUser && (
-                <Card className="shadow-sm">
+                <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
                       <Shield className="h-5 w-5 text-blue-600" />
@@ -789,7 +734,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
               {/* Privileges Assignment */}
               {foundUser && (
-                <Card className="shadow-sm">
+                <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
                   <CardHeader>
                     <CardTitle className="flex items-center space-x-2">
                       <Shield className="h-5 w-5 text-purple-600" />
@@ -1045,7 +990,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
                         Add Staff Member
                       </Button>
                     </AlertDialogTrigger>
-                    <AlertDialogContent>
+                    <AlertDialogContent className="rounded-2xl border-stone-200 bg-white shadow-none">
                       <AlertDialogHeader>
                         <AlertDialogTitle>Confirm Add Staff</AlertDialogTitle>
                         <AlertDialogDescription>
@@ -1078,7 +1023,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
         {/* Delete Confirmation Dialog */}
         <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-          <AlertDialogContent>
+          <AlertDialogContent className="rounded-2xl border-stone-200 bg-white shadow-none">
             <AlertDialogHeader>
               <AlertDialogTitle>Remove Staff Member</AlertDialogTitle>
               <AlertDialogDescription>
@@ -1100,8 +1045,9 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
         </AlertDialog>
 
         {/* Edit Staff Dialog */}
+        {mountEditStaffDialog ? (
         <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto rounded-2xl border-stone-200 bg-white shadow-none">
             <DialogHeader>
               <DialogTitle>Edit Staff Privileges - {editingStaff?.name}</DialogTitle>
               <DialogDescription>
@@ -1339,6 +1285,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+        ) : null}
       </div>
     </OrganizationPageShell>
   );

@@ -1,6 +1,6 @@
 /**
- * Public room booking URL — mirrors AppointzaStay `/book?roomId=room-201`.
- * Requires organisation + location scope on the main Appointza site.
+ * Public room booking URL on the main Appointza site.
+ * Requires organisation and location scope.
  */
 export function roomBookUrl(options: {
   roomCode: string;
