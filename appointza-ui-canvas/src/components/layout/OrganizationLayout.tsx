@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Loader2, ShieldX } from "lucide-react";
+import { ShieldX } from "lucide-react";
 import { OnboardingSetupScreen } from "@/components/onboarding/OrganizationOnboarding";
 import { isOrganizationOnboardingRoute } from "@/utils/organizationOnboarding.util";
 import { OrgTemplateAssetsProvider } from "@/contexts/OrgTemplateAssetsContext";
@@ -145,7 +145,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
       navigate('/user/dashboard');
       return;
     }
-  }, [isAuthenticated, userType, canSwitchMode, navigate, location]);
+  }, [isAuthenticated, userType, canSwitchMode, navigate, location.pathname]);
 
   if (!isAuthenticated || (userType !== 'organization' && !canSwitchMode)) {
     return (
@@ -212,23 +212,8 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
 
   // Show onboarding blocking screen if incomplete and not on onboarding routes
   // Skip onboarding check for staff users - they don't need to set up services/timing
-  if (userType === 'organization' && !isOnboardingRoute && !isStaff) {
-    if (isLoadingOnboarding) {
-      return (
-        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-          <Card className="w-full max-w-md">
-            <CardContent className="pt-6">
-              <div className="flex flex-col items-center justify-center space-y-4">
-                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-                <p className="text-sm text-gray-600">Checking setup status...</p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      );
-    }
-
-    if (!isComplete) {
+  if (userType === "organization" && !isOnboardingRoute && !isStaff) {
+    if (!isLoadingOnboarding && !isComplete) {
       return (
         <OnboardingSetupScreen
           hasCustomDomain={hasCustomDomain}

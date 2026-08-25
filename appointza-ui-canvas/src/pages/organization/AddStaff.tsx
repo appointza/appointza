@@ -8,7 +8,6 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Users as UsersIcon, Phone, Search, ArrowLeft, UserPlus, Shield, CheckCircle, AlertCircle, Loader2 } from "lucide-react";
-import OrganizationLayout from "@/components/layout/OrganizationLayout";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
@@ -225,10 +224,8 @@ const AddStaff = () => {
   // Get selected location name
   const selectedLocation = locations.find(loc => loc.id === selectedLocationId);
 
-  // Render
   return (
-    <OrganizationLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         {/* Header */}
         <div className="flex items-center space-x-4">
           <Button
@@ -475,7 +472,6 @@ const AddStaff = () => {
           </div>
         )}
       </div>
-    </OrganizationLayout>
   );
 };
 

@@ -16,7 +16,6 @@ import {
   Image as ImageIcon,
   BookOpen
 } from "lucide-react";
-import UserLayout from "@/components/layout/UserLayout";
 import { formatEventDateLong } from "@/utils/eventDate.util";
 import { EventService } from "@/services/event.service";
 import { Event, EventSelectReq } from "@/models/event.model";
@@ -159,18 +158,15 @@ const UserEvents: React.FC = () => {
 
   if (isLoading) {
     return (
-      <UserLayout>
-        <div className="flex items-center justify-center h-64">
-          <Loader2 className="h-8 w-8 animate-spin" />
-          <span className="ml-2">Loading events...</span>
-        </div>
-      </UserLayout>
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Loading events...</span>
+      </div>
     );
   }
 
   return (
-    <UserLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Events</h1>
           <p className="text-muted-foreground mt-2">
@@ -407,7 +403,6 @@ const UserEvents: React.FC = () => {
         )}
 
       </div>
-    </UserLayout>
   );
 };
 

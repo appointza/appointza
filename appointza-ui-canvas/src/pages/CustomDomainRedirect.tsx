@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { Loader2, AlertCircle } from "lucide-react";
-import { OrganisationSiteTemplateView } from "@/components/template/OrganisationSiteTemplateView";
 import { environment } from "@/utils/environment";
 import { extractOrganisationCustomSubdomain, isOrgLocTempId } from "@/utils/orgPublicSiteUrl.util";
 import {
@@ -8,7 +7,23 @@ import {
   shouldForcePublicSiteRefresh,
   writePublicSiteSubdomainResolve,
 } from "@/utils/publicSiteCache.util";
-import Index from "./Index";
+
+const Index = lazy(() => import("./Index"));
+const OrganisationSiteTemplateView = lazy(() =>
+  import("@/components/template/OrganisationSiteTemplateView").then((m) => ({
+    default: m.OrganisationSiteTemplateView,
+  })),
+);
+
+const RedirectLoader = () => (
+  <div className="min-h-screen flex items-center justify-center bg-gray-50">
+    <div className="text-center">
+      <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
+      <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Your Booking Page</h2>
+      <p className="text-gray-600">Resolving {extractOrganisationCustomSubdomain(window.location.host) || "subdomain"}…</p>
+    </div>
+  </div>
+);
 
 type SubdomainResolveResult = {
   organisationlocationid?: number;
@@ -105,24 +120,23 @@ const CustomDomainRedirect = () => {
   }, []);
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-600" />
-          <h2 className="text-xl font-semibold text-gray-900 mb-2">Loading Your Booking Page</h2>
-          <p className="text-gray-600">Resolving {extractOrganisationCustomSubdomain(window.location.host) || "subdomain"}…</p>
-        </div>
-      </div>
-    );
+    return <RedirectLoader />;
   }
 
   if (locationId > 0) {
-    return <OrganisationSiteTemplateView locationId={locationId} />;
+    return (
+      <Suspense fallback={<RedirectLoader />}>
+        <OrganisationSiteTemplateView locationId={locationId} />
+      </Suspense>
+    );
   }
 
   if (error === "main-page") {
-    // Index stays in the main chunk (eager home route). Avoid a cancelled dynamic import.
-    return <Index />;
+    return (
+      <Suspense fallback={<RedirectLoader />}>
+        <Index />
+      </Suspense>
+    );
   }
 
   if (error) {

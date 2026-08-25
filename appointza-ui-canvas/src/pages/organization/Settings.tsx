@@ -1,6 +1,5 @@
 
 import { useState } from "react";
-import OrganizationLayout from "@/components/layout/OrganizationLayout";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
@@ -41,8 +40,7 @@ const OrganizationSettings = () => {
   };
   
   return (
-    <OrganizationLayout>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <div>
           <h2 className="text-3xl font-bold tracking-tight">Organization Settings</h2>
           <p className="text-muted-foreground">
@@ -238,7 +236,6 @@ const OrganizationSettings = () => {
           </TabsContent>
         </Tabs>
       </div>
-    </OrganizationLayout>
   );
 };
 

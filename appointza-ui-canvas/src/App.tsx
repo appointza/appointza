@@ -1,14 +1,8 @@
 import { lazy, Suspense, useEffect, type ReactNode } from "react";
-import { Toaster } from "@/components/ui/toaster";
-import { Toaster as Sonner } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
-import { LocationProvider } from "./contexts/LocationContext";
-import { GlobalIdProvider } from "./contexts/GlobalIdContext";
-import { OnboardingGuard } from "./components/onboarding/OnboardingGuard";
 import { SafeArea } from "./components/common/SafeArea";
 import { GOOGLE_WEB_CLIENT_ID } from "./config/google";
 import { useSafeArea } from "./hooks/useSafeArea";
@@ -16,15 +10,17 @@ import { GoogleOAuthProvider } from '@react-oauth/google';
 import { Capacitor } from '@capacitor/core';
 import { isOrganisationSubdomainHost } from "@/utils/orgPublicSiteUrl.util";
 import { mustUseMainAppForAuth, redirectToLogin } from "@/utils/authNavigation.util";
-import { EnsureAuthOnMainHost } from "@/components/auth/EnsureAuthOnMainHost";
-import { shouldEnableFirebasePush } from "@/utils/firebasePushGate.util";
+import { isPublicBookingPagePath } from "@/utils/publicBookingRoute.util";
 
-// Eager: marketing homepage only — keeps `/` free of dashboard/app page graphs.
-import Index from "./pages/Index";
-
-// Lazy: Firebase Analytics/Messaging + push — only when authenticated app needs them.
-const FirebasePushBootstrap = lazy(
-  () => import("./components/notifications/FirebasePushBootstrap"),
+const Index = lazy(() => import("./pages/Index"));
+const FullAppChrome = lazy(() => import("@/components/layout/FullAppChrome"));
+const OrganizationLayout = lazy(() => import("@/components/layout/OrganizationLayout"));
+const UserLayout = lazy(() => import("@/components/layout/UserLayout"));
+const OnboardingGuard = lazy(() =>
+  import("./components/onboarding/OnboardingGuard").then((m) => ({ default: m.OnboardingGuard })),
+);
+const EnsureAuthOnMainHost = lazy(() =>
+  import("@/components/auth/EnsureAuthOnMainHost").then((m) => ({ default: m.EnsureAuthOnMainHost })),
 );
 
 // Lazy: all other routes (auth, marketing secondary, public browse, user, org, heavy pages).
@@ -86,12 +82,17 @@ const DynamicTemplatePage = lazy(() => import("./pages/DynamicTemplatePage"));
 const CustomDomainRedirect = lazy(() => import("./pages/CustomDomainRedirect"));
 const TurfDirectoryPage = lazy(() => import("./pages/TurfDirectoryPage"));
 const CampuszaStaff = lazy(() => import("./pages/campusza/Staff"));
-const OrganizationLayout = lazy(() => import("@/components/layout/OrganizationLayout"));
-const UserLayout = lazy(() => import("@/components/layout/UserLayout"));
 
 /** Lightweight route-chunk fallback — matches existing auth/loader styling. */
 const RouteChunkFallback = () => (
   <div className="flex min-h-screen items-center justify-center bg-appointza-cream">
+    <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />
+  </div>
+);
+
+/** Content-only fallback so the sidebar/shell stay mounted (Angular router-outlet style). */
+const OutletFallback = () => (
+  <div className="flex min-h-[40vh] w-full items-center justify-center">
     <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />
   </div>
 );
@@ -137,44 +138,36 @@ const ProtectedRouteWrapper = ({ children, redirectTo }: { children: React.React
 // Organization Route wrapper that includes onboarding guard
 const OrganizationRouteWrapper = ({ children }: { children: React.ReactNode }) => {
   return (
-    <OnboardingGuard>
-      {children}
-    </OnboardingGuard>
-  );
-};
-
-// Route layouts (React Router "router-outlet" equivalent)
-const OrganizationOutletLayout = () => (
-  <OrganizationLayout>
-    <Outlet />
-  </OrganizationLayout>
-);
-
-const UserOutletLayout = () => (
-  <UserLayout>
-    <Outlet />
-  </UserLayout>
-);
-
-// Registers push + Firebase only when authenticated app surfaces need them.
-const FirebasePushGate = () => {
-  const location = useLocation();
-  const { isAuthenticated, authReady } = useAuth();
-
-  if (!authReady) {
-    return null;
-  }
-
-  if (!shouldEnableFirebasePush(location.pathname, isAuthenticated)) {
-    return null;
-  }
-
-  return (
-    <Suspense fallback={null}>
-      <FirebasePushBootstrap />
+    <Suspense fallback={<OutletFallback />}>
+      <OnboardingGuard>
+        {children}
+      </OnboardingGuard>
     </Suspense>
   );
 };
+
+// Route layouts (React Router "router-outlet" equivalent). Layouts are lazy so
+// public /template does not download org/user dashboard shells. Inner Suspense
+// keeps the shell mounted when only the page chunk changes.
+const OrganizationOutletLayout = () => (
+  <Suspense fallback={<RouteChunkFallback />}>
+    <OrganizationLayout>
+      <Suspense fallback={<OutletFallback />}>
+        <Outlet />
+      </Suspense>
+    </OrganizationLayout>
+  </Suspense>
+);
+
+const UserOutletLayout = () => (
+  <Suspense fallback={<RouteChunkFallback />}>
+    <UserLayout>
+      <Suspense fallback={<OutletFallback />}>
+        <Outlet />
+      </Suspense>
+    </UserLayout>
+  </Suspense>
+);
 
 // Root route: org subdomain → public booking site; main host → marketing home.
 const OrganisationRootRoute = () =>
@@ -183,7 +176,9 @@ const OrganisationRootRoute = () =>
       <CustomDomainRedirect />
     </Suspense>
   ) : (
-    <Index />
+    <Suspense fallback={<RouteChunkFallback />}>
+      <Index />
+    </Suspense>
   );
 
 // Routes component that uses the protected route - this will be used after AuthProvider is established
@@ -192,9 +187,9 @@ const AppRoutes = () => {
     <Suspense fallback={<RouteChunkFallback />}>
       <Routes>
         <Route path="/" element={<OrganisationRootRoute />} />
-        <Route path="/login" element={<EnsureAuthOnMainHost><Login /></EnsureAuthOnMainHost>} />
-        <Route path="/register" element={<EnsureAuthOnMainHost><Register /></EnsureAuthOnMainHost>} />
-        <Route path="/otp" element={<EnsureAuthOnMainHost><OtpVerification /></EnsureAuthOnMainHost>} />
+        <Route path="/login" element={<Suspense fallback={<RouteChunkFallback />}><EnsureAuthOnMainHost><Login /></EnsureAuthOnMainHost></Suspense>} />
+        <Route path="/register" element={<Suspense fallback={<RouteChunkFallback />}><EnsureAuthOnMainHost><Register /></EnsureAuthOnMainHost></Suspense>} />
+        <Route path="/otp" element={<Suspense fallback={<RouteChunkFallback />}><EnsureAuthOnMainHost><OtpVerification /></EnsureAuthOnMainHost></Suspense>} />
         <Route path="/plans" element={<PricingPlans />} />
         <Route path="/demo" element={<DemoRequest />} />
         <Route path="/use-cases" element={<UseCases />} />
@@ -312,9 +307,12 @@ const queryClient = new QueryClient({
 
 /** Syncs safe-area CSS vars on native; initializes native Google Sign-In (WebView GIS often fails). */
 function NativeBootstrap({ children }: { children: ReactNode }) {
+  const location = useLocation();
+  const skipNativeGoogle = isPublicBookingPagePath(location.pathname);
   useSafeArea();
 
   useEffect(() => {
+    if (skipNativeGoogle) return;
     if (!Capacitor.isNativePlatform()) return;
     let cancelled = false;
     (async () => {
@@ -331,9 +329,30 @@ function NativeBootstrap({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [skipNativeGoogle]);
 
   return <>{children}</>;
+}
+
+/** Auth stays mounted so template → booking navigation keeps the session. Heavy chrome is deferred. */
+function AppShell() {
+  const location = useLocation();
+  const publicSurface = isPublicBookingPagePath(location.pathname);
+  const routes = <AppRoutes />;
+
+  return (
+    <NativeBootstrap>
+      <AuthProvider>
+        {publicSurface ? (
+          routes
+        ) : (
+          <Suspense fallback={<RouteChunkFallback />}>
+            <FullAppChrome>{routes}</FullAppChrome>
+          </Suspense>
+        )}
+      </AuthProvider>
+    </NativeBootstrap>
+  );
 }
 
 const routerBasename =
@@ -349,20 +368,7 @@ const App = () => (
           className="min-h-dvh min-h-screen"
           padding={Capacitor.isNativePlatform() ? "all" : "none"}
         >
-          <NativeBootstrap>
-            <AuthProvider>
-              <LocationProvider>
-                <GlobalIdProvider>
-                  <TooltipProvider>
-                    <FirebasePushGate />
-                    <Toaster />
-                    <Sonner />
-                    <AppRoutes />
-                  </TooltipProvider>
-                </GlobalIdProvider>
-              </LocationProvider>
-            </AuthProvider>
-          </NativeBootstrap>
+          <AppShell />
         </SafeArea>
       </BrowserRouter>
     </QueryClientProvider>

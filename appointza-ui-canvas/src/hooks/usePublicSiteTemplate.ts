@@ -8,6 +8,7 @@ import {
   writePublicSiteCache,
   writePublicSiteGuidMap,
 } from "@/utils/publicSiteCache.util";
+import { nextHtmlIfChanged } from "@/utils/publicTemplateHtml.util";
 
 type UsePublicSiteTemplateResult = {
   renderedHtml: string;
@@ -66,7 +67,7 @@ export function usePublicSiteTemplate(locationId: number): UsePublicSiteTemplate
     const canUseCache = !!cached && !isPublicSiteCacheStale(locationId);
 
     if (canUseCache || cached?.renderedHtml) {
-      setRenderedHtml(cached!.renderedHtml);
+      setRenderedHtml((prev) => nextHtmlIfChanged(prev, cached!.renderedHtml));
       setLoading(false);
       setFromCache(true);
     } else {
@@ -85,7 +86,7 @@ export function usePublicSiteTemplate(locationId: number): UsePublicSiteTemplate
         const changed = previousVersion !== result.versionKey || !canUseCache;
 
         if (changed || !cached?.renderedHtml) {
-          setRenderedHtml(result.renderedHtml);
+          setRenderedHtml((prev) => nextHtmlIfChanged(prev, result.renderedHtml));
           writePublicSiteCache(locationId, {
             versionKey: result.versionKey,
             renderedHtml: result.renderedHtml,

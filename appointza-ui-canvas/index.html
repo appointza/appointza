@@ -17,9 +17,35 @@
     <meta name="author" content="Appointza" />
     <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1" />
     <link rel="canonical" href="http://localhost:8083/" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      (function () {
+        function isPublicOrgTemplateSurface() {
+          var path = location.pathname || "";
+          if (path.indexOf("/template/") === 0) return true;
+          var host = (location.hostname || "").toLowerCase();
+          if (host === "localhost" || host === "127.0.0.1") return false;
+          if (host === "appointza.com" || host === "www.appointza.com") return false;
+          if (host.length > 13 && host.slice(-13) === ".appointza.com") return true;
+          if (host.length > 10 && host.slice(-10) === ".localhost") return true;
+          return false;
+        }
+        window.__APPOINTZA_PUBLIC_TEMPLATE__ = isPublicOrgTemplateSurface();
+        if (window.__APPOINTZA_PUBLIC_TEMPLATE__) return;
+        var pre = document.createElement("link");
+        pre.rel = "preconnect";
+        pre.href = "https://fonts.googleapis.com";
+        document.head.appendChild(pre);
+        var pre2 = document.createElement("link");
+        pre2.rel = "preconnect";
+        pre2.href = "https://fonts.gstatic.com";
+        pre2.crossOrigin = "anonymous";
+        document.head.appendChild(pre2);
+        var font = document.createElement("link");
+        font.rel = "stylesheet";
+        font.href = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap";
+        document.head.appendChild(font);
+      })();
+    </script>
 
     <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website" />
@@ -55,8 +81,21 @@
 
   <body>
     <div id="root"></div>
-    <!-- IMPORTANT: DO NOT REMOVE THIS SCRIPT TAG OR THIS VERY COMMENT! -->
-    <script src="https://cdn.gpteng.co/gptengineer.js" type="module"></script>
+    <script>
+      (function () {
+        if (window.__APPOINTZA_PUBLIC_TEMPLATE__) return;
+        var h = (location.hostname || "").toLowerCase();
+        var isDev =
+          h === "localhost" ||
+          h === "127.0.0.1" ||
+          (h.length > 10 && h.slice(-10) === ".localhost");
+        if (!isDev) return;
+        var s = document.createElement("script");
+        s.src = "https://cdn.gpteng.co/gptengineer.js";
+        s.type = "module";
+        document.body.appendChild(s);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

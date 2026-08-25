@@ -13,6 +13,7 @@ import {
 import { isOrgLocTempId } from "@/utils/orgPublicSiteUrl.util";
 import { publishMainAppOrigin, redirectToLogin } from "@/utils/authNavigation.util";
 import { navigateToTemplateBooking } from "@/utils/templateBookingNav.util";
+import { nextHtmlIfChanged } from "@/utils/publicTemplateHtml.util";
 import { useNavigate } from "react-router-dom";
 
 const DynamicTemplatePage = () => {
@@ -79,12 +80,12 @@ const DynamicTemplatePage = () => {
         return;
       }
 
-      // Show cached HTML immediately; still refresh from single public API.
+      // Cached HTML is already in state from the initial render. Do not setHtml
+      // again with the same string — that reloads iframe srcDoc.
       const existingMap = readPublicSiteGuidMap(token);
       if (existingMap?.locationId && !shouldForcePublicSiteRefresh()) {
         const cached = readPublicSiteCache(existingMap.locationId);
         if (cached?.renderedHtml && !cancelled) {
-          setHtml(cached.renderedHtml);
           setLoading(false);
         }
       }
@@ -112,7 +113,7 @@ const DynamicTemplatePage = () => {
         const changed = !previous || previous.versionKey !== versionKey;
 
         if (changed || !previous?.renderedHtml) {
-          setHtml(renderedHtml);
+          setHtml((prev) => nextHtmlIfChanged(prev, renderedHtml));
           if (locationId > 0) {
             writePublicSiteCache(locationId, { versionKey, renderedHtml });
           }

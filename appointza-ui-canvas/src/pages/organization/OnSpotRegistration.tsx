@@ -14,7 +14,6 @@ import {
   Loader2
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import OrganizationLayout from "@/components/layout/OrganizationLayout";
 import OrganizationPageShell from "@/components/layout/OrganizationPageShell";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
@@ -403,8 +402,7 @@ const OnSpotRegistration = () => {
   };
 
   return (
-    <OrganizationLayout>
-      <OrganizationPageShell
+    <OrganizationPageShell
         title="On-Spot Registration"
         description="Create client and book appointment immediately"
         actions={
@@ -750,7 +748,6 @@ const OnSpotRegistration = () => {
           </div>
         </div>
       </OrganizationPageShell>
-    </OrganizationLayout>
   );
 };
 
