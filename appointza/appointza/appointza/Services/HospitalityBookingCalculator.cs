@@ -107,12 +107,16 @@ namespace appointza.Services
                         : room.pricing.price_per_night;
                     pricePerHour = hourlyRate;
                     roomTotal = hourlyRate * hours;
-                    extraGuestTotal = Math.Max(0, persons - room.capacity.total_guests) * room.pricing.extra_guest_charge * hours;
+                    extraBedTotal = extraBeds * room.pricing.extra_guest_charge * hours;
+                    extraGuestTotal = Math.Max(0, persons - room.capacity.total_guests - extraBeds)
+                        * room.pricing.extra_guest_charge * hours;
                 }
                 else
                 {
                     roomTotal = SumOvernightRates(room.pricing, checkIn, checkOut);
-                    extraGuestTotal = Math.Max(0, persons - room.capacity.total_guests) * room.pricing.extra_guest_charge * nights;
+                    extraBedTotal = extraBeds * room.pricing.extra_guest_charge * nights;
+                    extraGuestTotal = Math.Max(0, persons - room.capacity.total_guests - extraBeds)
+                        * room.pricing.extra_guest_charge * nights;
                 }
 
                 if (hasStayPackage)
@@ -168,7 +172,7 @@ namespace appointza.Services
                 max_persons = maxPersons,
                 extra_beds = extraBeds,
                 persons = persons,
-                extra_bed_charge_per_night = 0,
+                extra_bed_charge_per_night = room?.pricing.extra_guest_charge ?? 0,
                 price_per_hour = pricePerHour,
                 minimum_hours = hourly
                     ? (room?.booking_rules.minimum_hours > 0 ? room.booking_rules.minimum_hours : Math.Max(1, propertyMinimumHours))

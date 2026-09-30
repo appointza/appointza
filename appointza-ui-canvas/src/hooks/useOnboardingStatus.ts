@@ -3,10 +3,6 @@ import { useAuth } from '@/contexts/AuthContext';
 import { PrivilegeUtil } from '@/utils/privilege.util';
 import { OrganisationServicesService } from '@/services/organisationservices.service';
 import { OrganisationServiceTimingService } from '@/services/organisationservicetiming.service';
-import { OrganisationServicesSelectReq } from '@/models/organisationservices.model';
-import { OrganisationServiceTimingSelectReq } from '@/models/organisationservicetiming.model';
-import { ReferenceValueService } from '@/services/referencevalue.service';
-import { ReferenceValueSelectReq } from '@/models/referencevalue.model';
 import { normalizeCustomUrlSlug } from '@/utils/slug.util';
 import {
   ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID,
@@ -21,6 +17,10 @@ import {
   fetchOrganisationLocations,
   organisationLocationsQueryKey,
 } from '@/hooks/useOrganisationLocations';
+import {
+  fetchReferenceValues,
+  referenceValuesQueryKey,
+} from '@/hooks/useReferenceValues';
 
 export interface OnboardingStatus {
   hasCustomDomain: boolean;
@@ -64,7 +64,8 @@ function resolveNextStep(
   return null;
 }
 
-export const useOnboardingStatus = () => {
+export const useOnboardingStatus = (options?: { enabled?: boolean }) => {
+  const onboardingEnabled = options?.enabled !== false;
   const { user, isAuthenticated } = useAuth();
   const queryClient = useQueryClient();
   const organizationId = user?.organisationid;
@@ -95,28 +96,25 @@ export const useOnboardingStatus = () => {
 
         // Locations via shared RQ key (dedupes with sidebar / Dashboard useOrganisationLocations).
         // Templates, services, and timings run in parallel with locations.
-        const referenceValueService = new ReferenceValueService();
-        const templateReq = new ReferenceValueSelectReq();
-        templateReq.referencetypeid = ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID;
-        templateReq.organisationid = orgIdValue;
-
         const servicesService = new OrganisationServicesService();
-        const servicesReq = new OrganisationServicesSelectReq();
-        servicesReq.organisationid = orgIdValue;
+        const servicesHasAnyReq = { organisationid: orgIdValue };
 
         const timingService = new OrganisationServiceTimingService();
-        const timingReq = new OrganisationServiceTimingSelectReq();
-        timingReq.organisationid = orgIdValue;
 
-        const [locations, orgTemplates, services, timings] = await Promise.all([
+        const [locations, orgTemplates, hasServices, hasTiming] = await Promise.all([
           queryClient.fetchQuery({
             queryKey: organisationLocationsQueryKey(orgIdValue, 0),
             queryFn: () => fetchOrganisationLocations(orgIdValue, 0),
-            staleTime: 60_000,
+            staleTime: 0,
           }),
-          referenceValueService.select(templateReq),
-          servicesService.select(servicesReq),
-          timingService.select(timingReq),
+          queryClient.fetchQuery({
+            queryKey: referenceValuesQueryKey(orgIdValue, ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID),
+            queryFn: () =>
+              fetchReferenceValues(orgIdValue, ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID),
+            staleTime: 0,
+          }),
+          servicesService.hasAny(servicesHasAnyReq),
+          timingService.hasAny({ organisationid: orgIdValue }),
         ]);
 
         const hasCustomDomain = (locations ?? []).some(
@@ -126,17 +124,17 @@ export const useOnboardingStatus = () => {
           (orgTemplates ?? []).map((template) => template.id).filter((id) => id > 0),
         );
         const hasWebsite = orgHasWebsiteFromLocations(locations ?? [], orgTemplateIds);
-        const hasServices = !!(services && services.length > 0);
-        const hasTiming = !!(timings && timings.length > 0);
+        const hasServicesResolved = hasServices;
+        const hasTimingResolved = hasTiming;
 
-        const isComplete = hasCustomDomain && hasServices && hasWebsite && hasTiming;
-        const nextStep = resolveNextStep(hasCustomDomain, hasServices, hasWebsite, hasTiming);
+        const isComplete = hasCustomDomain && hasServicesResolved && hasWebsite && hasTimingResolved;
+        const nextStep = resolveNextStep(hasCustomDomain, hasServicesResolved, hasWebsite, hasTimingResolved);
 
         return {
           hasCustomDomain,
-          hasServices,
+          hasServices: hasServicesResolved,
           hasWebsite,
-          hasTiming,
+          hasTiming: hasTimingResolved,
           isComplete,
           isLoading: false,
           nextStep,
@@ -154,7 +152,7 @@ export const useOnboardingStatus = () => {
         }
       }
     },
-    enabled: !!isAuthenticated && !!organizationId && !isStaff && !cachedComplete,
+    enabled: onboardingEnabled && !!isAuthenticated && !!organizationId && !isStaff && !cachedComplete,
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
     retry: 1,
@@ -173,7 +171,13 @@ export const useOnboardingStatus = () => {
     if (organizationId) {
       clearOnboardingCompleteCache(organizationId);
       void queryClient.invalidateQueries({
-        queryKey: organisationLocationsQueryKey(organizationId, 0),
+        queryKey: ['organisation-locations', organizationId],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: referenceValuesQueryKey(
+          organizationId,
+          ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID,
+        ),
       });
     }
     setCacheBypass(true);

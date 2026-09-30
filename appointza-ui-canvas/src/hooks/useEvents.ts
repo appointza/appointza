@@ -4,7 +4,15 @@ import { useToast } from '@/hooks/use-toast';
 import { EventService } from '@/services/event.service';
 import { invalidatePublicSiteCacheForLocation } from '@/utils/publicSiteCache.util';
 
-export const useEvents = (organizationId?: number, locationId?: number) => {
+export const eventsQueryKey = (organizationId?: number, locationId?: number) =>
+  ['events', organizationId, locationId] as const;
+
+export const useEvents = (
+  organizationId?: number,
+  locationId?: number,
+  options?: { enabled?: boolean },
+) => {
+  const queryEnabled = options?.enabled !== false;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const service = new EventService();
@@ -22,7 +30,7 @@ export const useEvents = (organizationId?: number, locationId?: number) => {
     error,
     refetch
   } = useQuery({
-    queryKey: ['events', organizationId, locationId],
+    queryKey: eventsQueryKey(organizationId, locationId),
     queryFn: async () => {
       if (!organizationId) return [];
       
@@ -39,7 +47,9 @@ export const useEvents = (organizationId?: number, locationId?: number) => {
       console.log('✅ Events API response:', response);
       return response || [];
     },
-    enabled: !!organizationId,
+    enabled: !!organizationId && queryEnabled,
+    staleTime: 60_000,
+    gcTime: 5 * 60_000,
   });
 
   const createEventMutation = useMutation({

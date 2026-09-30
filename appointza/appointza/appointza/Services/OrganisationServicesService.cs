@@ -95,6 +95,39 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
                 }
             return result;
         }
+
+        public async Task<bool> HasAnyForOrganisation(long organisationId)
+        {
+            if (organisationId <= 0)
+            {
+                return false;
+            }
+
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                await EnsureLocationColumnTransaction(db);
+                return await HasAnyForOrganisationTransaction(db, organisationId);
+            }
+        }
+
+        public async Task<bool> HasAnyForOrganisationTransaction(IDb db, long organisationId)
+        {
+            const string query = @"
+                SELECT 1
+                FROM OrganisationServices
+                WHERE organisationid = @organisationid
+                  AND isactive = TRUE
+                LIMIT 1";
+
+            var command = db.GetCommand(query);
+            db.AddParameter(command, "organisationid", DbTypes.Types.Long).Value = organisationId;
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                return await reader.ReadAsync();
+            }
+        }
+
         public async Task<OrganisationServices> Insert(OrganisationServices organisationservices)
         {
                 using (IDb db = await dbprovider.GetDb())

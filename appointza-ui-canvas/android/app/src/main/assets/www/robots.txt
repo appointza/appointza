@@ -2,7 +2,7 @@ User-agent: *
 Allow: /
 
 # Sitemap
-Sitemap: http://localhost:8083/sitemap.xml
+Sitemap: /sitemap.xml
 
 # Disallow admin and API routes
 Disallow: /api/

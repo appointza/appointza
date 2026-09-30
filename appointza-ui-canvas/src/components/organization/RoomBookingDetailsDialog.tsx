@@ -321,6 +321,25 @@ export default function RoomBookingDetailsDialog({
                 </div>
               ) : null}
             </dl>
+            {(room.booking?.stays ?? []).length > 1 ? (
+              <ul className="space-y-2 rounded-xl border border-stone-100 bg-stone-50/80 p-3 text-sm">
+                {(room.booking?.stays ?? []).map((stay) => (
+                  <li key={`${stay.booking_id}-${stay.check_in}`}>
+                    <p className="font-medium text-appointza-navy">
+                      {stay.check_in} → {stay.check_out}
+                      {stay.booking_id ? (
+                        <span className="ml-2 text-xs font-normal text-stone-500">
+                          {stay.booking_id}
+                        </span>
+                      ) : null}
+                    </p>
+                    {stay.guest?.name ? (
+                      <p className="text-xs text-stone-500">{stay.guest.name}</p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
           </section>
 
           <section className="space-y-2">

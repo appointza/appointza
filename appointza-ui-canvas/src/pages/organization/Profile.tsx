@@ -5,6 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import {
   User,
@@ -19,6 +26,12 @@ import {
   Wallet,
   Copy,
   Award,
+  Clock,
+  Users as UsersIcon,
+  FileText,
+  CreditCard,
+  Settings,
+  Building2,
 } from "lucide-react";
 import { org } from "@/lib/orgTheme";
 import { settingsEmbedded, profileSettingsX } from "@/lib/settingsEmbedded";
@@ -44,12 +57,12 @@ import { useLocation } from "@/hooks/useLocation";
 import { useLocationList } from "@/hooks/useLocationList";
 import IntegrationTokenPanel from "@/components/organization/IntegrationTokenPanel";
 
-/** Horizontal scroll tabs — matches Hospitality settings tabs. */
-const profileTabTriggerClass =
-  "shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:bg-blue-50 hover:text-blue-700 data-[state=active]:bg-none data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none sm:px-4";
+/** Settings nav — vertical sidebar on desktop. Mobile uses a select dropdown. */
+const profileSidebarTriggerClass =
+  "h-auto w-full justify-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-stone-600 shadow-none hover:bg-blue-50 hover:text-blue-700 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none";
 
-const profileTabListClass =
-  "inline-flex h-auto w-full min-w-0 max-w-full gap-1 overflow-x-auto bg-transparent p-0 shadow-none [scrollbar-width:thin]";
+const profileSidebarListClass =
+  "hidden !h-auto w-full flex-col items-stretch justify-start gap-0.5 rounded-none border-0 bg-transparent p-0 shadow-none lg:flex";
 
 const profileCardHeaderClass = cn(profileSettingsX, "w-full space-y-1.5 py-5 md:py-6");
 const profileCardContentClass = cn(profileSettingsX, "w-full pt-0");
@@ -92,6 +105,7 @@ type ProfileSettingsTab =
   | "profile"
   | "business-hours"
   | "staff"
+  | "organization"
   | "location"
   | "templates"
   | "payment"
@@ -136,7 +150,10 @@ const OrganizationProfile = () => {
     const list: ProfileSettingsTab[] = ["profile"];
     if (hasBusinessHoursAccess) list.push("business-hours");
     if (hasStaffManagementAccess) list.push("staff");
-    if (hasLocationManagementAccess) list.push("location");
+    if (hasLocationManagementAccess) {
+      list.push("organization");
+      list.push("location");
+    }
     if (hasTemplatesAccess) list.push("templates");
     if (hasPaymentSettingsAccess) list.push("payment");
     if (!isStaff) list.push("loyalty");
@@ -152,11 +169,33 @@ const OrganizationProfile = () => {
     isStaff,
   ]);
 
+  const settingsNavItems = useMemo(
+    () =>
+      (
+        [
+          { value: "profile", label: "Profile", icon: User },
+          { value: "business-hours", label: "Business Hours", icon: Clock },
+          { value: "staff", label: "Staff", icon: UsersIcon },
+          { value: "organization", label: "Organisation", icon: Building2 },
+          { value: "location", label: "Location", icon: MapPin },
+          { value: "templates", label: "Templates", icon: FileText },
+          { value: "payment", label: "Payment Settings", icon: CreditCard },
+          { value: "loyalty", label: "Loyalty", icon: Award },
+          { value: "billing", label: "Credit Wallet", icon: Wallet },
+          { value: "account", label: "Account", icon: Settings },
+        ] as const
+      ).filter((item) => accessibleTabValues.includes(item.value)),
+    [accessibleTabValues],
+  );
+
   const activeTab = useMemo(() => {
     const raw = searchParams.get("tab") as ProfileSettingsTab | null;
+    if (raw === "location" && searchParams.get("subtab") === "organization") {
+      return hasLocationManagementAccess ? "organization" : "profile";
+    }
     if (raw && accessibleTabValues.includes(raw)) return raw;
     return "profile";
-  }, [searchParams, accessibleTabValues]);
+  }, [searchParams, accessibleTabValues, hasLocationManagementAccess]);
 
   const setActiveTab = (value: string) => {
     setSearchParams(
@@ -164,12 +203,14 @@ const OrganizationProfile = () => {
         const next = new URLSearchParams(prev);
         next.set("tab", value);
         next.delete("section");
+        next.delete("subtab");
+        next.delete("edit");
         return next;
       },
       { replace: true },
     );
   };
-  
+
   const { 
     currentLocation, 
     getLocationDisplayName, 
@@ -390,14 +431,21 @@ const OrganizationProfile = () => {
     }
   };
 
+  // Load profile data when profile or account tab is active
+  const needsUserProfile = activeTab === "profile" || activeTab === "account";
+
   // Load profile on component mount
   useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
+    if (needsUserProfile) {
+      void loadProfile();
+    }
+  }, [needsUserProfile, loadProfile]);
 
   useEffect(() => {
-    void loadReferralStatus();
-  }, [loadReferralStatus]);
+    if (activeTab === "profile" && !isStaff) {
+      void loadReferralStatus();
+    }
+  }, [activeTab, isStaff, loadReferralStatus]);
 
   // Immediate fallback if user context is available but profile is empty
   useEffect(() => {
@@ -410,6 +458,10 @@ const OrganizationProfile = () => {
 
   // Load profile image via authenticated fetch (img src cannot send Authorization header)
   useEffect(() => {
+    if (activeTab !== "profile") {
+      return;
+    }
+
     let cancelled = false;
 
     const loadProfileImage = async () => {
@@ -479,7 +531,7 @@ const OrganizationProfile = () => {
     return () => {
       cancelled = true;
     };
-  }, [profile.profileimage, profileImageVersion, filesService]);
+  }, [activeTab, profile.profileimage, profileImageVersion, filesService]);
 
   // Save profile
   const handleSaveProfile = async () => {
@@ -721,7 +773,7 @@ const OrganizationProfile = () => {
     return <Navigate to={to} replace />;
   }
 
-  if (isLoading) {
+  if (activeTab === "profile" && isLoading) {
     return (
       <div className={cn(org.loading, "flex-col gap-3")}>
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -734,77 +786,102 @@ const OrganizationProfile = () => {
     <Tabs
       value={activeTab}
       onValueChange={setActiveTab}
-      className={cn(org.page, "flex h-full min-h-0 flex-col bg-white")}
+      className={cn(org.page, "flex h-full min-h-0 flex-col bg-white lg:flex-row")}
     >
-        {/* <header className={cn(org.pageHeader, "border-b border-stone-100/80 pb-4")}>
-          <div className="flex items-center gap-3">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => window.history.back()}
-              className="h-10 w-10 shrink-0 rounded-xl text-stone-500 hover:bg-[#FFF0EB] hover:text-[#E85D4C]"
-              aria-label="Go back"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="min-w-0">
-              <h1 className={org.title}>Settings</h1>
-              <p className={org.description}>Manage your organization profile and preferences</p>
+        <aside className="shrink-0 border-b border-stone-200 bg-white lg:h-full lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+          <div className="px-4 py-3 md:px-6 lg:px-3 lg:py-5">
+            <p className="mb-3 hidden px-3 text-xs font-semibold uppercase tracking-wide text-stone-400 lg:block">
+              Settings
+            </p>
+            <div className="lg:hidden">
+              <label htmlFor="profile-settings-nav" className="sr-only">
+                Settings
+              </label>
+              <Select value={activeTab} onValueChange={setActiveTab}>
+                <SelectTrigger
+                  id="profile-settings-nav"
+                  className="h-11 min-h-11 border-stone-200 shadow-none"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="item-aligned" className="z-[110] max-h-[min(24rem,70dvh)]">
+                  {settingsNavItems.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <SelectItem key={item.value} value={item.value} className="min-h-11">
+                        <span className="flex items-center gap-2">
+                          <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                          {item.label}
+                        </span>
+                      </SelectItem>
+                    );
+                  })}
+                </SelectContent>
+              </Select>
             </div>
+            <TabsList className={profileSidebarListClass}>
+              <TabsTrigger value="profile" className={profileSidebarTriggerClass}>
+                <User className="h-4 w-4 shrink-0" />
+                Profile
+              </TabsTrigger>
+              {hasBusinessHoursAccess && (
+                <TabsTrigger value="business-hours" className={profileSidebarTriggerClass}>
+                  <Clock className="h-4 w-4 shrink-0" />
+                  Business Hours
+                </TabsTrigger>
+              )}
+              {hasStaffManagementAccess && (
+                <TabsTrigger value="staff" className={profileSidebarTriggerClass}>
+                  <UsersIcon className="h-4 w-4 shrink-0" />
+                  Staff
+                </TabsTrigger>
+              )}
+              {hasLocationManagementAccess && (
+                <TabsTrigger value="organization" className={profileSidebarTriggerClass}>
+                  <Building2 className="h-4 w-4 shrink-0" />
+                  Organisation
+                </TabsTrigger>
+              )}
+              {hasLocationManagementAccess && (
+                <TabsTrigger value="location" className={profileSidebarTriggerClass}>
+                  <MapPin className="h-4 w-4 shrink-0" />
+                  Location
+                </TabsTrigger>
+              )}
+              {hasTemplatesAccess && (
+                <TabsTrigger value="templates" className={profileSidebarTriggerClass}>
+                  <FileText className="h-4 w-4 shrink-0" />
+                  Templates
+                </TabsTrigger>
+              )}
+              {hasPaymentSettingsAccess && (
+                <TabsTrigger value="payment" className={profileSidebarTriggerClass}>
+                  <CreditCard className="h-4 w-4 shrink-0" />
+                  Payment Settings
+                </TabsTrigger>
+              )}
+              {!isStaff && (
+                <TabsTrigger value="loyalty" className={profileSidebarTriggerClass}>
+                  <Award className="h-4 w-4 shrink-0" />
+                  Loyalty
+                </TabsTrigger>
+              )}
+              {!isStaff && (
+                <TabsTrigger value="billing" className={profileSidebarTriggerClass}>
+                  <Wallet className="h-4 w-4 shrink-0" />
+                  Credit Wallet
+                </TabsTrigger>
+              )}
+              <TabsTrigger value="account" className={profileSidebarTriggerClass}>
+                <Settings className="h-4 w-4 shrink-0" />
+                Account
+              </TabsTrigger>
+            </TabsList>
           </div>
-        </header> */}
+        </aside>
 
-        <div className="min-h-0 flex-1 overflow-y-auto bg-white pt-0">
-            <Card className={cn(org.card, "w-full overflow-hidden rounded-none border-0 border-y border-stone-200 bg-white shadow-none")}>
-              <div className={cn(profileSettingsX, "border-b border-stone-200 py-4 md:py-5")}>
-                <TabsList className={profileTabListClass}>
-                <TabsTrigger value="profile" className={profileTabTriggerClass}>
-                  Profile
-                </TabsTrigger>
-                {hasBusinessHoursAccess && (
-                  <TabsTrigger value="business-hours" className={profileTabTriggerClass}>
-                    Business Hours
-                  </TabsTrigger>
-                )}
-                {hasStaffManagementAccess && (
-                  <TabsTrigger value="staff" className={profileTabTriggerClass}>
-                    Staff
-                  </TabsTrigger>
-                )}
-                {hasLocationManagementAccess && (
-                  <TabsTrigger value="location" className={profileTabTriggerClass}>
-                    Location
-                  </TabsTrigger>
-                )}
-                {hasTemplatesAccess && (
-                  <TabsTrigger value="templates" className={profileTabTriggerClass}>
-                    Templates
-                  </TabsTrigger>
-                )}
-                {hasPaymentSettingsAccess && (
-                  <TabsTrigger value="payment" className={profileTabTriggerClass}>
-                    Payment Settings
-                  </TabsTrigger>
-                )}
-                {!isStaff && (
-                  <TabsTrigger value="loyalty" className={profileTabTriggerClass}>
-                    <Award className="mr-1.5 inline h-4 w-4 shrink-0" />
-                    Loyalty
-                  </TabsTrigger>
-                )}
-                {!isStaff && (
-                  <TabsTrigger value="billing" className={profileTabTriggerClass}>
-                    <Wallet className="mr-1.5 inline h-4 w-4 shrink-0" />
-                    Credit Wallet
-                  </TabsTrigger>
-                )}
-                <TabsTrigger value="account" className={profileTabTriggerClass}>
-                  Account
-                </TabsTrigger>
-              </TabsList>
-              </div>
-
+        <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-white pt-0">
+            <Card className={cn(org.card, "w-full overflow-hidden rounded-none border-0 bg-white shadow-none")}>
             <TabsContent value="profile" className={profileTabPanelClass}>
               <div className="w-full">
             {/* Profile Photo */}
@@ -1209,8 +1286,18 @@ const OrganizationProfile = () => {
             )}
 
             {hasLocationManagementAccess && (
+              <TabsContent value="organization" className={profileTabPanelClass}>
+                {activeTab === "organization" ? (
+                  <LocationsScreen embedded section="organization" />
+                ) : null}
+              </TabsContent>
+            )}
+
+            {hasLocationManagementAccess && (
               <TabsContent value="location" className={profileTabPanelClass}>
-                {activeTab === "location" ? <LocationsScreen embedded /> : null}
+                {activeTab === "location" ? (
+                  <LocationsScreen embedded section="locations" />
+                ) : null}
               </TabsContent>
             )}
 

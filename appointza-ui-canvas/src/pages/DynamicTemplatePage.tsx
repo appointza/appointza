@@ -1,7 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
-import { SiteDetailsService } from "@/services/siteDetails.service";
 import {
   readPublicSiteGuidMap,
   shouldForcePublicSiteRefresh,
@@ -9,16 +8,22 @@ import {
   writePublicSiteCache,
   readPublicSiteCache,
   isPublicSiteCacheStale,
+  readFreshPublicSiteCache,
 } from "@/utils/publicSiteCache.util";
 import { isOrgLocTempId } from "@/utils/orgPublicSiteUrl.util";
-import { publishMainAppOrigin, redirectToLogin } from "@/utils/authNavigation.util";
-import { navigateToTemplateBooking } from "@/utils/templateBookingNav.util";
-import { nextHtmlIfChanged } from "@/utils/publicTemplateHtml.util";
+import { publishMainAppOrigin } from "@/utils/authNavigation.util";
+import {
+  handleTemplateFrameMessage,
+  syncParentFromTemplateIframe,
+} from "@/utils/templateBookingNav.util";
+import { nextHtmlIfChanged, preparePublicSiteIframeHtml } from "@/utils/publicTemplateHtml.util";
+import { getPublicHtmlByGuid } from "@/services/publicHtml.service";
 import { useNavigate } from "react-router-dom";
 
 const DynamicTemplatePage = () => {
   const { templateId } = useParams();
   const navigate = useNavigate();
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const token = decodeURIComponent(templateId?.trim() || "");
 
   const mapped = isOrgLocTempId(token) && !shouldForcePublicSiteRefresh()
@@ -30,8 +35,14 @@ const DynamicTemplatePage = () => {
       : "";
 
   const [html, setHtml] = useState(cachedHtml || "");
+  const [organisationId, setOrganisationId] = useState(0);
   const [loading, setLoading] = useState(!cachedHtml);
   const [error, setError] = useState("");
+
+  const iframeHtml = useMemo(
+    () => preparePublicSiteIframeHtml(html, organisationId),
+    [html, organisationId],
+  );
 
   useEffect(() => {
     publishMainAppOrigin();
@@ -39,29 +50,7 @@ const DynamicTemplatePage = () => {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (!event.data) return;
-
-      if (event.data.type === "appointza:login-required") {
-        const returnUrl: string = event.data.returnUrl || "";
-        if (returnUrl) {
-          try {
-            sessionStorage.setItem("appointza_auth_return", returnUrl);
-          } catch {
-            // ignore
-          }
-        }
-        redirectToLogin(returnUrl);
-        return;
-      }
-
-      if (event.data.type !== "appointza:booking-nav") return;
-      const url: string = event.data.url || "";
-      if (!url) return;
-      if (url.startsWith("http://") || url.startsWith("https://")) {
-        window.location.href = url;
-        return;
-      }
-      navigateToTemplateBooking(url, navigate);
+      handleTemplateFrameMessage(event, navigate);
     };
 
     window.addEventListener("message", handleMessage);
@@ -83,21 +72,45 @@ const DynamicTemplatePage = () => {
       // Cached HTML is already in state from the initial render. Do not setHtml
       // again with the same string — that reloads iframe srcDoc.
       const existingMap = readPublicSiteGuidMap(token);
-      if (existingMap?.locationId && !shouldForcePublicSiteRefresh()) {
-        const cached = readPublicSiteCache(existingMap.locationId);
-        if (cached?.renderedHtml && !cancelled) {
-          setLoading(false);
-        }
+      const forceRefresh = shouldForcePublicSiteRefresh();
+      const cachedFromMap =
+        existingMap?.locationId && !forceRefresh
+          ? readFreshPublicSiteCache(existingMap.locationId)
+          : null;
+
+      if (cachedFromMap?.renderedHtml) {
+        if (!cancelled) setLoading(false);
+        return;
       }
 
+      const staleCache =
+        existingMap?.locationId && !forceRefresh
+          ? readPublicSiteCache(existingMap.locationId)
+          : null;
+
       try {
-        const siteService = new SiteDetailsService();
-        const result = await siteService.getPublicHtml(token);
+        const result = await getPublicHtmlByGuid(token, {
+          versionKey: staleCache?.versionKey,
+        });
         if (cancelled) return;
 
+        if (result.notModified && staleCache?.renderedHtml) {
+          writePublicSiteCache(existingMap!.locationId, {
+            versionKey: staleCache.versionKey,
+            renderedHtml: staleCache.renderedHtml,
+          });
+          setError("");
+          return;
+        }
+
         const locationId = result?.organisationlocationid || 0;
+        const orgId = result?.organisationid || 0;
         const renderedHtml = result?.html || "";
         const versionKey = result?.versionKey || `loc:${locationId}`;
+
+        if (orgId > 0) {
+          setOrganisationId(orgId);
+        }
 
         if (locationId > 0) {
           writePublicSiteGuidMap(token, locationId);
@@ -164,10 +177,12 @@ const DynamicTemplatePage = () => {
   return (
     <div style={{ width: "100%", height: "100vh" }}>
       <iframe
-        srcDoc={html}
+        ref={iframeRef}
+        srcDoc={iframeHtml}
         sandbox="allow-scripts allow-same-origin allow-forms"
         style={{ width: "100%", height: "100%", border: "none" }}
         title="Template"
+        onLoad={() => syncParentFromTemplateIframe(iframeRef.current, navigate)}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback } from "react";
 import { ArrowLeft, Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,6 @@ import { RoomCardPreview } from "@/components/organization/RoomCardPreview";
 import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
 import {
   ROOM_AMENITY_GROUPS,
-  buildRoomCalendar,
   defaultRoomCode,
 } from "@/utils/roomAmenities.util";
 
@@ -94,7 +93,6 @@ export function RoomEditorForm({
 
   const gallery = draft.gallery_photos ?? [];
   const galleryIds = gallery.map((id) => Number(id)).filter((id) => id > 0);
-  const calendarDays = useMemo(() => buildRoomCalendar(draft), [draft]);
 
   const updateGallery = (ids: number[]) => {
     const nextGallery = ids.map(String);
@@ -348,18 +346,29 @@ export function RoomEditorForm({
         </div>
       </SectionCard>
 
-      <SectionCard step={6} title="Booking Calendar (next 7 days)">
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-          {calendarDays.map((day) => (
-            <div
-              key={day.label}
-              className="rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2 text-center"
-            >
-              <p className="text-sm font-medium text-stone-900">{day.label}</p>
-              <p className="text-xs text-stone-500">{day.state}</p>
-            </div>
-          ))}
-        </div>
+      <SectionCard step={6} title="Booked stays">
+        {(draft.booking?.stays ?? []).length > 0 ? (
+          <ul className="space-y-2 text-sm">
+            {(draft.booking?.stays ?? []).map((stay) => (
+              <li
+                key={`${stay.booking_id}-${stay.check_in}`}
+                className="rounded-xl border border-stone-100 bg-stone-50/80 px-3 py-2"
+              >
+                <p className="font-medium text-appointza-navy">
+                  {stay.check_in} → {stay.check_out}
+                </p>
+                {stay.booking_id ? (
+                  <p className="text-xs text-stone-500">{stay.booking_id}</p>
+                ) : null}
+                {stay.guest?.name ? (
+                  <p className="text-xs text-stone-500">{stay.guest.name}</p>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-sm text-stone-500">No stays on this room yet.</p>
+        )}
       </SectionCard>
 
       <SectionCard step={7} title="Current Guest Stay">

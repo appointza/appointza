@@ -2,6 +2,8 @@ import type { OnboardingStepId } from "@/components/onboarding/OrganizationOnboa
 
 /** ReferenceValue type id for organisation website templates. */
 export const ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID = 5;
+/** Max website templates an organisation can save (excludes the hidden assets row). */
+export const ORG_WEBSITE_TEMPLATE_MAX_PER_ORG = 2;
 
 /** Legacy system default assigned on registration — not a user-created website. */
 export const SYSTEM_DEFAULT_LOCATION_TEMPLATE_ID = 60;

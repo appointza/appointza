@@ -1,6 +1,7 @@
 window.APP_CONFIG = {
-  baseurl: "http://localhost:5000",
-  templateBaseUrl: "http://localhost:5000/template",
+  // 1) Backend API — host:port the API runs on. The frontend calls this for /api/*.
+  baseurl: "https://localhost:7117",
+  // 2) Frontend UI — public site URL (login, Google, booking return links).
   uiBaseUrl: "http://localhost:8083",
   marketingDomain: "appointza.com",
   domainname: "appointza.com",

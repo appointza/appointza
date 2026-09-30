@@ -17,6 +17,13 @@ import {
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from '@/hooks/use-mobile';
+import { useAuth } from '@/contexts/AuthContext';
+import { useOrganisationCatalogOfferings } from '@/hooks/useOrganisationCatalogOfferings';
+import {
+  bookingsNavVisible,
+  catalogNavLabel,
+  catalogServicesNavTo,
+} from '@/utils/organisationCatalogOfferings.util';
 import OrganizationBottomNav from './OrganizationBottomNav';
 import { OrganizationSidebarLocation } from './OrganizationSidebarLocation';
 
@@ -34,9 +41,10 @@ const SidebarLink = ({
   collapsed?: boolean;
 }) => {
   const location = useLocation();
+  const pathOnly = to.split("?")[0];
   const isActive =
-    location.pathname === to ||
-    (to !== '/organization/dashboard' && location.pathname.startsWith(`${to}/`));
+    location.pathname === pathOnly ||
+    (pathOnly !== '/organization/dashboard' && location.pathname.startsWith(`${pathOnly}/`));
 
   return (
     <Link
@@ -72,6 +80,14 @@ interface OrganizationSidebarProps {
 const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSidebarProps) => {
   const isMobile = useIsMobile();
   const isCollapsed = collapsed;
+  const { user } = useAuth();
+  const organisationId = user?.organisationid ?? 0;
+  const {
+    offerings,
+    offersRooms,
+    offersServices,
+    offersEvents,
+  } = useOrganisationCatalogOfferings(organisationId);
 
   const getUserContext = () => {
     try {
@@ -94,6 +110,13 @@ const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSideb
   const hasBookingsAccess = hasAppointmentsAccess || hasEventsAccess;
   const hasServicesAccess = !isStaff || (userpermission?.editandviewCreateService === true || userpermission?.editandviewCreateEvent === true);
   const hasClientsAccess = !isStaff || userpermission?.editandviewClients === true;
+
+  const showBookingsNav = hasBookingsAccess && bookingsNavVisible(offerings);
+  const showCatalogNav =
+    hasServicesAccess &&
+    (offersServices || offersEvents);
+  const catalogLinkTo = catalogServicesNavTo(offerings);
+  const catalogLinkLabel = catalogNavLabel(offerings);
   
   const toggleCollapse = () => {
     onCollapsedChange(!isCollapsed);
@@ -151,14 +174,14 @@ const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSideb
               Dashboard
             </SidebarLink>
           )}
-          {hasBookingsAccess && (
+          {showBookingsNav && (
             <SidebarLink to="/organization/appointments" icon={CalendarDays} collapsed={isCollapsed}>
               Bookings
             </SidebarLink>
           )}
-          {hasServicesAccess && (
-            <SidebarLink to="/organization/services" icon={Package} collapsed={isCollapsed}>
-              Services & Events
+          {showCatalogNav && (
+            <SidebarLink to={catalogLinkTo} icon={Package} collapsed={isCollapsed}>
+              {catalogLinkLabel}
             </SidebarLink>
           )}
           {hasClientsAccess && (
@@ -171,7 +194,7 @@ const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSideb
               Customers
             </SidebarLink>
           )}
-          {!isStaff && (
+          {!isStaff && offersRooms && (
             <SidebarLink to="/organization/hospitality" icon={ConciergeBell} collapsed={isCollapsed}>
               Hospitality
             </SidebarLink>

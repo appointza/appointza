@@ -134,18 +134,14 @@ export function cloneRoom(room: OrganisationRoom): OrganisationRoom {
     amenities: [...(room.amenities ?? [])],
     gallery_photos: [...(room.gallery_photos ?? [])],
     guest: room.guest ? { ...room.guest } : null,
-    booking: room.booking ? { ...room.booking } : null,
+    booking: room.booking
+      ? { ...room.booking, stays: [...(room.booking.stays ?? [])] }
+      : null,
     payment: room.payment ? { ...room.payment } : null,
     cleaning_assignment: room.cleaning_assignment ? { ...room.cleaning_assignment } : null,
   };
 }
 
-export type RoomCalendarDay = {
-  label: string;
-  state: string;
-};
-
-/** Parse yyyy-MM-dd (or ISO prefix) as local calendar date — avoids UTC timezone shifts. */
 export function parseDateOnlyLocal(value: string | undefined | null): Date | null {
   if (!value?.trim()) return null;
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(value.trim());
@@ -158,73 +154,9 @@ export function parseDateOnlyLocal(value: string | undefined | null): Date | nul
   return parsed;
 }
 
-function startOfLocalDay(date: Date): Date {
-  const day = new Date(date);
-  day.setHours(0, 0, 0, 0);
-  return day;
-}
-
-/** True when `day` is a booked night (or same-day hourly stay). */
-function isDateWithinStay(day: Date, checkIn: Date, checkOut: Date): boolean {
-  const dayTime = day.getTime();
-  const inTime = checkIn.getTime();
-  const outTime = checkOut.getTime();
-  if (inTime === outTime) return dayTime === inTime;
-  return dayTime >= inTime && dayTime < outTime;
-}
-
-function isCheckoutDay(day: Date, checkOut: Date): boolean {
-  return day.getTime() === checkOut.getTime();
-}
-
-export function buildRoomCalendar(room: OrganisationRoom): RoomCalendarDay[] {
-  const days: RoomCalendarDay[] = [];
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  for (let i = 0; i < 7; i++) {
-    const date = new Date(today);
-    date.setDate(today.getDate() + i);
-    const label = date.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
-    days.push({ label, state: getRoomAvailabilityState(room, date) });
-  }
-
-  return days;
-}
-
-/** Availability label for a room on a specific calendar day (from status + stay dates). */
-export function getRoomAvailabilityState(room: OrganisationRoom, date: Date): string {
-  const day = startOfLocalDay(date);
-
-  if (room.status === "maintenance" || room.status === "blocked") return "Unavailable";
-  if (room.status === "cleaning") return "Cleaning";
-
-  const checkIn = parseDateOnlyLocal(room.booking?.check_in);
-  const checkOut = parseDateOnlyLocal(room.booking?.check_out);
-
-  if (checkIn && checkOut) {
-    if (isDateWithinStay(day, checkIn, checkOut)) {
-      return room.status === "reserved" ? "Reserved" : "Occupied";
-    }
-    if (
-      isCheckoutDay(day, checkOut) &&
-      (room.status === "checkout_pending" || room.status === "occupied")
-    ) {
-      return room.status === "checkout_pending" ? "Check-out" : "Occupied";
-    }
-    return "Available";
-  }
-
-  const today = startOfLocalDay(new Date());
-  const isToday = day.getTime() === today.getTime();
-  if (!isToday) return "Available";
-
-  if (room.status === "occupied") return "Occupied";
-  if (room.status === "reserved") return "Reserved";
-  if (room.status === "checkout_pending") return "Check-out";
-  if (room.status === "hold") return "Hold";
-
-  return "Available";
+/** Bind `availability_state` from GetStatusBoard. */
+export function getRoomAvailabilityState(room: OrganisationRoom, _date?: Date): string {
+  return (room.availability_state || "").trim() || "Available";
 }
 
 export function roomAvailabilityClassName(state: string): string {

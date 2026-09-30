@@ -177,6 +177,13 @@ namespace appointza.Models.Hospitality
         public DateTime created_at { get; set; }
         public DateTime updated_at { get; set; }
 
+        /// <summary>Server-computed label for the requested board date. Not stored.</summary>
+        public string availability_state { get; set; } = "Available";
+        /// <summary>True when this room has one or more stay records. Not stored.</summary>
+        public bool has_active_booking { get; set; }
+        /// <summary>True when the org UI should show guest/stay actions for the requested date. Not stored.</summary>
+        public bool can_manage { get; set; }
+
         [JsonIgnore] public string capacity_json { get => JsonSerializer.Serialize(capacity ?? new()); set => capacity = DeserializeObject(value, new RoomCapacityData()); }
         [JsonIgnore] public string pricing_json { get => JsonSerializer.Serialize(pricing ?? new()); set => pricing = DeserializeObject(value, new RoomPricingData()); }
         [JsonIgnore] public string amenities_json { get => JsonSerializer.Serialize(amenities ?? []); set => amenities = DeserializeStringList(value); }
@@ -245,6 +252,24 @@ namespace appointza.Models.Hospitality
         public string check_in { get; set; } = "";
         public string check_out { get; set; } = "";
         public int nights { get; set; }
+        /// <summary>All stays for this room. Header fields are the stay shown on the board for a given day.</summary>
+        public List<RoomStayRecord> stays { get; set; } = [];
+    }
+
+    public class RoomStayRecord
+    {
+        public string booking_id { get; set; } = "";
+        public string booking_guid { get; set; } = "";
+        public string check_in { get; set; } = "";
+        public string check_out { get; set; } = "";
+        public int nights { get; set; }
+        public RoomGuestData? guest { get; set; }
+        public RoomPaymentData? payment { get; set; }
+        public List<string> package_ids { get; set; } = [];
+        /// <summary>Logged-in Appointza user who created the stay, when known.</summary>
+        public long user_id { get; set; }
+        /// <summary>True after checkout. Stay is kept for history and no longer occupies the room.</summary>
+        public bool closed { get; set; }
     }
 
     public class RoomPaymentData
@@ -280,6 +305,8 @@ namespace appointza.Models.Hospitality
         public long organisation_location_id { get; set; }
         public long? room_id { get; set; }
         public string? date { get; set; }
+        /// <summary>yyyy-MM. Occupancy heatmap month; defaults to the month of <see cref="date"/>.</summary>
+        public string? occupancy_month { get; set; }
     }
 
     public class OrganisationRoomStatusUpdateReq
@@ -335,6 +362,10 @@ namespace appointza.Models.Hospitality
         public List<OrganisationRoomStatusSummaryItem> status_summary { get; set; } = [];
         public List<OrganisationRoomStatusFloorGroup> floors { get; set; } = [];
         public List<OrganisationRoom> rooms { get; set; } = [];
+        /// <summary>Busy room count per yyyy-MM-dd for the occupancy month. UI binds only.</summary>
+        public Dictionary<string, int> occupancy_by_day { get; set; } = new();
+        public int available_count { get; set; }
+        public int occupied_count { get; set; }
     }
 
     public class OrganisationRoomStatusSummaryItem

@@ -77,10 +77,36 @@ const ExploreServices = () => {
   const eventService = useMemo(() => new EventService(), []);
   const organisationServicesService = useMemo(() => new OrganisationServicesService(), []);
 
-  // Tab state — allow deep link from marketing home (`Link state={{ tab: 'event' }}`)
+  // Tab state — URL `?tab=` and marketing home `Link state={{ tab: 'event' }}`
+  const tabFromSearch = new URLSearchParams(location.search).get("tab");
   const stateTab = (location.state as { tab?: string } | null)?.tab;
-  const initialTab = stateTab === "event" ? "event" : "organisation";
+  const initialTab =
+    tabFromSearch === "event" || stateTab === "event" ? "event" : "organisation";
   const [activeTab, setActiveTab] = useState(initialTab);
+
+  useEffect(() => {
+    const next =
+      new URLSearchParams(location.search).get("tab") === "event" ||
+      (location.state as { tab?: string } | null)?.tab === "event"
+        ? "event"
+        : "organisation";
+    setActiveTab(next);
+  }, [location.search, location.state]);
+
+  const handleExploreTabChange = (value: string) => {
+    setActiveTab(value);
+    const params = new URLSearchParams(location.search);
+    if (value === "event") {
+      params.set("tab", "event");
+    } else {
+      params.delete("tab");
+    }
+    const qs = params.toString();
+    navigate(
+      { pathname: location.pathname, search: qs ? `?${qs}` : "" },
+      { replace: true },
+    );
+  };
 
   // State for organisations
   const [organisations, setOrganisations] = useState<OrganisationDetail[]>([]);
@@ -764,7 +790,7 @@ const ExploreServices = () => {
      
 
         {/* Tabs */}
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <Tabs value={activeTab} onValueChange={handleExploreTabChange} className="space-y-6">
           <TabsList className="inline-flex h-auto w-full min-w-0 justify-stretch gap-0 overflow-x-auto rounded-none bg-transparent p-0 text-left shadow-none [scrollbar-width:thin]">
             <TabsTrigger value="organisation" className={cn(exploreTabTriggerClass)}>
               <Building2 className="h-4 w-4 shrink-0" />

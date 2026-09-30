@@ -43,6 +43,32 @@ export type GuestHospitalityBookingCreateReq = {
   guest_service_ids: string[];
 };
 
+export type GuestHospitalityBookingMineItem = {
+  booking_id: string;
+  booking_guid: string;
+  organisation_id: number;
+  organisation_location_id: number;
+  organisation_name: string;
+  location_name: string;
+  city: string;
+  state: string;
+  room_id: number;
+  room_number: string;
+  room_name: string;
+  room_type: string;
+  guest_name: string;
+  phone: string;
+  email: string;
+  check_in: string;
+  check_out: string;
+  nights: number;
+  closed: boolean;
+  status: string;
+  total: number;
+  paid: number;
+  balance: number;
+};
+
 export type GuestHospitalityBookingResult = {
   booking_code: string;
   booking_id: string;
@@ -146,12 +172,23 @@ export class GuestHospitalityBookingService {
       const resp = await this.http.post<ActionRes<GuestHospitalityBookingResult>>(
         `${this.base}/Create`,
         postdata,
-        true,
       );
       if (resp.error) throw new Error(resp.error);
       return resp.item ?? null;
     } catch (err) {
       throw new Error(getApiErrorMessage(err, "Booking failed."));
+    }
+  }
+
+  async myBookings() {
+    try {
+      const resp = await this.http.get<ActionRes<GuestHospitalityBookingMineItem[]>>(
+        `${this.base}/MyBookings`,
+      );
+      if (resp.error) throw new Error(resp.error);
+      return resp.item ?? [];
+    } catch (err) {
+      throw new Error(getApiErrorMessage(err, "Could not load room bookings."));
     }
   }
 }

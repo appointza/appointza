@@ -35,6 +35,15 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
+        [HttpPost("HasAny")]
+        public async Task<ActionResult<ActionRes<bool>>> HasAny(ActionReq<OrganisationServicesHasAnyReq> req)
+        {
+            return Ok(new ActionRes<bool>
+            {
+                item = await organisationservicesService.HasAnyForOrganisation(req?.item?.organisationid ?? 0),
+            });
+        }
+
         [HttpPost("SelectPublicCatalogue")]
         public async Task<ActionResult<ActionRes<List<PublicServiceCatalogueItem>>>> SelectPublicCatalogue(ActionReq<OrganisationServicesSelectReq> req)
         {

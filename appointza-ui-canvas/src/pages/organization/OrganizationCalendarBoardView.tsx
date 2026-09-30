@@ -187,8 +187,9 @@ const OrganizationCalendarBoardView = ({
                       ) : null
                     ) : (
                       slots.map((slot, index) => {
-                        const isAvailable =
-                          slot.statuscode?.toLowerCase() === "available";
+                        const remaining = Math.max(0, slot.remaining ?? 0);
+                        const capacity = Math.max(0, slot.capacity ?? 0);
+                        const isAvailable = remaining > 0;
                         const booking = !isAvailable
                           ? findBookingForSlot(slot, bookings)
                           : undefined;
@@ -207,7 +208,7 @@ const OrganizationCalendarBoardView = ({
                               {formatAppointmentTime(slot.fromtime)}
                               <span className="font-normal text-stone-500">
                                 {" "}
-                                · {isAvailable ? "Open" : "Booked"}
+                                · {isAvailable ? `${remaining}/${capacity || remaining}` : "Booked"}
                               </span>
                             </div>
                             {!isAvailable && booking ? (

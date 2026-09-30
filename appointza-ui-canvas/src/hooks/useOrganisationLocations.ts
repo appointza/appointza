@@ -5,7 +5,10 @@ import { OrganisationLocationService } from '@/services/organisationlocation.ser
 export const organisationLocationsQueryKey = (
   organisationId: number,
   staffLocationId: number,
-) => ['organisation-locations', organisationId, staffLocationId] as const;
+) =>
+  organisationId > 0
+    ? (['organisation-locations', organisationId] as const)
+    : (['organisation-locations', organisationId, staffLocationId] as const);
 
 /** Shared fetcher — also used by onboarding so Location/Select hits one React Query cache. */
 export async function fetchOrganisationLocations(

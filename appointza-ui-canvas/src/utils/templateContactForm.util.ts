@@ -25,6 +25,24 @@ export function upgradeContactFormsInHtml(html: string, organisationId: number):
     },
   );
 
+  out = out.replace(
+    /(<section\b[^>]*\bid=["']contact["'][^>]*>)([\s\S]*?)(<\/section>)/gi,
+    (_full, open: string, inner: string, close: string) => {
+      const sectionBody = inner.replace(
+        /<form(\s[^>]*)(>)/gi,
+        (formMatch, attrs: string, end: string) => {
+          if (/\bdata-appointza-contact\b/i.test(attrs)) {
+            return formMatch;
+          }
+          let next = attrs.replace(/\s*onsubmit="[^"]*"/gi, "");
+          next += ` data-appointza-contact novalidate data-organisation-id="${orgId}"`;
+          return `<form${next}${end}`;
+        },
+      );
+      return `${open}${sectionBody}${close}`;
+    },
+  );
+
   if (out.includes('name="organisation_id"')) {
     out = out.replace(
       /(<input[^>]*name="organisation_id"[^>]*value=")[^"]*(")/gi,

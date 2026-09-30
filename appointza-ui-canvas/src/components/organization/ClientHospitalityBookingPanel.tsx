@@ -577,6 +577,12 @@ export function ClientHospitalityBookingPanel({
                   <span>{formatInr(quote.room_total ?? 0)}</span>
                 </div>
               ) : null}
+              {(quote.extra_bed_total ?? 0) > 0 ? (
+                <div className="flex justify-between">
+                  <span>Extra beds</span>
+                  <span>{formatInr(quote.extra_bed_total ?? 0)}</span>
+                </div>
+              ) : null}
               {(quote.packages_total ?? 0) > 0 ? (
                 <div className="flex justify-between">
                   <span>Package</span>

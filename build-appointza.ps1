@@ -1,10 +1,19 @@
 # Appointza production build (UI + server).
-# Config: appointza-ui-canvas/public/config.js
-# Output: appointzabuild/appointzaproduction/
+# Two URLs:
+#   -ApiUrl  Backend API (port/host the API runs on; frontend calls this)
+#   -UiUrl   Frontend site URL
 #
-# Usage: .\build-appointza.ps1
+# Usage:
+#   .\build-appointza.ps1
+#   .\build-appointza.ps1 -ApiUrl https://localhost:7117 -UiUrl http://localhost:8083
+#   .\build-appointza.ps1 -ApiUrl https://api.appointza.com -UiUrl https://appointza.com
 
 #Requires -Version 5.1
+
+param(
+    [string]$ApiUrl = "",
+    [string]$UiUrl = ""
+)
 
 $ErrorActionPreference = "Stop"
 
@@ -63,6 +72,20 @@ try {
 
     Write-Step "Appointza build"
 
+    if ($ApiUrl -and $UiUrl) {
+        Write-Host "Backend API URL: $ApiUrl" -ForegroundColor Yellow
+        Write-Host "Frontend UI URL: $UiUrl" -ForegroundColor Yellow
+        Push-Location $uiDir
+        try {
+            & npm run set:url -- $ApiUrl $UiUrl
+            if (-not $?) { throw "Failed to set API/UI URLs" }
+        } finally {
+            Pop-Location
+        }
+    } elseif ($ApiUrl -or $UiUrl) {
+        throw "Pass both -ApiUrl (backend) and -UiUrl (frontend)."
+    }
+
     Write-Step "Publish .NET server"
     Stop-RunningServer
     $serverProj = Resolve-ServerProjectPath
@@ -112,6 +135,7 @@ appointza.exe
     Write-Step "Build completed"
     Write-Host "Output: $prodOut" -ForegroundColor Green
     Write-Host "Run:    .\appointzabuild\appointzaproduction\run.cmd" -ForegroundColor Cyan
+    Write-Host "Set URLs: npm run set:url -- <apiUrl> <uiUrl>" -ForegroundColor DarkGray
     exit 0
 }
 catch {

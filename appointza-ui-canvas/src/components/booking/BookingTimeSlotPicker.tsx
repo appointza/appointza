@@ -62,12 +62,16 @@ function BookingTimeSlotPickerInner({
 
       <div className="grid grid-cols-3 gap-3">
         {timeSlots.map((slot, index) => {
+          const remaining = Math.max(0, slot.remaining ?? (slot.statuscode === "Booked" ? 0 : 1));
+          const capacity = Math.max(0, slot.capacity ?? remaining);
           const isSelected = selectedFromTime === slot.fromtime;
-          const isBooked = slot.statuscode === "Booked";
+          const isBooked = remaining <= 0 || slot.statuscode === "Booked";
+          const isOutsideWindow = slot.is_within_booking_window === false;
           const isBlocked = isTimeSlotBlocked(selectedDate, slot.fromtime);
           const isBlockedByLeave = isTimeSlotBlockedByLeave(selectedDate, slot.fromtime);
           const isPastSlot = isTimeSlotInPastForToday(selectedDate, slot.fromtime);
-          const disabled = isBooked || isBlocked || isBlockedByLeave || isPastSlot;
+          const disabled =
+            isBooked || isBlocked || isBlockedByLeave || isPastSlot || isOutsideWindow;
 
           return (
             <Button
@@ -90,6 +94,12 @@ function BookingTimeSlotPickerInner({
               <div className="text-center w-full">
                 <div>{formatTime(slot.fromtime)}</div>
                 {isBooked && <div className="text-xs text-red-600">Booked</div>}
+                {!isBooked && !isOutsideWindow && capacity > 0 && (
+                  <div className="text-xs opacity-80">
+                    {remaining}/{capacity}
+                  </div>
+                )}
+                {isOutsideWindow && <div className="text-xs">Outside window</div>}
                 {isBlocked && <div className="text-xs">Holiday</div>}
                 {isBlockedByLeave && <div className="text-xs">Leave</div>}
                 {isPastSlot && !isBooked && !isBlocked && !isBlockedByLeave && (

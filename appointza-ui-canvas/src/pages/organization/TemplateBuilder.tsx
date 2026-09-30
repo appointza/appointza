@@ -4,7 +4,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -18,11 +17,10 @@ import {
   Code2,
   Eye,
   Images,
-  Layers,
   Loader2,
+  MoreHorizontal,
+  Pencil,
   Plus,
-  Save,
-  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
@@ -30,6 +28,8 @@ import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import {
   organizationTemplatesRoute,
   onboardingStepRoute,
+  clearOnboardingCompleteCache,
+  ORG_WEBSITE_TEMPLATE_MAX_PER_ORG,
 } from "@/utils/organizationOnboarding.util";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
@@ -38,7 +38,8 @@ import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue
 import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
 import { EventService } from "@/services/event.service";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
-import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import { useOrganisationLocations, organisationLocationsQueryKey } from "@/hooks/useOrganisationLocations";
+import { referenceValuesQueryKey } from "@/hooks/useReferenceValues";
 import { SiteDetailsService } from "@/services/siteDetails.service";
 import { SiteDetailsItem } from "@/models/sitedetail.model";
 import {
@@ -63,6 +64,13 @@ import {
 } from "@/utils/templateBuilder/storage";
 import { renderSiteTemplateHtml } from "@/utils/templateRenderer.util";
 import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const TEMPLATE_REFERENCE_TYPE_ID = 5;
 const HOME_PAGE_ID = "home";
@@ -70,6 +78,7 @@ const HOME_PAGE_ID = "home";
 type BuilderMode = "blocks" | "html";
 type LeftTab = "blocks" | "media";
 type RightTab = "sections" | "settings";
+type SimplePane = "add" | "look" | "change";
 
 function notesHasBlocksProject(notes: string | null | undefined): boolean {
   if (!notes?.trim()) return false;
@@ -92,11 +101,12 @@ function TemplateBuilderInner() {
     hasWebsite,
     hasTiming,
     nextStep,
+    refetch: refetchOnboarding,
   } = useOnboardingStatus();
   const navigate = useNavigate();
   const templatesBackRoute = organizationTemplatesRoute(isComplete);
   const inOnboarding = !isComplete && hasCustomDomain && hasServices;
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { registerFileIds } = useOrgTemplateAssets();
 
   const refService = useMemo(() => new ReferenceValueService(), []);
@@ -123,11 +133,15 @@ function TemplateBuilderInner() {
   const [jsonDraft, setJsonDraft] = useState("{}");
   const [leftTab, setLeftTab] = useState<LeftTab>("blocks");
   const [rightTab, setRightTab] = useState<RightTab>("sections");
+  const [simplePane, setSimplePane] = useState<SimplePane>("look");
+  const [toolSide, setToolSide] = useState<"add" | "change">("add");
   /** Keep blocks JSON on save once the user works in Blocks mode or loads a blocks project. */
   const [persistBlocks, setPersistBlocks] = useState(true);
 
   const organisationId = user?.organisationid ?? 0;
   const userLocationId = user?.organisationlocationid ?? user?.locationid ?? 0;
+  const staffLocationId = user?.locationid || 0;
+  const locationsQueryKey = organisationLocationsQueryKey(organisationId, staffLocationId);
   const { data: locations = [] } = useOrganisationLocations({
     organisationId,
     staffLocationId: user?.locationid || 0,
@@ -265,7 +279,13 @@ function TemplateBuilderInner() {
       req.referencetypeid = TEMPLATE_REFERENCE_TYPE_ID;
       req.organisationid = organisationId;
       const resp = await refService.select(req);
-      setSavedTemplates((resp ?? []).filter((t) => t.identifier !== ORG_TEMPLATE_ASSETS_IDENTIFIER));
+      setSavedTemplates(
+        (resp ?? []).filter(
+          (t) =>
+            t.identifier !== ORG_TEMPLATE_ASSETS_IDENTIFIER &&
+            Number(t.organizationid) === Number(organisationId),
+        ),
+      );
     } catch {
       toast({ title: "Could not load templates", variant: "destructive" });
     } finally {
@@ -277,10 +297,8 @@ function TemplateBuilderInner() {
     void fetchSavedTemplates();
   }, [fetchSavedTemplates]);
 
-  const loadTemplate = useCallback(
-    (id: string) => {
-      const row = savedTemplates.find((t) => String(t.id) === id);
-      if (!row) return;
+  const applyTemplateRow = useCallback(
+    (row: ReferenceValue) => {
       setTemplateId(row.id);
       setTemplateName(row.displaytext || "");
       setIsActive(!!row.isactive);
@@ -303,7 +321,26 @@ function TemplateBuilderInner() {
         }
       }
     },
-    [savedTemplates, toast],
+    [toast],
+  );
+
+  const loadTemplate = useCallback(
+    (id: string) => {
+      const numericId = Number(id);
+      const row = savedTemplates.find((t) => t.id === numericId || String(t.id) === id);
+      if (!row) return;
+      applyTemplateRow(row);
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("templateId", String(row.id));
+          if (previewLocationId > 0) next.set("locationId", String(previewLocationId));
+          return next;
+        },
+        { replace: true },
+      );
+    },
+    [savedTemplates, applyTemplateRow, setSearchParams, previewLocationId],
   );
 
   useEffect(() => {
@@ -315,12 +352,62 @@ function TemplateBuilderInner() {
 
   useEffect(() => {
     const qp = Number(searchParams.get("templateId") || 0);
-    if (qp > 0 && savedTemplates.length && !templateId) {
-      loadTemplate(String(qp));
+    if (qp <= 0 || templateId === qp) return;
+
+    const row = savedTemplates.find((t) => t.id === qp);
+    if (row) {
+      applyTemplateRow(row);
+      return;
     }
-  }, [searchParams, savedTemplates, templateId, loadTemplate]);
+
+    if (isLoadingList || organisationId <= 0) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const req = new ReferenceValueSelectReq();
+        req.id = qp;
+        req.referencetypeid = TEMPLATE_REFERENCE_TYPE_ID;
+        req.organisationid = organisationId;
+        const resp = await refService.select(req);
+        const found = (resp ?? []).find((t) => t.id === qp);
+        if (!cancelled && found && found.identifier !== ORG_TEMPLATE_ASSETS_IDENTIFIER) {
+          applyTemplateRow(found);
+        }
+      } catch {
+        if (!cancelled) {
+          toast({
+            title: "Could not open template",
+            description: "This page could not be loaded for editing.",
+            variant: "destructive",
+          });
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    searchParams,
+    savedTemplates,
+    templateId,
+    isLoadingList,
+    organisationId,
+    refService,
+    applyTemplateRow,
+    toast,
+  ]);
 
   const handleNew = () => {
+    if (savedTemplates.length >= ORG_WEBSITE_TEMPLATE_MAX_PER_ORG) {
+      toast({
+        title: "Limit reached",
+        description: `You can save up to ${ORG_WEBSITE_TEMPLATE_MAX_PER_ORG} templates. Delete one first.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setTemplateId(0);
     setTemplateName("");
     setHtml("");
@@ -330,6 +417,14 @@ function TemplateBuilderInner() {
     setPersistBlocks(true);
     setSelectedBlockId(null);
     setRightTab("sections");
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("templateId");
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const switchMode = (mode: BuilderMode) => {
@@ -348,7 +443,12 @@ function TemplateBuilderInner() {
     setSelectedBlockId(block.id);
     setRightTab("settings");
     setPersistBlocks(true);
-    toast({ title: "Section added", description: "Edit it in Section settings." });
+    setSimplePane("look");
+    setToolSide("add");
+    toast({
+      title: "Added to your page",
+      description: "Check Look, then tap Save when you like it.",
+    });
   };
 
   const moveBlock = (index: number, direction: -1 | 1) => {
@@ -424,6 +524,14 @@ function TemplateBuilderInner() {
     }
 
     const wasUpdate = templateId > 0;
+    if (!wasUpdate && savedTemplates.length >= ORG_WEBSITE_TEMPLATE_MAX_PER_ORG) {
+      toast({
+        title: "Limit reached",
+        description: `You can save up to ${ORG_WEBSITE_TEMPLATE_MAX_PER_ORG} templates. Delete one first.`,
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSaving(true);
     try {
       const namedProject: TemplateBuilderProject = {
@@ -448,7 +556,18 @@ function TemplateBuilderInner() {
 
       const saved = await refService.save(payload);
       const savedTemplateId = saved?.id ?? templateId;
-      if (savedTemplateId) setTemplateId(savedTemplateId);
+      if (savedTemplateId) {
+        setTemplateId(savedTemplateId);
+        setSearchParams(
+          (prev) => {
+            const next = new URLSearchParams(prev);
+            next.set("templateId", String(savedTemplateId));
+            if (previewLocationId > 0) next.set("locationId", String(previewLocationId));
+            return next;
+          },
+          { replace: true },
+        );
+      }
 
       if (persistBlocks) {
         await registerFileIds(collectImageIdsFromProject(namedProject));
@@ -456,6 +575,7 @@ function TemplateBuilderInner() {
       }
       setHtml(effectiveHtml);
 
+      let assignSucceeded = false;
       let assignedLocationName: string | null = null;
       if (previewLocationId > 0 && savedTemplateId > 0) {
         try {
@@ -463,13 +583,14 @@ function TemplateBuilderInner() {
           assignReq.organisationlocationid = previewLocationId;
           assignReq.templateid = savedTemplateId;
           const assigned = await locationService.updateLocationTemplateId(assignReq);
-          if (assigned) {
+          assignSucceeded = !!assigned;
+          if (assignSucceeded) {
             assignedLocationName =
               locations.find((loc) => loc.id === previewLocationId)?.name ||
               locations.find((loc) => loc.id === previewLocationId)?.city ||
               null;
-            setLocations((current) =>
-              current.map((location) =>
+            queryClient.setQueryData<OrganisationLocation[]>(locationsQueryKey, (current) =>
+              (current ?? locations).map((location) =>
                 location.id === previewLocationId
                   ? { ...location, templateid: savedTemplateId }
                   : location,
@@ -496,13 +617,33 @@ function TemplateBuilderInner() {
         invalidatePublicSiteCacheForLocation(previewLocationId);
       }
 
-      if (!isComplete && assignedLocationName && previewLocationId > 0) {
-        await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
-        toast({
-          title: "Website ready!",
-          description: "Next step: set your business hours so customers can book.",
-        });
-        window.setTimeout(() => navigate(onboardingStepRoute("timing")), 700);
+      if (!isComplete && savedTemplateId > 0 && assignSucceeded && previewLocationId > 0) {
+        clearOnboardingCompleteCache(organisationId);
+        queryClient.setQueryData<ReferenceValue[]>(
+          referenceValuesQueryKey(organisationId, TEMPLATE_REFERENCE_TYPE_ID),
+          (current) => {
+            const list = current ?? savedTemplates;
+            if (list.some((t) => t.id === savedTemplateId)) return list;
+            return [
+              ...list,
+              {
+                ...(saved as ReferenceValue),
+                id: savedTemplateId,
+                referencetypeid: TEMPLATE_REFERENCE_TYPE_ID,
+                organizationid: organisationId,
+              },
+            ];
+          },
+        );
+        const refreshed = await refetchOnboarding();
+        const websiteReady = refreshed.data?.hasWebsite ?? false;
+        if (websiteReady) {
+          toast({
+            title: "Website ready!",
+            description: "Next step: set your business hours so customers can book.",
+          });
+          window.setTimeout(() => navigate(onboardingStepRoute("timing")), 700);
+        }
       }
     } catch (e) {
       toast({
@@ -537,11 +678,8 @@ function TemplateBuilderInner() {
   const previewPanel = (
     <section className="flex h-full min-h-0 flex-1 flex-col overflow-hidden border border-stone-200 bg-white lg:rounded-xl">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-stone-100 bg-stone-50/80 px-3 py-2">
-        <p className="text-xs font-medium text-stone-600">
-          Preview
-          {previewSiteData?.organisationdetail?.name
-            ? ` — ${previewSiteData.organisationdetail.name}`
-            : ""}
+        <p className="text-sm font-semibold text-appointza-navy">
+          How your page looks
         </p>
         <div className="flex flex-wrap items-center gap-1.5">
           {locations.length > 1 ? (
@@ -550,7 +688,7 @@ function TemplateBuilderInner() {
               onValueChange={(value) => setPreviewLocationId(Number(value))}
             >
               <SelectTrigger className="h-7 w-[min(100%,180px)] text-xs">
-                <SelectValue placeholder="Location" />
+                <SelectValue placeholder="Which shop?" />
               </SelectTrigger>
               <SelectContent>
                 {locations.map((loc) => (
@@ -565,7 +703,7 @@ function TemplateBuilderInner() {
             type="button"
             variant="outline"
             size="sm"
-            className="h-7 text-xs"
+            className="hidden h-8 text-xs md:inline-flex"
             onClick={() => setShowPreview((v) => !v)}
           >
             <Eye className="mr-1 h-3.5 w-3.5" />
@@ -579,7 +717,7 @@ function TemplateBuilderInner() {
             onClick={openPreviewTab}
             disabled={!sourceHtml.trim()}
           >
-            Open tab
+            Full screen
           </Button>
         </div>
       </div>
@@ -601,8 +739,8 @@ function TemplateBuilderInner() {
         ) : (
           <div className="flex min-h-0 flex-1 items-center justify-center px-4 text-center text-sm text-stone-500">
             {builderMode === "blocks"
-              ? "Add sections from the left to preview your page."
-              : "Paste HTML to see a live preview with your business data."}
+              ? "Tap Add, then tap a piece to put it on your page."
+              : "Paste your code to see the page."}
           </div>
         )
       ) : (
@@ -612,6 +750,13 @@ function TemplateBuilderInner() {
       )}
     </section>
   );
+
+  const openChangePane = (id: string) => {
+    setSelectedBlockId(id);
+    setRightTab("settings");
+    setSimplePane("change");
+    setToolSide("change");
+  };
 
   const handleBackFromBuilder = () => {
     if (!isComplete && nextStep === "website") {
@@ -632,121 +777,143 @@ function TemplateBuilderInner() {
             hasServices={hasServices}
             hasWebsite={hasWebsite}
             hasTiming={hasTiming}
+            locationId={previewLocationId > 0 ? previewLocationId : undefined}
           />
         </div>
       )}
-      <header className="z-30 shrink-0 border-b border-stone-200 bg-white px-3 py-2 sm:px-4">
-        <div className="flex flex-wrap items-center gap-2">
+      <header className="z-30 shrink-0 border-b border-stone-200 bg-white px-3 py-3 sm:px-4">
+        <div className="flex items-center gap-2">
           <Button
             variant="ghost"
             size="icon"
-            className="h-8 w-8 shrink-0"
+            className="h-11 w-11 shrink-0 md:h-9 md:w-9"
             onClick={handleBackFromBuilder}
-            aria-label="Back to templates"
+            aria-label="Go back"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-5 w-5" />
           </Button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-sm font-bold text-appointza-navy sm:text-base">Page builder</h1>
-            <p className="hidden text-xs text-stone-500 sm:block">
-              Build with blocks or paste AI HTML — both save as your booking page.
+            <h1 className="text-base font-bold leading-tight text-appointza-navy md:text-lg">
+              {templateId > 0 ? "Edit your website" : "Make your website"}
+            </h1>
+            <p className="text-xs text-stone-500 md:text-sm">
+              1. Add pieces &nbsp; 2. Look &nbsp; 3. Save
             </p>
           </div>
-
-          <div className="flex shrink-0 items-center rounded-lg border border-stone-200 bg-stone-100 p-0.5">
-            {(
-              [
-                { id: "blocks" as const, label: "Blocks", icon: Layers },
-                { id: "html" as const, label: "HTML", icon: Code2 },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => switchMode(tab.id)}
-                className={cn(
-                  "inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-xs font-semibold transition",
-                  builderMode === tab.id
-                    ? "bg-white text-appointza-navy shadow-sm"
-                    : "text-stone-500 hover:text-stone-800",
-                )}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon" className="h-11 w-11 shrink-0 md:h-9 md:w-9" aria-label="More">
+                <MoreHorizontal className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem onClick={handleNew}>Start a blank page</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => switchMode(builderMode === "html" ? "blocks" : "html")}>
+                {builderMode === "html" ? "Simple editor (pieces)" : "Paste website code"}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setIsActive((value) => !value);
+                }}
               >
-                <tab.icon className="h-3.5 w-3.5" />
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <TemplateVariablesCopyDialog
-            triggerClassName="h-8"
-            locationId={selectedLocation?.id}
-            locationName={selectedLocation?.name}
-          />
-          <Button variant="outline" size="sm" className="h-8" onClick={handleNew}>
-            <Sparkles className="mr-1.5 h-3.5 w-3.5" />
-            New
-          </Button>
+                {isActive ? "Customers can see this page" : "Hide this page from customers"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button
             onClick={() => void handleSave()}
             disabled={isSaving}
-            size="sm"
-            className="h-8 bg-orange-600 hover:bg-orange-700"
+            className="h-11 min-w-[5.5rem] bg-blue-600 px-4 text-sm font-semibold text-white hover:bg-blue-700 md:h-9"
           >
-            {isSaving ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <>
-                <Save className="mr-1.5 h-3.5 w-3.5" />
-                Save
-              </>
-            )}
+            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save"}
           </Button>
         </div>
 
-        <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
           <div>
-            <Label htmlFor="page-name" className="text-xs text-stone-500">
-              Page name
+            <Label htmlFor="page-name" className="text-sm font-medium text-stone-700">
+              Name of this page
             </Label>
             <Input
               id="page-name"
-              className="mt-0.5 h-8"
+              className="mt-1 h-11 md:h-10"
               value={templateName}
               onChange={(e) => setTemplateName(e.target.value)}
-              placeholder="Main booking page"
+              placeholder="Example: Main page"
             />
           </div>
-          <div>
-            <Label className="text-xs text-stone-500">Open saved page</Label>
-            <Select value={templateId ? String(templateId) : undefined} onValueChange={loadTemplate}>
-              <SelectTrigger className="mt-0.5 h-8">
-                <SelectValue placeholder={isLoadingList ? "Loading…" : "Choose page"} />
-              </SelectTrigger>
-              <SelectContent>
-                {savedTemplates.map((t) => (
-                  <SelectItem key={t.id} value={String(t.id)}>
-                    {t.displaytext || `#${t.id}`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-stone-100 bg-stone-50/80 px-3 py-1.5 lg:h-8">
-            <Label htmlFor="active" className="text-sm whitespace-nowrap">
-              Published
-            </Label>
-            <Switch id="active" checked={isActive} onCheckedChange={setIsActive} />
-          </div>
+          {savedTemplates.length > 0 ? (
+            <div>
+              <Label className="text-sm font-medium text-stone-700">Open another page</Label>
+              <Select value={templateId ? String(templateId) : undefined} onValueChange={loadTemplate}>
+                <SelectTrigger className="mt-1 h-11 md:h-10">
+                  <SelectValue placeholder={isLoadingList ? "Loading…" : "Pick a saved page"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {savedTemplates.map((t) => (
+                    <SelectItem key={t.id} value={String(t.id)}>
+                      {t.displaytext || `#${t.id}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
         </div>
         {selectedLocation ? (
-          <p className="mt-2 text-xs text-stone-500">
-            Saving assigns this page to{" "}
-            <span className="font-medium text-appointza-navy">
-              {selectedLocation.name || selectedLocation.city || `location #${selectedLocation.id}`}
+          <p className="mt-2 text-sm text-stone-600">
+            Save puts this page on{" "}
+            <span className="font-semibold text-appointza-navy">
+              {selectedLocation.name || selectedLocation.city || "your shop"}
             </span>
             .
           </p>
         ) : null}
+
+        <div className="mt-3 grid grid-cols-3 gap-2">
+          <TemplateVariablesCopyDialog
+            triggerClassName="h-11 w-full justify-center md:h-10"
+            triggerLabel="AI prompt"
+            locationId={selectedLocation?.id}
+            locationName={selectedLocation?.name}
+          />
+          <Button
+            type="button"
+            variant={builderMode === "html" ? "default" : "outline"}
+            className={cn(
+              "h-11 min-w-0 md:h-10",
+              builderMode === "html" && "bg-blue-600 text-white hover:bg-blue-700",
+            )}
+            onClick={() => switchMode("html")}
+          >
+            <Code2 className="mr-1.5 h-4 w-4 shrink-0" />
+            HTML
+          </Button>
+          <Button
+            type="button"
+            variant={
+              builderMode === "html" ?
+                showPreview ? "default" : "outline"
+              : simplePane === "look" ?
+                "default"
+              : "outline"
+            }
+            className={cn(
+              "h-11 min-w-0 md:h-10",
+              (builderMode === "html" ? showPreview : simplePane === "look") &&
+                "bg-blue-600 text-white hover:bg-blue-700",
+            )}
+            onClick={() => {
+              setShowPreview(true);
+              setSimplePane("look");
+            }}
+          >
+            <Eye className="mr-1.5 h-4 w-4 shrink-0" />
+            Preview
+          </Button>
+        </div>
       </header>
 
       {builderMode === "html" ? (
@@ -759,13 +926,11 @@ function TemplateBuilderInner() {
           )}
         >
           <section className="flex min-h-0 flex-col overflow-hidden border-b border-stone-200 lg:border-b-0 lg:border-r">
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-stone-100 bg-stone-50/80 px-3 py-2">
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-stone-700">HTML editor</p>
-                <p className="text-[11px] text-stone-500">
-                  Use <strong>Copy AI prompts</strong> → HTML or Blocks, then paste here.
-                </p>
-              </div>
+            <div className="flex shrink-0 items-center justify-between gap-2 border-b border-stone-100 bg-stone-50/80 px-3 py-2">
+              <p className="text-sm font-semibold text-appointza-navy">Paste code here</p>
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={() => switchMode("blocks")}>
+                Back to pieces
+              </Button>
             </div>
             <Textarea
               className="min-h-0 flex-1 resize-none rounded-none border-0 font-mono text-xs leading-relaxed focus-visible:ring-0 sm:text-sm"
@@ -780,14 +945,43 @@ function TemplateBuilderInner() {
           ) : null}
         </div>
       ) : (
-        <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(280px,42vh)_minmax(0,1fr)_minmax(220px,32vh)] lg:grid-rows-1 lg:grid-cols-[220px_minmax(0,1fr)_260px] xl:grid-cols-[240px_minmax(0,1fr)_280px]">
-          {/* Left: palette */}
-          <aside className="flex min-h-0 flex-col overflow-hidden border-b border-stone-200 bg-white lg:border-b-0 lg:border-r">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <div className="hidden shrink-0 border-b border-stone-200 bg-white p-2 md:flex lg:hidden">
+            {(
+              [
+                { id: "add" as const, label: "Add pieces", icon: Plus },
+                { id: "change" as const, label: "Change pieces", icon: Pencil },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setToolSide(tab.id)}
+                className={cn(
+                  "flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold",
+                  toolSide === tab.id ? "bg-blue-600 text-white" : "text-stone-600 hover:bg-stone-50",
+                )}
+              >
+                <tab.icon className="h-4 w-4" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+        <div className="grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[minmax(16rem,38%)_minmax(0,1fr)] lg:grid-cols-[13.75rem_minmax(0,1fr)_16.5rem] xl:grid-cols-[15rem_minmax(0,1fr)_18rem]">
+          <aside
+            className={cn(
+              "min-h-0 flex-col overflow-hidden border-stone-200 bg-white md:border-r",
+              simplePane === "add" ? "flex" : "hidden",
+              toolSide === "add" ? "md:flex" : "md:hidden",
+              "lg:flex",
+            )}
+          >
             <div className="flex shrink-0 gap-1 border-b border-stone-100 p-2">
               {(
                 [
-                  { id: "blocks" as const, label: "Add sections", icon: Plus },
-                  { id: "media" as const, label: "Media", icon: Images },
+                  { id: "blocks" as const, label: "Pieces", icon: Plus },
+                  { id: "media" as const, label: "Photos", icon: Images },
                 ] as const
               ).map((tab) => (
                 <button
@@ -812,10 +1006,12 @@ function TemplateBuilderInner() {
                   organisationId={organisationId || selectedLocation?.organisationid || 0}
                   location={selectedLocation}
                   onSaved={(savedLocation) => {
-                    setLocations((current) =>
-                      current.map((location) =>
-                        location.id === savedLocation.id ? savedLocation : location,
-                      ),
+                    queryClient.setQueryData<OrganisationLocation[]>(
+                      locationsQueryKey,
+                      (current) =>
+                        (current ?? locations).map((location) =>
+                          location.id === savedLocation.id ? savedLocation : location,
+                        ),
                     );
                     setPreviewSiteData((current) =>
                       current
@@ -833,12 +1029,16 @@ function TemplateBuilderInner() {
                 />
               ) : (
                 <div className="space-y-5">
-                  <div className="rounded-xl border border-emerald-100 bg-emerald-50/70 px-3 py-2.5 text-[11px] leading-relaxed text-emerald-900">
-                    <p className="font-semibold">Build with live data</p>
-                    <p className="mt-0.5 text-emerald-800/90">
-                      Green “Live data” blocks pull from your Services, Events, Hours, Gallery, and Hospitality pages.
-                      Use <span className="font-medium">Copy AI prompts</span> for a full variable list.
+                  <div className="space-y-3">
+                    <p className="text-sm leading-relaxed text-stone-600">
+                      Tap a piece to add it. Green pieces fill in your real services by themselves.
                     </p>
+                    <TemplateVariablesCopyDialog
+                      triggerClassName="h-11 w-full justify-center"
+                      triggerLabel="Ask AI for help"
+                      locationId={selectedLocation?.id}
+                      locationName={selectedLocation?.name}
+                    />
                   </div>
                   {TEMPLATE_BUILDER_CATEGORIES.map((cat) => (
                     <div key={cat.name}>
@@ -886,7 +1086,7 @@ function TemplateBuilderInner() {
                                   </span>
                                   {bt.mode === "appointza" ? (
                                     <span className="mt-1 inline-flex rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                                      Live data
+                                      Fills in for you
                                     </span>
                                   ) : null}
                                 </span>
@@ -902,16 +1102,29 @@ function TemplateBuilderInner() {
             </div>
           </aside>
 
-          {/* Center: preview — takes remaining height */}
-          <div className="flex min-h-0 flex-col overflow-hidden p-0 lg:p-3">{previewPanel}</div>
+          <div
+            className={cn(
+              "min-h-0 flex-col overflow-hidden p-0 md:p-3",
+              simplePane === "look" ? "flex" : "hidden",
+              "md:flex",
+            )}
+          >
+            {previewPanel}
+          </div>
 
-          {/* Right: structure / settings */}
-          <aside className="flex min-h-0 flex-col overflow-hidden border-t border-stone-200 bg-white lg:border-t-0 lg:border-l">
+          <aside
+            className={cn(
+              "min-h-0 flex-col overflow-hidden border-stone-200 bg-white md:border-l",
+              simplePane === "change" ? "flex" : "hidden",
+              toolSide === "change" ? "md:flex" : "md:hidden",
+              "lg:flex",
+            )}
+          >
             <div className="flex shrink-0 gap-1 border-b border-stone-100 p-2">
               {(
                 [
-                  { id: "sections" as const, label: "Page order" },
-                  { id: "settings" as const, label: "Section settings" },
+                  { id: "sections" as const, label: "List" },
+                  { id: "settings" as const, label: "Edit one" },
                 ] as const
               ).map((tab) => (
                 <button
@@ -934,10 +1147,7 @@ function TemplateBuilderInner() {
                 <TemplateBuilderStructurePanel
                   blocks={blocks}
                   selectedBlockId={selectedBlockId}
-                  onSelectBlock={(id) => {
-                    setSelectedBlockId(id);
-                    setRightTab("settings");
-                  }}
+                  onSelectBlock={openChangePane}
                   onToggleVisible={(id, visible) =>
                     setBlocks((prev) => prev.map((b) => (b.id === id ? { ...b, visible } : b)))
                   }
@@ -946,10 +1156,7 @@ function TemplateBuilderInner() {
                     setBlocks((prev) => prev.filter((b) => b.id !== id));
                     if (selectedBlockId === id) setSelectedBlockId(null);
                   }}
-                  onEditBlock={(id) => {
-                    setSelectedBlockId(id);
-                    setRightTab("settings");
-                  }}
+                  onEditBlock={openChangePane}
                 />
               ) : selectedBlock ? (
                 <TemplateBuilderBlockEditor
@@ -962,14 +1169,41 @@ function TemplateBuilderInner() {
                 />
               ) : (
                 <div className="rounded-2xl border border-dashed border-stone-200 bg-stone-50/80 px-4 py-10 text-center">
-                  <p className="text-sm font-medium text-stone-700">No section selected</p>
-                  <p className="mt-1 text-xs text-stone-500">
-                    Add a section on the left, or pick one from Page order.
+                  <p className="text-sm font-medium text-stone-700">Tap a piece in List</p>
+                  <p className="mt-1 text-sm text-stone-500">
+                    Then you can change its words and pictures.
                   </p>
                 </div>
               )}
             </div>
           </aside>
+        </div>
+          <nav className="grid shrink-0 grid-cols-3 border-t border-stone-200 bg-white md:hidden" aria-label="Page steps">
+            {(
+              [
+                { id: "add" as const, label: "Add", icon: Plus },
+                { id: "look" as const, label: "Look", icon: Eye },
+                { id: "change" as const, label: "Change", icon: Pencil },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setSimplePane(tab.id);
+                  if (tab.id === "add") setToolSide("add");
+                  if (tab.id === "change") setToolSide("change");
+                }}
+                className={cn(
+                  "flex min-h-12 flex-col items-center justify-center gap-0.5 text-xs font-semibold",
+                  simplePane === tab.id ? "bg-blue-50 text-blue-700" : "text-stone-500",
+                )}
+              >
+                <tab.icon className="h-5 w-5" />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
         </div>
       )}
     </div>

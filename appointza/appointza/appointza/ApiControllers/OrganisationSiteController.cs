@@ -171,7 +171,25 @@ namespace appointza.Controllers
                     frontendBaseUrl = $"{originUri.Scheme}://{originUri.Authority}";
                 }
 
-                var built = await BuildPublicHtmlForLocationAsync(locationId, token, apiBaseUrl, frontendBaseUrl);
+                var loaded = await LoadPublicHtmlContextAsync(locationId, token);
+                if (loaded.EarlyResponse != null)
+                {
+                    ApplyPublicHtmlCacheHeaders(loaded.EarlyResponse.versionKey);
+                    if (IsPublicHtmlNotModified(loaded.EarlyResponse.versionKey))
+                    {
+                        return StatusCode(304);
+                    }
+
+                    return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = loaded.EarlyResponse });
+                }
+
+                ApplyPublicHtmlCacheHeaders(loaded.VersionKey);
+                if (IsPublicHtmlNotModified(loaded.VersionKey))
+                {
+                    return StatusCode(304);
+                }
+
+                var built = RenderPublicHtmlFromContext(loaded, apiBaseUrl, frontendBaseUrl);
                 return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = built });
             }
             catch (Exception ex)
@@ -207,7 +225,25 @@ namespace appointza.Controllers
                     frontendBaseUrl = $"{originUri.Scheme}://{originUri.Authority}";
                 }
 
-                var built = await BuildPublicHtmlForLocationAsync(locationId, "", apiBaseUrl, frontendBaseUrl);
+                var loaded = await LoadPublicHtmlContextAsync(locationId, "");
+                if (loaded.EarlyResponse != null)
+                {
+                    ApplyPublicHtmlCacheHeaders(loaded.EarlyResponse.versionKey);
+                    if (IsPublicHtmlNotModified(loaded.EarlyResponse.versionKey))
+                    {
+                        return StatusCode(304);
+                    }
+
+                    return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = loaded.EarlyResponse });
+                }
+
+                ApplyPublicHtmlCacheHeaders(loaded.VersionKey);
+                if (IsPublicHtmlNotModified(loaded.VersionKey))
+                {
+                    return StatusCode(304);
+                }
+
+                var built = RenderPublicHtmlFromContext(loaded, apiBaseUrl, frontendBaseUrl);
                 return Ok(new ActionRes<OrganisationTemplateResolveRes> { item = built });
             }
             catch (Exception ex)
@@ -220,21 +256,35 @@ namespace appointza.Controllers
             }
         }
 
-        private async Task<OrganisationTemplateResolveRes> BuildPublicHtmlForLocationAsync(
-            long locationId,
-            string orgLocTempIdHint,
-            string apiBaseUrl,
-            string frontendBaseUrl)
+        private sealed class PublicHtmlLoadContext
+        {
+            public OrganisationTemplateResolveRes? EarlyResponse { get; init; }
+            public Sitedetails? SiteDetail { get; init; }
+            public IList<Event> Events { get; init; } = new List<Event>();
+            public IList<string> Facilities { get; init; } = new List<string>();
+            public OrganisationDetail? OrganisationDetail { get; init; }
+            public string TemplateHtml { get; init; } = "";
+            public string VersionKey { get; init; } = "";
+            public string OrgLocTempIdHint { get; init; } = "";
+            public long OrgId { get; init; }
+            public long LocId { get; init; }
+            public long TemplateId { get; init; }
+        }
+
+        private async Task<PublicHtmlLoadContext> LoadPublicHtmlContextAsync(long locationId, string orgLocTempIdHint)
         {
             var siteDetails = await organisationsiteService.GetSiteDetails(locationId);
             if (siteDetails == null || siteDetails.Count == 0)
             {
-                return new OrganisationTemplateResolveRes
+                return new PublicHtmlLoadContext
                 {
-                    organisationlocationid = locationId,
-                    orgloctempid = orgLocTempIdHint ?? "",
-                    html = BuildErrorHtml("Site Details Not Found", "No site details were returned for this location."),
-                    versionKey = $"missing:{locationId}",
+                    EarlyResponse = new OrganisationTemplateResolveRes
+                    {
+                        organisationlocationid = locationId,
+                        orgloctempid = orgLocTempIdHint ?? "",
+                        html = BuildErrorHtml("Site Details Not Found", "No site details were returned for this location."),
+                        versionKey = $"missing:{locationId}",
+                    },
                 };
             }
 
@@ -242,7 +292,6 @@ namespace appointza.Controllers
             var orgId = siteDetail.organisationdetail?.id ?? 0;
             var locId = siteDetail.locationdetail?.id > 0 ? siteDetail.locationdetail.id : locationId;
 
-            // Keep services scoped to this location (matches UI filter).
             if (siteDetail.orgnaisatinservice != null && locId > 0)
             {
                 siteDetail.orgnaisatinservice = siteDetail.orgnaisatinservice
@@ -269,26 +318,31 @@ namespace appointza.Controllers
 
             if (string.IsNullOrWhiteSpace(templateHtml))
             {
-                return new OrganisationTemplateResolveRes
+                return new PublicHtmlLoadContext
                 {
-                    organisationid = orgId,
-                    organisationlocationid = locId,
-                    orgloctempid = orgLocTempIdHint ?? "",
-                    templateid = siteDetail.locationdetail?.templateid ?? 0,
-                    html = BuildErrorHtml("No Template Assigned", "No template has been assigned to this location."),
-                    versionKey = $"empty-template:{locId}",
+                    EarlyResponse = new OrganisationTemplateResolveRes
+                    {
+                        organisationid = orgId,
+                        organisationlocationid = locId,
+                        orgloctempid = orgLocTempIdHint ?? "",
+                        templateid = siteDetail.locationdetail?.templateid ?? 0,
+                        html = BuildErrorHtml("No Template Assigned", "No template has been assigned to this location."),
+                        versionKey = $"empty-template:{locId}",
+                    },
                 };
             }
 
-            var events = await eventService.Select(new EventSelectReq
-            {
-                organisation_id = (int)orgId,
-                organisation_location_id = (int)locId,
-                is_public = true,
-                include_past = false,
-            }) ?? new List<Event>();
+            var events = PublicTemplateContentRequirements.RequiresEvents(templateHtml)
+                ? await eventService.Select(new EventSelectReq
+                {
+                    organisation_id = (int)orgId,
+                    organisation_location_id = (int)locId,
+                    is_public = true,
+                    include_past = false,
+                }) ?? new List<Event>()
+                : new List<Event>();
 
-            var facilities = await ResolveFacilities(siteDetail);
+            var facilities = siteDetail.facilities ?? new List<string>();
             var organisationDetail = new OrganisationDetail
             {
                 organisationid = orgId,
@@ -308,28 +362,86 @@ namespace appointza.Controllers
                 organisationlocationlongitude = siteDetail.locationdetail?.longitude ?? 0,
             };
 
+            return new PublicHtmlLoadContext
+            {
+                SiteDetail = siteDetail,
+                Events = events,
+                Facilities = facilities,
+                OrganisationDetail = organisationDetail,
+                TemplateHtml = templateHtml,
+                VersionKey = BuildPublicHtmlVersionKey(siteDetail, events),
+                OrgLocTempIdHint = orgLocTempIdHint ?? "",
+                OrgId = orgId,
+                LocId = locId,
+                TemplateId = siteDetail.locationdetail?.templateid ?? 0,
+            };
+        }
+
+        private static OrganisationTemplateResolveRes RenderPublicHtmlFromContext(
+            PublicHtmlLoadContext context,
+            string apiBaseUrl,
+            string frontendBaseUrl)
+        {
             var boundHtml = BindTemplate(
-                templateHtml,
-                siteDetail,
-                organisationDetail,
+                context.TemplateHtml,
+                context.SiteDetail!,
+                context.OrganisationDetail!,
                 apiBaseUrl,
                 frontendBaseUrl,
-                events,
-                facilities);
+                context.Events,
+                context.Facilities);
 
-            boundHtml = FinalizePublicHtml(boundHtml, apiBaseUrl);
-
-            var versionKey = BuildPublicHtmlVersionKey(siteDetail, events);
+            boundHtml = FinalizePublicHtml(boundHtml, apiBaseUrl, frontendBaseUrl, context.OrgId);
 
             return new OrganisationTemplateResolveRes
             {
-                organisationid = orgId,
-                organisationlocationid = locId,
-                orgloctempid = orgLocTempIdHint ?? "",
-                templateid = siteDetail.locationdetail?.templateid ?? 0,
+                organisationid = context.OrgId,
+                organisationlocationid = context.LocId,
+                orgloctempid = context.OrgLocTempIdHint,
+                templateid = context.TemplateId,
                 html = boundHtml,
-                versionKey = versionKey,
+                versionKey = context.VersionKey,
             };
+        }
+
+        private async Task<OrganisationTemplateResolveRes> BuildPublicHtmlForLocationAsync(
+            long locationId,
+            string orgLocTempIdHint,
+            string apiBaseUrl,
+            string frontendBaseUrl)
+        {
+            var loaded = await LoadPublicHtmlContextAsync(locationId, orgLocTempIdHint);
+            if (loaded.EarlyResponse != null)
+            {
+                return loaded.EarlyResponse;
+            }
+
+            return RenderPublicHtmlFromContext(loaded, apiBaseUrl, frontendBaseUrl);
+        }
+
+        private static string FormatPublicHtmlEtag(string versionKey)
+        {
+            var safe = (versionKey ?? "").Replace("\"", "");
+            return $"\"{safe}\"";
+        }
+
+        private void ApplyPublicHtmlCacheHeaders(string versionKey)
+        {
+            Response.Headers.ETag = FormatPublicHtmlEtag(versionKey);
+            Response.Headers.CacheControl = "private, max-age=0, must-revalidate";
+        }
+
+        private bool IsPublicHtmlNotModified(string versionKey)
+        {
+            var etag = FormatPublicHtmlEtag(versionKey);
+            var ifNoneMatch = Request.Headers.IfNoneMatch.ToString();
+            if (string.IsNullOrWhiteSpace(ifNoneMatch))
+            {
+                return false;
+            }
+
+            return ifNoneMatch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .Any(value => string.Equals(value, etag, StringComparison.Ordinal));
         }
 
         private static string BuildPublicHtmlVersionKey(Sitedetails site, IList<Event> events)
@@ -353,7 +465,7 @@ namespace appointza.Controllers
 </head><body><div class=""error""><h1>{title}</h1><p>{message}</p></div></body></html>";
         }
 
-        private static string FinalizePublicHtml(string html, string apiBaseUrl)
+        private static string FinalizePublicHtml(string html, string apiBaseUrl, string frontendBaseUrl, long organisationId = 0)
         {
             var output = html ?? "";
 
@@ -361,6 +473,24 @@ namespace appointza.Controllers
             output = Regex.Replace(output, @"\{\{#[^}]+\}\}", "");
             output = Regex.Replace(output, @"\{\{\/[^}]+\}\}", "");
             output = Regex.Replace(output, @"\{\{[^}]+\}\}", "");
+
+            if (!string.IsNullOrWhiteSpace(frontendBaseUrl)
+                && !string.Equals(apiBaseUrl, frontendBaseUrl, StringComparison.OrdinalIgnoreCase))
+            {
+                output = output.Replace(
+                    $"{apiBaseUrl}/book-appointment/",
+                    $"{frontendBaseUrl}/book-appointment/",
+                    StringComparison.OrdinalIgnoreCase);
+                output = output.Replace(
+                    $"{apiBaseUrl}/user/events/",
+                    $"{frontendBaseUrl}/user/events/",
+                    StringComparison.OrdinalIgnoreCase);
+                output = Regex.Replace(
+                    output,
+                    Regex.Escape(apiBaseUrl) + @"/book(\?|""|'|>)",
+                    $"{frontendBaseUrl}/book$1",
+                    RegexOptions.IgnoreCase);
+            }
 
             // Normalize Files/Get URLs to absolute API host.
             output = Regex.Replace(
@@ -372,6 +502,22 @@ namespace appointza.Controllers
                 output,
                 @"(['""])\/api\/Files\/Get\?id=(\d+)\1",
                 $"$1{apiBaseUrl}/api/Files/Get?id=$2$1",
+                RegexOptions.IgnoreCase);
+
+            output = Regex.Replace(output, @"<img\b[^>]*\bsrc\s*=\s*""\s*""[^>]*>", "", RegexOptions.IgnoreCase);
+            output = Regex.Replace(output, @"<img\b[^>]*\bsrc\s*=\s*'\s*'[^>]*>", "", RegexOptions.IgnoreCase);
+
+            var imgIndex = 0;
+            output = Regex.Replace(
+                output,
+                @"<img\b",
+                match =>
+                {
+                    imgIndex++;
+                    return imgIndex == 1
+                        ? "<img fetchpriority=\"high\" loading=\"eager\""
+                        : "<img loading=\"lazy\"";
+                },
                 RegexOptions.IgnoreCase);
 
             var bookingScript = @"
@@ -426,26 +572,19 @@ namespace appointza.Controllers
     var bookingUrl = href.indexOf('http://') === 0 || href.indexOf('https://') === 0
       ? href
       : mainOrigin + path;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'appointza:booking-nav', url: bookingUrl }, '*');
+      return;
+    }
     var token = null;
     try { token = localStorage.getItem('auth_token'); } catch (_) {}
     // Hospitality /book is guest checkout — do not force login.
     if (!token && !guestStay) {
       try { sessionStorage.setItem('appointza_auth_return', bookingUrl); } catch (_) {}
-      var loginUrl = mainOrigin + '/login?from=' + encodeURIComponent(bookingUrl);
-      if (window.parent && window.parent !== window) {
-        try { window.top.location.href = loginUrl; } catch (_) {
-          window.parent.postMessage({ type: 'appointza:login-required', returnUrl: bookingUrl }, '*');
-        }
-      } else {
-        window.location.href = loginUrl;
-      }
+      window.location.href = mainOrigin + '/login?from=' + encodeURIComponent(bookingUrl);
       return;
     }
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ type: 'appointza:booking-nav', url: bookingUrl }, '*');
-    } else {
-      window.location.href = bookingUrl;
-    }
+    window.location.href = bookingUrl;
   });
 })();
 </script>";
@@ -462,6 +601,8 @@ namespace appointza.Controllers
             {
                 output += bookingScript;
             }
+
+            output = PublicTemplateContactForm.Inject(output, organisationId, apiBaseUrl);
 
             return output;
         }
@@ -563,14 +704,16 @@ namespace appointza.Controllers
 
             var apiBaseUrl = $"{Request.Scheme}://{Request.Host}";
             var frontendBaseUrl = Request.Headers["Origin"].FirstOrDefault() ?? apiBaseUrl;
-            var events = await eventService.Select(new EventSelectReq
-            {
-                organisation_id = (int)organisationDetail.organisationid,
-                organisation_location_id = (int)organisationDetail.organisationlocationid,
-                is_public = true
-            });
+            var events = PublicTemplateContentRequirements.RequiresEvents(templateHtml)
+                ? await eventService.Select(new EventSelectReq
+                {
+                    organisation_id = (int)organisationDetail.organisationid,
+                    organisation_location_id = (int)organisationDetail.organisationlocationid,
+                    is_public = true
+                }) ?? new List<Event>()
+                : new List<Event>();
 
-            var facilities = await ResolveFacilities(siteDetail);
+            var facilities = siteDetail.facilities ?? new List<string>();
 
             var boundHtml = BindTemplate(templateHtml, siteDetail, organisationDetail, apiBaseUrl, frontendBaseUrl, events, facilities);
 
@@ -598,6 +741,7 @@ namespace appointza.Controllers
             var html = templateHtml ?? "";
 
             html = html.Replace("{{environment.baseurl}}", apiBaseUrl);
+            html = html.Replace("{{environment.uiBaseUrl}}", frontendBaseUrl);
 
             var organisationName = siteDetail.organisationdetail?.name ?? organisationDetail?.organisationname ?? "";
             var organisationTagline = siteDetail.organisationdetail?.tagline ?? organisationDetail?.organisationtagline ?? "";
@@ -1126,35 +1270,6 @@ namespace appointza.Controllers
             }
 
             return uri.AbsoluteUri;
-        }
-
-        private async Task<IList<string>> ResolveFacilities(Sitedetails siteDetail)
-        {
-            var facilityIds = siteDetail?.locationdetail?.facility_list ?? new List<long>();
-            if (facilityIds.Count == 0)
-            {
-                return new List<string>();
-            }
-
-            var facilities = new List<string>();
-            foreach (var id in facilityIds)
-            {
-                var values = await referenceValueService.Select(new ReferenceValueSelectReq
-                {
-                    id = id,
-                    referencetypeid = 0,
-                    organisationid = 0,
-                    parentid = 0
-                });
-
-                var displayText = values?.FirstOrDefault()?.displaytext ?? "";
-                if (!string.IsNullOrWhiteSpace(displayText))
-                {
-                    facilities.Add(displayText);
-                }
-            }
-
-            return facilities;
         }
     }
 } 

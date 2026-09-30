@@ -4,6 +4,8 @@ import {
   OrganisationServiceTiming,
   OrganisationServiceTimingDeleteReq,
   OrganisationServiceTimingSelectReq,
+  OrganisationServiceTimingBulkSaveReq,
+  OrganisationServiceTimingHasAnyReq,
   Leavereq,
   CalendarOverviewReq,
   CalendarOverviewRes,
@@ -70,6 +72,26 @@ export class OrganisationServiceTimingService {
             postdata
         );
         return resp.item;
+    }
+
+    async hasAny(req: OrganisationServiceTimingHasAnyReq) {
+        const postdata = new ActionReq<OrganisationServiceTimingHasAnyReq>();
+        postdata.item = req;
+        const resp = await this.http.post<ActionRes<boolean>>(
+            this.baseurl + '/HasAny',
+            postdata,
+        );
+        return !!resp.item;
+    }
+
+    async saveBulk(req: OrganisationServiceTimingBulkSaveReq) {
+        const postdata = new ActionReq<OrganisationServiceTimingBulkSaveReq>();
+        postdata.item = req;
+        const resp = await this.http.post<ActionRes<boolean>>(
+            this.baseurl + '/SaveBulk',
+            postdata,
+        );
+        return !!resp.item;
     }
 
     async Bookappoinment(req: any) {

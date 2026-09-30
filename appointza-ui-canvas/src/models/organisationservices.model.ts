@@ -67,3 +67,7 @@ export class OrganisationServicesDeleteReq {
   id: number = 0;
   version: number = 0;
 }
+
+export class OrganisationServicesHasAnyReq {
+  organisationid: number = 0;
+}

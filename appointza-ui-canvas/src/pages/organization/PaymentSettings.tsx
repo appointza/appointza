@@ -15,24 +15,15 @@ import { environment } from "@/utils/environment";
 import { PaymentService, CreatePaymentOrderReq, VerifyPaymentReq } from "@/services/payment.service";
 import { loadScript } from "@/utils/razorpay.util";
 import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import {
+  usePaymentGatewayCredentials,
+  type PaymentGatewayCredential,
+} from "@/hooks/usePaymentGatewayCredentials";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
 
-interface PaymentGatewayCredentials {
-  id: number;
-  gateway_id: number;
-  organization_id: number;
-  gateway_name: string;
-  api_key: string;
-  api_secret: string;
-  upi_id?: string;
-  webhook_secret?: string;
-  environment: string;
-  is_active: boolean;
-  created_at: string;
-  updated_at: string;
-}
+interface PaymentGatewayCredentials extends PaymentGatewayCredential {}
 
 const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
   const { user } = useAuth();
@@ -41,7 +32,6 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
   const organizationId = user?.organisationid || 0;
 
   const [credentials, setCredentials] = useState<PaymentGatewayCredentials[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [testingPaymentId, setTestingPaymentId] = useState<number | null>(null);
@@ -51,6 +41,60 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
     organisationId: organizationId,
     enabled: organizationId > 0,
   });
+
+  const {
+    data: credentialsData = [],
+    isFetching: isLoading,
+    refetch: refetchCredentials,
+  } = usePaymentGatewayCredentials({
+    organisationId: organizationId,
+    enabled: organizationId > 0,
+  });
+
+  const applyCredentialsToForm = (
+    loadedCredentials: PaymentGatewayCredentials[],
+    autoLoadFirst: boolean,
+  ) => {
+    setCredentials(loadedCredentials);
+    if (autoLoadFirst && loadedCredentials.length > 0 && editingId === null) {
+      const activeCredential =
+        loadedCredentials.find((credential) => credential.is_active) || loadedCredentials[0];
+      if (activeCredential) {
+        setFormData({
+          gateway_id: activeCredential.gateway_id,
+          gateway_name: activeCredential.gateway_name,
+          api_key: "",
+          api_secret: "",
+          webhook_secret: "",
+          environment: activeCredential.environment,
+          is_active: activeCredential.is_active,
+        });
+        setEditingId(activeCredential.id);
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (organizationId <= 0) {
+      setCredentials([]);
+      return;
+    }
+    applyCredentialsToForm(credentialsData, true);
+  }, [organizationId, credentialsData]);
+
+  const loadCredentials = async (autoLoadFirst: boolean = true) => {
+    if (!organizationId) return;
+    const result = await refetchCredentials();
+    if (result.data) {
+      applyCredentialsToForm(result.data, autoLoadFirst);
+      return;
+    }
+    toast({
+      title: "Error",
+      description: "Failed to load payment gateway credentials",
+      variant: "destructive",
+    });
+  };
 
   const [formData, setFormData] = useState({
     gateway_id: 1,
@@ -62,70 +106,6 @@ const PaymentSettings = ({ embedded = false }: { embedded?: boolean }) => {
     environment: 'production',
     is_active: true,
   });
-
-  useEffect(() => {
-    loadCredentials();
-  }, [organizationId]);
-
-  const loadCredentials = async (autoLoadFirst: boolean = true) => {
-    if (!organizationId) return;
-    
-    setIsLoading(true);
-    try {
-      const response = await fetch(`${environment.baseurl}/api/PaymentGatewayCredentials/Select`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-        },
-        body: JSON.stringify({
-          item: {
-            organization_id: organizationId
-          }
-        })
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const loadedCredentials = result.item || [];
-        setCredentials(loadedCredentials);
-        
-        // Auto-load the first active credential or first credential if available (only on initial load)
-        // Note: Sensitive fields (api_key, api_secret, webhook_secret) are masked from API
-        // Do not pre-fill these fields to avoid showing masked values
-        if (autoLoadFirst && loadedCredentials.length > 0 && editingId === null) {
-          const activeCredential = loadedCredentials.find((c: PaymentGatewayCredentials) => c.is_active) || loadedCredentials[0];
-          if (activeCredential) {
-            setFormData({
-              gateway_id: activeCredential.gateway_id,
-              gateway_name: activeCredential.gateway_name,
-              api_key: '', // Don't pre-fill masked API key
-              api_secret: '', // Don't pre-fill masked API secret
-              webhook_secret: '', // Don't pre-fill masked webhook secret
-              environment: activeCredential.environment,
-              is_active: activeCredential.is_active,
-            });
-            setEditingId(activeCredential.id);
-          }
-        }
-      } else {
-        toast({
-          title: "Error",
-          description: "Failed to load payment gateway credentials",
-          variant: "destructive"
-        });
-      }
-    } catch (error) {
-      console.error('Error loading credentials:', error);
-      toast({
-        title: "Error",
-        description: "An error occurred while loading credentials",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
   const handleInputChange = (field: string, value: any) => {
     setFormData(prev => ({

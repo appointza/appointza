@@ -7,7 +7,7 @@ const Privacy = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       <Helmet>
-        <title>Privacy Policy - Appointza</title>
+        <title>Privacy Policy - Napz</title>
       </Helmet>
       
       <Header />
@@ -15,8 +15,8 @@ const Privacy = () => {
       <main className="pt-24 pb-16 px-4">
         <div className="container mx-auto max-w-4xl">
           <div className="bg-white rounded-lg shadow-lg p-8">
-            <h1 className="text-3xl font-bold text-appointza-navy mb-2">Privacy Policy for Appointza</h1>
-            <p className="text-gray-600 mb-8">Effective Date: January 15, 2025 | Last Updated: January 15, 2025</p>
+            <h1 className="text-3xl font-bold text-appointza-navy mb-2">Privacy Policy for Napz</h1>
+            <p className="text-gray-600 mb-8">Effective Date: January 15, 2025 | Last Updated: September 27, 2026</p>
             
             <div className="space-y-8">
               <section>
@@ -176,7 +176,95 @@ const Privacy = () => {
               </section>
 
               <section>
-                <h2 className="text-2xl font-semibold text-appointza-navy mb-4">12. Contact Us</h2>
+                <h2 className="text-2xl font-semibold text-appointza-navy mb-4">
+                  12. Napz Destination Alarm (com.wakemethere)
+                </h2>
+                <div className="space-y-4 text-gray-700 leading-relaxed">
+                  <p>
+                    Napz is a destination arrival-alarm application published by Appointza Technology
+                    (OPC) Private Limited under the Android package name <strong>com.wakemethere</strong>.
+                    The following terms describe how Napz handles location and account information.
+                  </p>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Location data and purpose</h3>
+                    <p>
+                      Napz collects and uses precise location data to determine your current location,
+                      calculate your distance from a destination you select, show your position on the
+                      map, save a current place when requested, and trigger your destination arrival
+                      alarm when you enter the selected alert radius.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Background location</h3>
+                    <p>
+                      During an active trip, Napz continues collecting precise location in the
+                      background, including when the app is minimized, the screen is off, or the app is
+                      closed where Android allows. Background collection is used to calculate distance
+                      and trigger the arrival alarm, and stops when you stop the trip or the trip ends.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      On-device processing and map providers
+                    </h3>
+                    <p>
+                      Continuous trip GPS used for distance checks and arrival alarms is processed on
+                      your device and is not uploaded to Napz servers. When you use map, place-search,
+                      or place-name features, Napz may transmit your search text, current location,
+                      selected map coordinates, or search-location bias to Google Maps, Google Places,
+                      Google Geocoding, or OpenStreetMap Nominatim to provide the feature you requested.
+                      Napz does not use location data for advertising or marketing.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Permissions and consent</h3>
+                    <p>
+                      Napz presents an in-app location disclosure and requires an affirmative
+                      “Agree &amp; Continue” action before requesting Android location permission.
+                      Foreground permission is requested when you use a location feature. A separate
+                      background-location disclosure is shown before background permission is requested
+                      for an active trip. You may deny or revoke permissions in Android Settings.
+                    </p>
+                  </div>
+
+                  <div id="napz-account-deletion">
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">
+                      Account information, retention, and deletion
+                    </h3>
+                    <p>
+                      If you sign in with Google, Napz may store your name, email address, profile photo,
+                      and optional profile fields through Firebase Authentication and Firestore. Saved
+                      places and active-trip state are stored on your device until you delete them, stop
+                      the trip, clear app data, or uninstall Napz. Napz does not store the continuous
+                      trip GPS stream in Firebase.
+                    </p>
+                    <p className="mt-2">
+                      You can request account deletion from the Napz Account screen. This stops active
+                      tracking and permanently deletes the Firebase account, Firestore profile and
+                      login records controlled by Napz, and local app data. You may also
+                      request deletion outside the app by emailing <strong>appointza@gmail.com</strong>
+                      with the subject “Napz Account Deletion” and the email address associated with the
+                      account. Information may be retained only where required for security, fraud
+                      prevention, dispute resolution, or legal obligations.
+                    </p>
+                  </div>
+
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900 mb-2">Napz privacy contact</h3>
+                    <p>
+                      For Napz privacy questions, data-access requests, or deletion requests, email
+                      <strong> appointza@gmail.com</strong> or use the company contact details below.
+                    </p>
+                  </div>
+                </div>
+              </section>
+
+              <section>
+                <h2 className="text-2xl font-semibold text-appointza-navy mb-4">13. Contact Us</h2>
                 <p className="text-gray-700 leading-relaxed">
                   If you have any questions, concerns, or requests regarding this Privacy Policy or our data practices, please contact us:
                   <br /><br />

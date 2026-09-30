@@ -15,24 +15,34 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, Calendar, Users, AlertCircle, Search, X, Trash2, Star, QrCode, Phone } from "lucide-react";
+import { Loader2, Calendar, Users, AlertCircle, Search, X, Trash2, Star, QrCode, Phone, BedDouble, MapPin } from "lucide-react";
 import { EventBookingService } from "@/services/eventbooking.service";
+import {
+  GuestHospitalityBookingService,
+  type GuestHospitalityBookingMineItem,
+} from "@/services/guestHospitalityBooking.service";
 import { EventBooking, EventBookingSelectReq, EventBookingDeleteReq } from "@/models/eventbooking.model";
 import { EventService } from "@/services/event.service";
 import { Event } from "@/models/event.model";
 import { ReviewService } from "@/services/review.service";
 import { Review, ReviewSelectReq } from "@/models/review.model";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLocation } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { decodeEventBookingNotes } from "@/utils/eventBookingNotes.util";
 import { formatEventDateLong, compareDateOnly, todayDateOnlyString } from "@/utils/eventDate.util";
+import { cn } from "@/lib/utils";
 
 const QRCodeSVG = lazy(() =>
   import("qrcode.react").then((m) => ({ default: m.QRCodeSVG })),
 );
 
 const MyEventBookings: React.FC = () => {
+  const location = useLocation();
+  const isRoomsPage = location.pathname.startsWith("/user/my-room-bookings");
+  const bookingKind: "event" | "room" = isRoomsPage ? "room" : "event";
   const [bookings, setBookings] = useState<EventBooking[]>([]);
+  const [roomBookings, setRoomBookings] = useState<GuestHospitalityBookingMineItem[]>([]);
   const [filteredBookings, setFilteredBookings] = useState<EventBooking[]>([]);
   const [events, setEvents] = useState<{ [key: number]: Event }>({});
   const [isLoading, setIsLoading] = useState(true);
@@ -65,6 +75,7 @@ const MyEventBookings: React.FC = () => {
   const { user, mobile: authMobile } = useAuth();
   const { toast } = useToast();
   const eventBookingService = useMemo(() => new EventBookingService(), []);
+  const roomBookingService = useMemo(() => new GuestHospitalityBookingService(), []);
   const eventService = useMemo(() => new EventService(), []);
   const reviewService = useMemo(() => new ReviewService(), []);
 
@@ -81,9 +92,16 @@ const MyEventBookings: React.FC = () => {
         check_in_status: "",
         confirmation_status: ""
       };
-      
-      const bookingsData = await eventBookingService.select(req);
-      setBookings(bookingsData || []);
+
+      if (isRoomsPage) {
+        const roomsData = await roomBookingService.myBookings().catch(() => [] as GuestHospitalityBookingMineItem[]);
+        setBookings([]);
+        setEvents({});
+        setRoomBookings(roomsData || []);
+      } else {
+        const bookingsData = await eventBookingService.select(req);
+        setRoomBookings([]);
+        setBookings(bookingsData || []);
       
       // Fetch event details for each booking
       if (bookingsData && bookingsData.length > 0) {
@@ -109,10 +127,14 @@ const MyEventBookings: React.FC = () => {
         }
         
         setEvents(eventsMap);
+      } else {
+        setEvents({});
+      }
       }
     } catch (error) {
       console.error('Error fetching bookings:', error);
       setBookings([]);
+      setRoomBookings([]);
     } finally {
       setIsLoading(false);
     }
@@ -141,7 +163,7 @@ const MyEventBookings: React.FC = () => {
   useEffect(() => {
     fetchBookings();
     loadReviews();
-  }, [user?.id, eventBookingService, eventService, loadReviews]);
+  }, [user?.id, isRoomsPage, eventBookingService, eventService, roomBookingService, loadReviews]);
 
   // Apply filters
   useEffect(() => {
@@ -186,12 +208,65 @@ const MyEventBookings: React.FC = () => {
 
   useEffect(() => {
     setVisibleBookingCount(40);
-  }, [searchTerm, selectedEventId, selectedPaymentStatus, selectedCheckInStatus, selectedConfirmationStatus]);
+  }, [searchTerm, selectedEventId, selectedPaymentStatus, selectedCheckInStatus, selectedConfirmationStatus, bookingKind]);
+
+  const filteredRooms = useMemo(() => {
+    let list = [...roomBookings];
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      list = list.filter((room) =>
+        [
+          room.organisation_name,
+          room.location_name,
+          room.room_name,
+          room.room_number,
+          room.city,
+          room.state,
+          room.booking_id,
+          room.guest_name,
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(term),
+      );
+    }
+    return list;
+  }, [roomBookings, searchTerm]);
+
+  type CombinedItem =
+    | { kind: "event"; key: string; date: string; booking: EventBooking }
+    | { kind: "room"; key: string; date: string; room: GuestHospitalityBookingMineItem };
+
+  const combinedItems = useMemo(() => {
+    const eventItems: CombinedItem[] =
+      bookingKind === "room"
+        ? []
+        : filteredBookings.map((booking) => ({
+            kind: "event" as const,
+            key: `event-${booking.id}`,
+            date: events[booking.event_id]?.event_date
+              ? String(events[booking.event_id].event_date)
+              : String(booking.created_at || ""),
+            booking,
+          }));
+    const roomItems: CombinedItem[] =
+      bookingKind === "event"
+        ? []
+        : filteredRooms.map((room) => ({
+            kind: "room" as const,
+            key: `room-${room.booking_guid || room.booking_id}-${room.room_id}-${room.check_in}`,
+            date: room.check_in || "",
+            room,
+          }));
+    return [...eventItems, ...roomItems].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  }, [bookingKind, filteredBookings, filteredRooms, events]);
 
   const visibleBookings = useMemo(
-    () => filteredBookings.slice(0, visibleBookingCount),
-    [filteredBookings, visibleBookingCount],
+    () => combinedItems.slice(0, visibleBookingCount),
+    [combinedItems, visibleBookingCount],
   );
+
+  const totalBookingCount = bookings.length + roomBookings.length;
 
   // Clear all filters
   const clearFilters = () => {
@@ -399,7 +474,9 @@ const MyEventBookings: React.FC = () => {
             aria-hidden
           />
           <Loader2 className="mx-auto mb-5 h-9 w-9 animate-spin text-orange-500" />
-          <p className="text-sm font-medium tracking-tight text-zinc-600">Loading your event bookings…</p>
+          <p className="text-sm font-medium tracking-tight text-zinc-600">
+            {isRoomsPage ? "Loading your room bookings…" : "Loading your event bookings…"}
+          </p>
           <p className="mt-1 text-xs text-zinc-400">This only takes a moment</p>
         </div>
       </div>
@@ -410,10 +487,16 @@ const MyEventBookings: React.FC = () => {
     <div className="mx-auto w-full max-w-full min-w-0 overflow-x-hidden pb-8 sm:pb-10 -mx-4 px-3 sm:-mx-6 sm:px-4 lg:-mx-8 lg:px-5">
         <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between sm:gap-6 md:mb-10">
           <div className="min-w-0 max-w-xl">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-orange-600/90">Your events</p>
-            <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-900 sm:text-2xl md:text-3xl">My Event Bookings</h1>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-orange-600/90">
+              {isRoomsPage ? "Your stays" : "Your events"}
+            </p>
+            <h1 className="mt-2 text-xl font-semibold tracking-tight text-zinc-900 sm:text-2xl md:text-3xl">
+              {isRoomsPage ? "My Room Bookings" : "My Event Bookings"}
+            </h1>
             <p className="mt-2 text-sm leading-relaxed text-zinc-500">
-              View confirmation, payment, and check-in status for your registrations.
+              {isRoomsPage
+                ? "Check-in, check-out, and payment for your room stays."
+                : "View confirmation, payment, and check-in status for your registrations."}
             </p>
           </div>
           <div className="flex w-full min-w-0 items-stretch gap-2 sm:w-auto sm:items-center sm:gap-3">
@@ -430,7 +513,8 @@ const MyEventBookings: React.FC = () => {
         </header>
 
         <div className="mb-6 flex flex-col gap-4 rounded-[1.25rem] border border-zinc-100/90 bg-white p-4 shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)] sm:p-5 md:p-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-2", isRoomsPage ? "lg:grid-cols-2" : "lg:grid-cols-4")}>
+            {!isRoomsPage ? (
             <div className="space-y-1.5">
               <Label htmlFor="event-filter" className="text-xs font-medium text-gray-600">
                 Event
@@ -452,6 +536,7 @@ const MyEventBookings: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+            ) : null}
 
             <div className="space-y-1.5">
               <Label htmlFor="payment-filter" className="text-xs font-medium text-gray-600">
@@ -471,6 +556,8 @@ const MyEventBookings: React.FC = () => {
               </Select>
             </div>
 
+            {!isRoomsPage ? (
+            <>
             <div className="space-y-1.5">
               <Label htmlFor="checkin-filter" className="text-xs font-medium text-gray-600">
                 Check-in status
@@ -504,12 +591,14 @@ const MyEventBookings: React.FC = () => {
                 </SelectContent>
               </Select>
             </div>
+            </>
+            ) : null}
           </div>
 
           <div className="relative w-full">
             <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-zinc-400" aria-hidden />
             <Input
-              placeholder="Search by event name, description, or location…"
+              placeholder={isRoomsPage ? "Search by property, room, or booking ID…" : "Search by event name, description, or location…"}
               className="h-11 w-full rounded-2xl border-zinc-200/90 pl-11 pr-4 text-base sm:text-sm"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -517,26 +606,28 @@ const MyEventBookings: React.FC = () => {
           </div>
         </div>
 
-        {bookings.length === 0 ? (
+        {totalBookingCount === 0 ? (
           <div className="rounded-[1.25rem] border border-zinc-100/90 bg-white px-6 py-12 text-center shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)]">
             <Calendar className="mx-auto mb-4 h-16 w-16 text-zinc-300" aria-hidden />
             <h3 className="mb-2 text-lg font-semibold text-zinc-900">No bookings found</h3>
             <p className="text-sm text-zinc-500">
-              You haven&apos;t booked any events yet. Browse events to get started.
+              {isRoomsPage
+                ? "You haven't booked any rooms yet."
+                : "You haven't booked any events yet. Browse events to get started."}
             </p>
           </div>
         ) : (
           <>
             <div>
               <p className="mb-6 text-sm text-zinc-500">
-                {filteredBookings.length} booking
-                {filteredBookings.length === 1 ? "" : "s"}
-                {filteredBookings.length !== bookings.length ? (
-                  <span className="text-gray-400"> · {bookings.length} total</span>
+                {combinedItems.length} booking
+                {combinedItems.length === 1 ? "" : "s"}
+                {combinedItems.length !== totalBookingCount ? (
+                  <span className="text-gray-400"> · {totalBookingCount} total</span>
                 ) : null}
               </p>
 
-              {filteredBookings.length === 0 ? (
+              {combinedItems.length === 0 ? (
                 <div className="rounded-[1.25rem] border border-zinc-100/90 bg-white px-6 py-12 text-center shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)]">
                   <AlertCircle className="mx-auto mb-4 h-16 w-16 text-zinc-300" aria-hidden />
                   <h3 className="mb-2 text-lg font-semibold text-zinc-900">No bookings match filters</h3>
@@ -545,7 +636,74 @@ const MyEventBookings: React.FC = () => {
               ) : (
                 <>
                   <div className="grid grid-cols-1 gap-4 sm:gap-5 md:grid-cols-2 md:gap-6 lg:grid-cols-3 lg:gap-8">
-                    {visibleBookings.map((booking) => {
+                    {visibleBookings.map((item) => {
+                      if (item.kind === "room") {
+                        const room = item.room;
+                        const place = [room.city, room.state].filter(Boolean).join(", ");
+                        const stayLabel = [room.check_in, room.check_out].filter(Boolean).join(" → ");
+                        const roomStatus = (room.closed ? "completed" : room.status || "reserved").toLowerCase();
+                        const roomStatusClass =
+                          roomStatus === "completed" || roomStatus === "occupied"
+                            ? "bg-green-100 text-green-700"
+                            : roomStatus === "checkout_pending"
+                              ? "bg-amber-100 text-amber-700"
+                              : "bg-blue-100 text-blue-700";
+                        return (
+                          <div key={item.key} className="relative overflow-hidden rounded-[1.25rem] border border-zinc-100/90 bg-white p-5 shadow-[0_2px_20px_-4px_rgba(15,23,42,0.08)] transition-[transform,box-shadow,border-color] duration-300 hover:border-orange-200/45 hover:shadow-[0_18px_44px_-16px_rgba(15,23,42,0.14)] sm:p-6">
+                            <div
+                              className="pointer-events-none absolute inset-x-0 top-0 h-[3px] bg-gradient-to-r from-orange-400 via-rose-400 to-amber-400 opacity-90"
+                              aria-hidden
+                            />
+                            <span className="mb-3 inline-flex items-center gap-1 rounded-full bg-orange-50 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-orange-700">
+                              <BedDouble className="h-3.5 w-3.5" aria-hidden />
+                              Room
+                            </span>
+                            <h3 className="font-semibold text-lg leading-tight text-gray-900">
+                              {room.organisation_name || "Stay"}
+                            </h3>
+                            <p className="mb-4 mt-1 text-sm text-gray-500">
+                              {room.room_name || `Room ${room.room_number}`}
+                              {room.room_number ? ` · #${room.room_number}` : ""}
+                            </p>
+                            <div className="space-y-3 text-sm text-gray-800">
+                              {stayLabel ? (
+                                <div className="flex items-center gap-1.5">
+                                  <Calendar className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                                  <span>{stayLabel}</span>
+                                  {room.nights > 0 ? (
+                                    <span className="text-gray-500">
+                                      ({room.nights} {room.nights === 1 ? "night" : "nights"})
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ) : null}
+                              {place || room.location_name ? (
+                                <div className="flex items-center gap-1.5 text-gray-600">
+                                  <MapPin className="h-4 w-4 shrink-0 text-gray-500" aria-hidden />
+                                  <span>{room.location_name ? `${room.location_name}${place ? ` · ${place}` : ""}` : place}</span>
+                                </div>
+                              ) : null}
+                              {room.booking_id ? (
+                                <div className="text-xs text-gray-500">Booking ID: {room.booking_id}</div>
+                              ) : null}
+                              {room.total > 0 ? (
+                                <div>
+                                  <span className="font-semibold text-gray-900">Amount:</span>{" "}
+                                  ₹{room.total.toLocaleString()}
+                                </div>
+                              ) : null}
+                              <div>
+                                <span className={`inline-block rounded-full px-3 py-1 text-xs ${roomStatusClass}`}>
+                                  {room.closed ? "Completed" : room.status.replaceAll("_", " ") || "Reserved"}
+                                </span>
+                              </div>
+                              {room.balance > 0 ? cardPaymentPill("pending") : room.total > 0 ? cardPaymentPill("paid") : null}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      const booking = item.booking;
                       const event = events[booking.event_id];
                       const attendeesRaw =
                         booking.notes ?
@@ -570,6 +728,9 @@ const MyEventBookings: React.FC = () => {
                             </Button>
                           )}
 
+                            <span className="mb-3 mr-2 inline-flex items-center rounded-full bg-zinc-100 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-zinc-600">
+                              Event
+                            </span>
                           <h3 className="pr-10 font-semibold text-lg leading-tight text-gray-900">
                             {event?.event_name ?? "Event"}
                           </h3>
@@ -672,15 +833,14 @@ const MyEventBookings: React.FC = () => {
                       );
                     })}
                   </div>
-                  {visibleBookings.length < filteredBookings.length ? (
-                    <div className="mt-6 flex justify-center">
+                  {visibleBookings.length < combinedItems.length ? (
+                    <div className="mt-8 flex justify-center">
                       <Button
-                        type="button"
                         variant="outline"
-                        className="h-10 rounded-2xl text-sm"
-                        onClick={() => setVisibleBookingCount((n) => n + 40)}
+                        className="rounded-2xl"
+                        onClick={() => setVisibleBookingCount((count) => count + 40)}
                       >
-                        Show more ({filteredBookings.length - visibleBookings.length} remaining)
+                        Show more ({combinedItems.length - visibleBookings.length} remaining)
                       </Button>
                     </div>
                   ) : null}

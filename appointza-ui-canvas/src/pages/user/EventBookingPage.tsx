@@ -16,7 +16,12 @@ import {
   ArrowLeft
 } from "lucide-react";
 import UserLayout from "@/components/layout/UserLayout";
-import { redirectToLogin } from "@/utils/authNavigation.util";
+import {
+  getCurrentAppPath,
+  getMainAppAuthUrl,
+  mustUseMainAppForAuth,
+  redirectToLogin,
+} from "@/utils/authNavigation.util";
 import { formatEventDateLong } from "@/utils/eventDate.util";
 import { EventService } from "@/services/event.service";
 import { Event, EventSelectReq } from "@/models/event.model";
@@ -63,6 +68,12 @@ const EventBookingPage: React.FC = () => {
   const referenceValueService = useMemo(() => new ReferenceValueService(), []);
   const filesService = useMemo(() => new FilesService(), []);
   const paymentService = useMemo(() => new PaymentService(), []);
+
+  // Auth tokens live on the main app host only. Never book on org subdomains.
+  useEffect(() => {
+    if (!mustUseMainAppForAuth()) return;
+    window.location.replace(getMainAppAuthUrl(getCurrentAppPath()));
+  }, []);
 
   const [dynamicFields, setDynamicFields] = useState<EventBookingFormField[]>([]);
   const [dynamicValues, setDynamicValues] = useState<Record<string, any>>({});
@@ -270,7 +281,7 @@ const EventBookingPage: React.FC = () => {
         variant: "destructive",
       });
       // Redirect to login with return URL
-      redirectToLogin(window.location.pathname, navigate);
+      redirectToLogin(getCurrentAppPath(), navigate);
       return;
     }
 

@@ -4,14 +4,10 @@ import { statusLabel } from "@/models/hospitality.model";
 const INACTIVE_BOOKING_STATUSES = new Set(["available", "maintenance", "blocked"]);
 
 export function roomHasActiveBooking(room: OrganisationRoom): boolean {
+  if (room.has_active_booking) return true;
   const hasGuest = Boolean(room.guest?.name?.trim() || room.guest?.phone?.trim());
-  const hasBooking = Boolean(
-    room.booking?.booking_id?.trim() ||
-      room.booking?.check_in?.trim() ||
-      room.booking?.check_out?.trim(),
-  );
   const status = (room.status || "").toLowerCase();
-  return hasGuest || hasBooking || !INACTIVE_BOOKING_STATUSES.has(status);
+  return hasGuest || !INACTIVE_BOOKING_STATUSES.has(status);
 }
 
 export function getRoomBookingStartDate(room: OrganisationRoom): Date | null {

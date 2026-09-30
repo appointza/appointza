@@ -470,16 +470,8 @@ namespace appointza.Authentication.Services
                 throw new AppException(AppException.ErrorCodes.OtpInvalid);
             }
 
-            await organisationservice.DeleteTransaction(db, new OrganisationDeleteReq
-            {
-                id = req.organisationid
-            });
-
-            await organisationlocationservice.DeleteTransaction(db, new OrganisationLocationDeleteReq
-            {
-                orgnaisationid = req.organisationid
-            });
-
+            // Customer account deletion — remove only this user (organisationid is 0).
+            // Organisation teardown uses DeleteOrganisationPermananet instead.
             await DeleteTransaction(db, new UsersDeleteReq
             {
                 id = req.userid

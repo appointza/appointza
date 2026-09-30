@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, type MouseEvent } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { OrganizationPageShell } from "@/components/layout/OrganizationPageShell";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,20 +6,48 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import { Template, TemplateType } from "@/models/TemplateModels";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Loader2, Copy, Share2, ExternalLink, MapPin, CheckCircle, AlertCircle, Wand2, PencilLine, FileText } from "lucide-react";
-import { OrganisationLocationService } from "@/services/organisationlocation.service";
+import {
+  Loader2,
+  Copy,
+  Share2,
+  ExternalLink,
+  MapPin,
+  CheckCircle,
+  AlertCircle,
+  Wand2,
+  PencilLine,
+  FileText,
+  Trash2,
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useQueryClient } from "@tanstack/react-query";
 import { ReferenceValueService } from "@/services/referencevalue.service";
+import { ReferenceValueDeleteReq } from "@/models/referencevalue.model";
+import { referenceValuesQueryKey } from "@/hooks/useReferenceValues";
+import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { OrganisationLocation, UpdateLocationTemplateIdReq } from "@/models/organisationlocation.model";
-import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
+import { ReferenceValue } from "@/models/referencevalue.model";
 import { useAuth } from "@/contexts/AuthContext";
-import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import { useOrganisationLocations, organisationLocationsQueryKey } from "@/hooks/useOrganisationLocations";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
 import {
   buildTemplateBuilderPath,
+  ORG_WEBSITE_TEMPLATE_MAX_PER_ORG,
+  ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID,
 } from "@/utils/organizationOnboarding.util";
-import { OrganisationService } from "@/services/organisation.service";
-import { Organisation, OrganisationSelectReq } from "@/models/organisation.model";
+import { ORG_TEMPLATE_ASSETS_IDENTIFIER } from "@/types/orgAssets.types";
+import { useOrganisation } from "@/hooks/useOrganisation";
+import { useReferenceValues } from "@/hooks/useReferenceValues";
 import {
   buildOrganisationTemplateBookingUrl,
   buildOrganisationCustomUrlHost,
@@ -40,6 +68,7 @@ const templatesSectionIconWrap =
 
 const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const { user, isAuthenticated } = useAuth();
   const { isComplete, hasCustomDomain, hasServices, hasWebsite, hasTiming, nextStep } = useOnboardingStatus();
   const inOnboarding = !embedded && !isComplete && hasCustomDomain && hasServices;
@@ -69,42 +98,90 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   // Location selection state
   const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
   const [isCreatingTemplate, setIsCreatingTemplate] = useState(false);
   const [existingTemplate, setExistingTemplate] = useState<ReferenceValue | null>(null);
-  const [fetchedTemplates, setFetchedTemplates] = useState<Template[]>([]);
-  const [isLoadingTemplates, setIsLoadingTemplates] = useState(false);
   
   // Booking page URL (same location as template assignment)
   const [bookingUrl, setBookingUrl] = useState<string>('');
   const [isGeneratingUrl, setIsGeneratingUrl] = useState(false);
-  const [organisationDetails, setOrganisationDetails] = useState<Organisation | null>(null);
   const [customUrl, setCustomUrl] = useState<string>('');
   const [previewSiteData, setPreviewSiteData] = useState<SiteDetailsItem | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [templatePendingDelete, setTemplatePendingDelete] = useState<ReferenceValue | null>(null);
+  const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
 
   // Get organization ID from user context
   const organizationId = useMemo(() => {
     return user?.organisationid || 0;
   }, [user]);
 
-  const { data: cachedLocations = [] } = useOrganisationLocations({
+  const { data: cachedLocations = [], isFetching: isLocationsFetching } = useOrganisationLocations({
     organisationId: user?.organisationid || 0,
     staffLocationId: user?.locationid || 0,
     enabled: isAuthenticated,
   });
 
-  // Use fetched templates from ReferenceValue service
-  const availableTemplates = useMemo(() => {
-    return fetchedTemplates;
-  }, [fetchedTemplates]);
+  const { data: templateReferenceValues = [], isFetching: isLoadingTemplates } = useReferenceValues({
+    organisationId: organizationId,
+    referencetypeid: ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID,
+    enabled: isAuthenticated && organizationId > 0,
+  });
+
+  const { data: organisationDetails = null } = useOrganisation({
+    organisationId: organizationId,
+    enabled: isAuthenticated && organizationId > 0,
+  });
+
+  const fetchedTemplates = useMemo((): Template[] => {
+    return templateReferenceValues
+      .filter((refValue) => refValue.identifier !== ORG_TEMPLATE_ASSETS_IDENTIFIER)
+      .map((refValue) => ({
+        id: refValue.id.toString(),
+        name: refValue.displaytext,
+        description: refValue.notes || "",
+        content: refValue.description || "",
+        isactive: refValue.isactive,
+        previewImage: "/placeholder.svg",
+      }));
+  }, [templateReferenceValues]);
+
+  const availableTemplates = fetchedTemplates;
+
+  const orgOwnedTemplates = useMemo(
+    () =>
+      templateReferenceValues.filter(
+        (rv) =>
+          rv.identifier !== ORG_TEMPLATE_ASSETS_IDENTIFIER &&
+          Number(rv.organizationid) === Number(organizationId) &&
+          organizationId > 0,
+      ),
+    [templateReferenceValues, organizationId],
+  );
+
+  const atTemplateLimit = orgOwnedTemplates.length >= ORG_WEBSITE_TEMPLATE_MAX_PER_ORG;
+
+  const referenceValueService = useMemo(() => new ReferenceValueService(), []);
 
   // API services
   const locationService = useMemo(() => new OrganisationLocationService(), []);
-  const referenceValueService = useMemo(() => new ReferenceValueService(), []);
-  const organisationService = useMemo(() => new OrganisationService(), []);
   const siteDetailsService = useMemo(() => new SiteDetailsService(), []);
   const eventService = useMemo(() => new EventService(), []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    if (cachedLocations.length > 0) {
+      setLocations(cachedLocations);
+      setSelectedLocationId((prev) => prev ?? cachedLocations[0].id);
+    } else {
+      setLocations([]);
+    }
+  }, [cachedLocations, isAuthenticated]);
+
+  useEffect(() => {
+    if (fetchedTemplates.length > 0) {
+      setSelectedTemplate((current) => current || (fetchedTemplates[0].id as TemplateType));
+    }
+  }, [fetchedTemplates]);
 
   const renderTemplatePreviewHtml = useCallback(
     (templateContent: string) => {
@@ -119,91 +196,19 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     [previewSiteData],
   );
 
-  // Fetch templates from ReferenceValue with referencetypeid = 5
-  const fetchTemplates = useCallback(async () => {
-    setIsLoadingTemplates(true);
-    try {
-      console.log('🔍 Fetching templates from ReferenceValue with referencetypeid = 5');
-      const req = new ReferenceValueSelectReq();
-      req.referencetypeid = 5;
-      // IMPORTANT: only load templates for this organization
-      req.organisationid = organizationId;
-      
-      const response = await referenceValueService.select(req);
-      console.log('✅ Templates API response:', response);
-      
-      if (response && response.length > 0) {
-        // Convert ReferenceValue to Template format
-        const templates: Template[] = response.map((refValue: ReferenceValue) => ({
-          id: refValue.id.toString(), // ReferenceValue.id
-          name: refValue.displaytext,
-          // `notes` stores the builder project JSON; show as description fallback
-          description: refValue.notes || "",
-          // `description` stores the generated HTML for public booking page
-          content: refValue.description || "",
-          isactive: refValue.isactive,
-          previewImage: "/placeholder.svg",
-        }));
-        
-        setFetchedTemplates(templates);
-        console.log('✅ Converted templates:', templates);
-        
-        // Set the first template as selected if none is selected
-        if (templates.length > 0) {
-          setSelectedTemplate((current) => current || (templates[0].id as TemplateType));
-        }
-      } else {
-        setFetchedTemplates([]);
-        console.log('⚠️ No templates found');
+  const syncExistingTemplateForLocation = useCallback(
+    (locationId: number) => {
+      const selectedLocation = locations.find((loc) => loc.id === locationId);
+      if (!selectedLocation?.templateid) {
+        setExistingTemplate(null);
+        return;
       }
-    } catch (error) {
-      console.error('❌ Error fetching templates:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch templates",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoadingTemplates(false);
-    }
-  }, [organizationId, referenceValueService, toast]);
-
-  // Fetch locations
-  const fetchLocations = useCallback(async () => {
-    if (!isAuthenticated) return;
-    setIsLoading(true);
-    try {
-      const response = cachedLocations;
-      if (response && response.length > 0) {
-        setLocations(response);
-        setSelectedLocationId(response[0].id);
-      } else {
-        setLocations([]);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  }, [cachedLocations, isAuthenticated]);
-
-  // Check if location already has a template using ReferenceValue service
-  const checkExistingTemplate = useCallback(async (locationId: number): Promise<ReferenceValue | null> => {
-    try {
-      const req = new ReferenceValueSelectReq();
-      req.referencetypeid = 5;
-      // IMPORTANT: scope by organization so we don't read other org templates
-      req.organisationid = organizationId;
-      // Add location-specific filter if needed
-      // You might need to add a custom field or use description/notes to store locationId
-      
-      const response = await referenceValueService.select(req);
-      // Filter by location if you have location info in the template data
-      // For now, return the first template or implement location-specific filtering
-      return response && response.length > 0 ? response[0] : null;
-    } catch (error) {
-      console.error('❌ Error checking existing template:', error);
-      return null;
-    }
-  }, [organizationId, referenceValueService]);
+      const template =
+        templateReferenceValues.find((item) => item.id === selectedLocation.templateid) ?? null;
+      setExistingTemplate(template);
+    },
+    [locations, templateReferenceValues],
+  );
 
   // Update location's templateid field using dedicated API
   const updateLocationTemplateId = async (locationId: number, templateId: string): Promise<boolean> => {
@@ -232,6 +237,13 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               : loc
           )
         );
+        queryClient.setQueryData<OrganisationLocation[]>(
+          organisationLocationsQueryKey(user?.organisationid || 0, user?.locationid || 0),
+          (prev) =>
+            (prev ?? []).map((loc) =>
+              loc.id === locationId ? { ...loc, templateid: numericTemplateId } : loc,
+            ),
+        );
         return true;
       }
       
@@ -242,94 +254,80 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     }
   };
 
-  // Update only the templateid in organisationlocation table
-  const createOrUpdateTemplate = async () => {
-    if (!selectedLocationId) {
+  const assignTemplateToLocation = async (locationId: number, templateId: string) => {
+    if (!locationId) {
       toast({
-        title: "Error",
-        description: "Please select a location first",
-        variant: "destructive"
+        title: "Select a location",
+        description: "Choose a business location first, then pick a template.",
+        variant: "destructive",
       });
       return;
     }
 
-    if (!selectedTemplate) {
+    if (!templateId) {
       toast({
-        title: "Error",
-        description: "Please select a template first",
-        variant: "destructive"
+        title: "Select a template",
+        description: "Choose a template to assign to this location.",
+        variant: "destructive",
       });
+      return;
+    }
+
+    const numericTemplateId = parseInt(templateId, 10) || 0;
+    const currentLocation = locations.find((loc) => loc.id === locationId);
+    if (currentLocation?.templateid === numericTemplateId) {
       return;
     }
 
     setIsCreatingTemplate(true);
     try {
-      console.log('🔧 Updating templateid for location:', selectedLocationId);
-      
-      // Get the selected template ID
-      const templateId = selectedTemplate;
-      console.log('📋 Selected Template ID:', templateId);
-
-      // Update only the location's templateid field
-      const success = await updateLocationTemplateId(selectedLocationId, templateId);
+      const success = await updateLocationTemplateId(locationId, templateId);
 
       if (success) {
-        invalidatePublicSiteCacheForLocation(selectedLocationId);
+        invalidatePublicSiteCacheForLocation(locationId);
+        void queryClient.invalidateQueries({
+          queryKey: organisationLocationsQueryKey(
+            user?.organisationid || 0,
+            user?.locationid || 0,
+          ),
+        });
         toast({
-          title: "Success",
-          description: `Template ID ${templateId} has been assigned to location.`,
+          title: "Template updated",
+          description: "This location now uses the selected template.",
         });
       } else {
         toast({
           title: "Error",
           description: "Failed to update template for location",
-          variant: "destructive"
+          variant: "destructive",
         });
       }
     } catch (error) {
-      console.error('❌ Error updating location templateid:', error);
+      console.error("❌ Error updating location templateid:", error);
       toast({
         title: "Error",
         description: "Failed to update template",
-        variant: "destructive"
+        variant: "destructive",
       });
     } finally {
       setIsCreatingTemplate(false);
     }
   };
 
-  // Check for existing template when location changes
-  const checkLocationTemplate = useCallback(async (locationId: number) => {
-    if (!locationId || !organizationId) return;
-    
-    try {
-      const template = await checkExistingTemplate(locationId);
-      setExistingTemplate(template);
-    } catch (error) {
-      console.error('❌ Error checking location template:', error);
-      setExistingTemplate(null);
+  const selectAndAssignTemplate = (templateId: string) => {
+    setSelectedTemplate(templateId as TemplateType);
+    if (!selectedLocationId) {
+      toast({
+        title: "Select a location",
+        description: "Choose a business location first, then pick a template.",
+        variant: "destructive",
+      });
+      return;
     }
-  }, [checkExistingTemplate, organizationId]);
+    void assignTemplateToLocation(selectedLocationId, templateId);
+  };
 
-  // Load organisation details for booking page
-  const loadOrganisationDetails = useCallback(async () => {
-    if (!isAuthenticated || !organizationId) return;
-    
-    try {
-      const req = new OrganisationSelectReq();
-      req.id = organizationId;
-      const response = await organisationService.select(req);
-      
-      if (response && response.length > 0) {
-        setOrganisationDetails(response[0]);
-        console.log('✅ Organisation details loaded:', response[0]);
-      }
-    } catch (error) {
-      console.error('❌ Error loading organisation details:', error);
-    }
-  }, [isAuthenticated, organizationId, organisationService]);
-
-  // Custom URL host from organisationlocation.customurl + domainname in config.js
+  // Update location's templateid field using dedicated API
   const generateCustomUrl = (location: OrganisationLocation) => {
     if (!location) return "";
     return buildOrganisationCustomUrlHost({ customUrl: location.customurl });
@@ -367,15 +365,93 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
     }
   }, [locations, toast]);
 
-  const openTemplateBuilder = (mode: "new" | "edit" = "new") => {
-    if (!selectedLocationId) {
-      navigate(buildTemplateBuilderPath(0));
+  const requestDeleteTemplate = (refValue: ReferenceValue, e?: MouseEvent) => {
+    e?.stopPropagation();
+    if (Number(refValue.organizationid) !== Number(organizationId) || organizationId <= 0) {
       return;
     }
+    setTemplatePendingDelete(refValue);
+  };
+
+  const confirmDeleteTemplate = async () => {
+    if (!templatePendingDelete || organizationId <= 0) return;
+
+    setIsDeletingTemplate(true);
+    try {
+      const deletedNumericId = templatePendingDelete.id;
+      const assignedLocations = locations.filter((loc) => loc.templateid === deletedNumericId);
+      for (const loc of assignedLocations) {
+        const unassign = new UpdateLocationTemplateIdReq();
+        unassign.organisationlocationid = loc.id;
+        unassign.templateid = 0;
+        await locationService.updateLocationTemplateId(unassign);
+        invalidatePublicSiteCacheForLocation(loc.id);
+      }
+
+      const deleteReq = new ReferenceValueDeleteReq();
+      deleteReq.id = templatePendingDelete.id;
+      deleteReq.version = templatePendingDelete.version;
+      const deleted = await referenceValueService.delete(deleteReq);
+      if (!deleted) {
+        throw new Error("Delete did not remove the template.");
+      }
+
+      const deletedId = templatePendingDelete.id.toString();
+
+      setLocations((prev) =>
+        prev.map((loc) =>
+          loc.templateid === deletedNumericId ? { ...loc, templateid: 0 } : loc,
+        ),
+      );
+
+      if (selectedTemplate === deletedId) {
+        const remaining = templateReferenceValues.filter((rv) => rv.id !== deletedNumericId);
+        setSelectedTemplate(remaining[0]?.id.toString() ?? "");
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: referenceValuesQueryKey(organizationId, ORG_WEBSITE_TEMPLATE_REFERENCE_TYPE_ID),
+      });
+      await queryClient.invalidateQueries({
+        queryKey: organisationLocationsQueryKey(organizationId, user?.locationid || 0),
+      });
+
+      toast({
+        title: "Template deleted",
+        description: `"${templatePendingDelete.displaytext}" was removed.`,
+      });
+      setTemplatePendingDelete(null);
+    } catch (error) {
+      console.error("Failed to delete template:", error);
+      toast({
+        title: "Error",
+        description: "Could not delete this template. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeletingTemplate(false);
+    }
+  };
+
+  const openTemplateBuilder = (mode: "new" | "edit" = "new", templateIdOverride?: number) => {
+    if (mode === "new" && atTemplateLimit) {
+      toast({
+        title: "Limit reached",
+        description: `You can save up to ${ORG_WEBSITE_TEMPLATE_MAX_PER_ORG} templates. Delete one to create another.`,
+        variant: "destructive",
+      });
+      return;
+    }
+    const templateId =
+      templateIdOverride && templateIdOverride > 0
+        ? templateIdOverride
+        : mode === "edit" && selectedTemplate
+          ? Number(selectedTemplate)
+          : undefined;
     navigate(
       buildTemplateBuilderPath(
-        selectedLocationId,
-        mode === "edit" && selectedTemplate ? Number(selectedTemplate) : undefined,
+        selectedLocationId || 0,
+        mode === "edit" && templateId && templateId > 0 ? templateId : undefined,
       ),
     );
   };
@@ -445,18 +521,11 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
   // During setup, send users without an assigned org template straight to the builder.
   useEffect(() => {
-    if (embedded || isLoading || locations.length === 0 || !selectedLocationId) return;
+    if (embedded || isLocationsFetching || locations.length === 0 || !selectedLocationId) return;
     if (isComplete || hasWebsite) return;
 
     navigate(buildTemplateBuilderPath(selectedLocationId), { replace: true });
-  }, [embedded, isLoading, isComplete, hasWebsite, locations, selectedLocationId, navigate]);
-
-  // Load templates and locations on component mount
-  useEffect(() => {
-    fetchTemplates();
-    fetchLocations();
-    loadOrganisationDetails();
-  }, [fetchTemplates, fetchLocations, loadOrganisationDetails]);
+  }, [embedded, isLocationsFetching, isComplete, hasWebsite, locations, selectedLocationId, navigate]);
 
   // Generate booking URL when location changes
   useEffect(() => {
@@ -477,11 +546,11 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
   // Check for existing template when location changes
   useEffect(() => {
     if (selectedLocationId) {
-      checkLocationTemplate(selectedLocationId);
+      syncExistingTemplateForLocation(selectedLocationId);
     } else {
       setExistingTemplate(null);
     }
-  }, [selectedLocationId, checkLocationTemplate]);
+  }, [selectedLocationId, syncExistingTemplateForLocation]);
 
   // Load real location/org/services data for template preview (same renderer as public subdomain).
   useEffect(() => {
@@ -559,7 +628,14 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
     return (
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3 md:gap-6">
-        {availableTemplates.map((template) => (
+        {availableTemplates.map((template) => {
+          const refValue = templateReferenceValues.find((rv) => rv.id.toString() === template.id);
+          const isOrgOwned =
+            !!refValue &&
+            Number(refValue.organizationid) === Number(organizationId) &&
+            organizationId > 0;
+
+          return (
           <Card
             key={template.id}
             className={cn(
@@ -567,9 +643,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               "cursor-pointer overflow-hidden rounded-2xl border-stone-200 bg-white shadow-none transition-colors hover:border-blue-300 hover:shadow-none",
               selectedTemplate === template.id && "border-blue-500 ring-2 ring-blue-500 ring-offset-2",
             )}
-            onClick={() => {
-              setSelectedTemplate(template.id as TemplateType);
-            }}
+            onClick={() => selectAndAssignTemplate(template.id)}
           >
             <div className="aspect-video bg-stone-100 overflow-hidden">
               {template.content && template.content.includes("<!DOCTYPE html>") ? (
@@ -594,26 +668,61 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               )}
             </div>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base text-appointza-navy">{template.name}</CardTitle>
+              <div className="flex items-start justify-between gap-2">
+                <CardTitle className="text-base text-appointza-navy">{template.name}</CardTitle>
+                {isOrgOwned ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 rounded-lg text-stone-500 hover:bg-red-50 hover:text-red-600"
+                    onClick={(e) => refValue && requestDeleteTemplate(refValue, e)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
             </CardHeader>
-            <CardFooter className="pt-0">
+            <CardFooter className="flex gap-2 pt-0">
               <Button
                 variant={selectedTemplate === template.id ? "default" : "outline"}
                 className={cn(
                   selectedTemplate === template.id ? org.btnPrimary : org.btnOutline,
-                  "min-h-10 w-full rounded-xl border-stone-200 shadow-none",
+                  "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none",
                   selectedTemplate === template.id && "border-blue-600 bg-blue-600 text-white hover:bg-blue-700",
                 )}
+                disabled={isCreatingTemplate || !selectedLocationId}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  selectAndAssignTemplate(template.id);
+                }}
+              >
+                {selectedLocationId &&
+                locations.find((loc) => loc.id === selectedLocationId)?.templateid ===
+                  Number(template.id)
+                  ? "Assigned"
+                  : selectedTemplate === template.id
+                    ? "Selected"
+                    : "Select"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className={cn(org.btnOutline, "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none")}
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedTemplate(template.id as TemplateType);
+                  const numericId = Number(template.id);
+                  if (numericId > 0) openTemplateBuilder("edit", numericId);
                 }}
               >
-                {selectedTemplate === template.id ? "Selected" : "Select"}
+                <PencilLine className="mr-2 h-4 w-4 text-blue-600" />
+                Edit
               </Button>
             </CardFooter>
           </Card>
-        ))}
+          );
+        })}
       </div>
     );
   };
@@ -676,7 +785,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
         <SettingsEmbeddedHeader
           icon={FileText}
           title="Templates & booking"
-          description="Pick a location, choose a website template, assign it, and copy your booking link — all on one page."
+          description="Pick a location, choose a website template, and copy your booking link — all on one page."
         />
       ) : null}
       <div className={cn(embedded ? settingsEmbedded.sectionBody : "space-y-4 sm:space-y-6")}>
@@ -714,7 +823,8 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   Create page with AI
                 </h3>
                 <p className="text-sm text-stone-500">
-                  Copy the AI prompt, paste HTML from ChatGPT or Claude, and save — no drag-and-drop builder.
+                  Copy the AI prompt, paste HTML from ChatGPT or Claude, and save. You can keep up to{" "}
+                  {ORG_WEBSITE_TEMPLATE_MAX_PER_ORG} templates.
                 </p>
                 </div>
               </div>
@@ -730,6 +840,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               <Button
                 className={cn(org.btnPrimary, "min-h-10 rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700")}
                 onClick={() => openTemplateBuilder("new")}
+                disabled={atTemplateLimit}
               >
                 <Wand2 className="mr-2 h-4 w-4" />
                 New AI page
@@ -751,7 +862,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {isLoading ? (
+              {isLocationsFetching ? (
                 <div className={cn(org.loading, "flex-col gap-2 py-8")}>
                   <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
                   <span className="text-sm text-stone-600">Loading locations…</span>
@@ -768,7 +879,12 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                           selectedLocationId === location.id &&
                             "border-blue-500 bg-blue-50 ring-2 ring-blue-500",
                         )}
-                        onClick={() => setSelectedLocationId(location.id)}
+                        onClick={() => {
+                          setSelectedLocationId(location.id);
+                          if (location.templateid) {
+                            setSelectedTemplate(String(location.templateid) as TemplateType);
+                          }
+                        }}
                       >
                         <CardContent className="p-4">
                           <div className="flex items-center gap-3">
@@ -794,30 +910,24 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                       </Card>
                     ))}
                   </div>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-                    <Button
-                      onClick={createOrUpdateTemplate}
-                      disabled={!selectedLocationId || !selectedTemplate || isCreatingTemplate}
-                      className={cn(org.btnPrimary, "min-h-11 w-full rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700 sm:w-auto")}
-                    >
-                      {isCreatingTemplate ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Updating…
-                        </>
-                      ) : (
-                        "Assign selected template to this location"
-                      )}
-                    </Button>
-                    {selectedTemplate ? (
-                      <p className="text-sm text-stone-600">
-                        Selected:{" "}
-                        <span className="font-medium text-appointza-navy">
-                          {availableTemplates.find((t) => t.id === selectedTemplate)?.name || "Unknown"}
-                        </span>
-                      </p>
-                    ) : null}
-                  </div>
+                  {isCreatingTemplate ? (
+                    <p className="flex items-center gap-2 text-sm text-stone-600">
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                      Updating this location’s template…
+                    </p>
+                  ) : selectedLocationId ? (
+                    <p className="text-sm text-stone-600">
+                      {(() => {
+                        const loc = locations.find((item) => item.id === selectedLocationId);
+                        const assigned = availableTemplates.find(
+                          (t) => t.id === String(loc?.templateid ?? ""),
+                        );
+                        return assigned
+                          ? `This location uses ${assigned.name}.`
+                          : "No template on this location yet — select one below.";
+                      })()}
+                    </p>
+                  ) : null}
                 </div>
               ) : (
                 <div className="px-4 py-8 text-center">
@@ -841,7 +951,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           <div>
             <h2 className="mb-1 text-lg font-semibold text-appointza-navy">Choose a template</h2>
             <p className="mb-4 text-sm text-stone-500">
-              Select a design, then assign it to your location above.
+              Select a design to apply it to the location above.
             </p>
             <TemplatePreviews />
           </div>
@@ -972,6 +1082,44 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           </Card>
         </div>
       </div>
+
+      <AlertDialog
+        open={!!templatePendingDelete}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingTemplate) setTemplatePendingDelete(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this template?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {templatePendingDelete
+                ? `"${templatePendingDelete.displaytext}" will be removed. Locations using it will need another template assigned. This cannot be undone.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingTemplate}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700"
+              disabled={isDeletingTemplate}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteTemplate();
+              }}
+            >
+              {isDeletingTemplate ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </OrganizationPageShell>
   );
 };

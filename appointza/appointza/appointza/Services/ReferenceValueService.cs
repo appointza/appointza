@@ -147,6 +147,41 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
                 }
             return result;
         }
+
+        /// <summary>
+        /// Batch lookup of reference-value display text by id (public-site facilities).
+        /// Preserves no ordering — callers map ids to labels in list order.
+        /// </summary>
+        public async Task<Dictionary<long, string>> SelectDisplayTextByIdsTransaction(IDb db, IEnumerable<long> ids)
+        {
+            var idList = ids.Where(id => id > 0).Distinct().ToList();
+            var labels = new Dictionary<long, string>();
+            if (idList.Count == 0)
+                return labels;
+
+            var inClause = string.Join(", ", idList);
+            var query = $@"
+                SELECT ReferenceValue.id, ReferenceValue.displaytext
+                FROM ReferenceValue
+                WHERE ReferenceValue.id IN ({inClause})";
+
+            var command = db.GetCommand(query);
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                while (await reader.ReadAsync())
+                {
+                    var id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]);
+                    if (id <= 0)
+                        continue;
+
+                    var displayText = reader["displaytext"] == DBNull.Value ? "" : reader["displaytext"].ToString() ?? "";
+                    labels[id] = displayText.Trim();
+                }
+            }
+
+            return labels;
+        }
+
         public async Task<ReferenceValue> Insert(ReferenceValue referencevalue)
         {
                 using (IDb db = await dbprovider.GetDb())
@@ -158,6 +193,38 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
         }
         public async Task InsertTransaction(IDb db, ReferenceValue referencevalue)
         {
+                const int websiteTemplateTypeId = 5;
+                const int maxWebsiteTemplatesPerOrg = 2;
+                const string orgTemplateAssetsIdentifier = "__org_template_assets__";
+                if (referencevalue.referencetypeid == websiteTemplateTypeId
+                    && referencevalue.organizationid > 0
+                    && !string.Equals(referencevalue.identifier, orgTemplateAssetsIdentifier, StringComparison.Ordinal))
+                {
+                    String countQuery = @"
+                    SELECT COUNT(*)::int
+                    FROM ReferenceValue
+                    WHERE organizationid = @organisationid
+                      AND referencetypeid = @referencetypeid
+                      AND COALESCE(identifier, '') <> @assets_identifier
+                    ";
+                    DbCommand countCommand = db.GetCommand(countQuery);
+                    db.AddParameter(countCommand, "organisationid", DbTypes.Types.Integer).Value = referencevalue.organizationid;
+                    db.AddParameter(countCommand, "referencetypeid", DbTypes.Types.Integer).Value = websiteTemplateTypeId;
+                    db.AddParameter(countCommand, "assets_identifier", DbTypes.Types.String).Value = orgTemplateAssetsIdentifier;
+                    int existingCount = 0;
+                    using (DbDataReader countReader = await db.Execute(countCommand))
+                    {
+                        if (await countReader.ReadAsync())
+                        {
+                            existingCount = countReader[0] == DBNull.Value ? 0 : Convert.ToInt32(countReader[0]);
+                        }
+                    }
+                    if (existingCount >= maxWebsiteTemplatesPerOrg)
+                    {
+                        throw new InvalidOperationException("An organisation can have at most 2 website templates.");
+                    }
+                }
+
                 String query = @"
                 INSERT INTO ReferenceValue (
                     identifier,displaytext,description,langcode,organizationid,referencetypeid,version,createdby,createdon,modifiedby,modifiedon,attributes,isactive,issuspended,parentid,isfactory,notes
@@ -275,23 +342,12 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
         {
             bool result = false;
                 String query = @"
-                UPDATE ReferenceValue
-                SET isactive = '0',
-                    version = version + 1,
-                    modifiedon = @modifiedon,
-                    modifiedby = @modifiedby 
+                DELETE FROM ReferenceValue
+                WHERE id = @id
+                  AND COALESCE(isfactory, FALSE) = FALSE
                 ";
-                var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
-                queryBuilder.AddParameter("id", "=", "id", referencevalue.id, DbTypes.Types.Long);
-                if (referencevalue.version > 0)
-                {
-                    queryBuilder.AddParameter("version", "=", "version", referencevalue.version, DbTypes.Types.Integer);
-                }
-                DbCommand command = queryBuilder.GetCommand(db);
+                DbCommand command = db.GetCommand(query);
                 db.AddParameter(command, "id", DbTypes.Types.Long).Value = referencevalue.id;
-                db.AddParameter(command, "version", DbTypes.Types.Integer).Value = referencevalue.version;
-                db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext.id;
-                db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
                 if (await db.ExecuteNonQuery(command) > 0)
                 {
                     result = true;

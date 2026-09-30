@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
 import { BedDouble, Loader2, MapPin, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { OrganisationRoom, emptyRoom, normalizeOrganisationRoom } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
+import { organisationRoomsQueryKey, useOrganisationRooms } from "@/hooks/useOrganisationRooms";
 import { RoomEditorForm } from "@/components/organization/RoomEditorForm";
 import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
 import { cloneRoom, defaultRoomCode } from "@/utils/roomAmenities.util";
@@ -24,47 +26,23 @@ export function RoomDefinitionsPanel({
   onOpenRoomStatus,
 }: RoomDefinitionsPanelProps) {
   const { toast } = useToast();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const organisationId = user?.organisationid ?? 0;
 
-  const [loading, setLoading] = useState(true);
+  const { data: rooms = [], isLoading: loading } = useOrganisationRooms({
+    organisationId,
+    locationId,
+  });
+
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [rooms, setRooms] = useState<OrganisationRoom[]>([]);
   const [search, setSearch] = useState("");
   const [editorOpen, setEditorOpen] = useState(false);
   const [draft, setDraft] = useState(() => emptyRoom(organisationId, locationId));
   const openedFromUrlRef = useRef<number | null>(null);
   const prevLocationIdRef = useRef(locationId);
-
-  const loadRooms = useCallback(async () => {
-    if (organisationId <= 0 || locationId <= 0) {
-      setRooms([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const items = await hospitalityService.selectRooms({
-        organisation_id: organisationId,
-        organisation_location_id: locationId,
-      });
-      setRooms(items.map((item) => normalizeOrganisationRoom(item)));
-    } catch (error) {
-      toast({
-        title: "Could not load rooms",
-        description: error instanceof Error ? error.message : "Unknown error",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [organisationId, locationId, toast]);
-
-  useEffect(() => {
-    void loadRooms();
-  }, [loadRooms]);
 
   useEffect(() => {
     if (prevLocationIdRef.current === locationId) return;
@@ -200,7 +178,9 @@ export function RoomDefinitionsPanel({
       }
       await hospitalityService.saveRoom(payload);
       closeEditor();
-      await loadRooms();
+      await queryClient.invalidateQueries({
+        queryKey: organisationRoomsQueryKey(organisationId, locationId),
+      });
       toast({ title: "Saved", description: "Room saved successfully." });
     } catch (error) {
       toast({
@@ -225,7 +205,9 @@ export function RoomDefinitionsPanel({
         organisation_id: organisationId,
       });
       closeEditor();
-      await loadRooms();
+      await queryClient.invalidateQueries({
+        queryKey: organisationRoomsQueryKey(organisationId, locationId),
+      });
       toast({ title: "Deleted", description: "Room removed." });
     } catch (error) {
       toast({

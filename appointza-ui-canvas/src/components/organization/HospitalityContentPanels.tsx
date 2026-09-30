@@ -1,17 +1,30 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
 import {
   HospitalityFoodItem,
   HospitalityGuestService,
   HospitalityNearbyPlace,
   HospitalityPackage,
+  OrganisationRoom,
+  OrganisationRoomSelectReq,
+  ROOM_TYPES,
+  normalizeOrganisationRoom,
 } from "@/models/hospitality.model";
+import { hospitalityService } from "@/services/hospitality.service";
+import { formatRoomTypeLabel } from "@/utils/roomAmenities.util";
 
 type PersistFn<T> = (items: T[]) => Promise<void>;
 
@@ -87,6 +100,9 @@ type PackagesPanelProps = {
   setPackages: (items: HospitalityPackage[]) => void;
   onPersist: PersistFn<HospitalityPackage>;
   newItem: () => HospitalityPackage;
+  organisationId: number;
+  locationId: number;
+  onAddRooms?: () => void;
 };
 
 export function HospitalityPackagesPanel({
@@ -94,8 +110,42 @@ export function HospitalityPackagesPanel({
   setPackages,
   onPersist,
   newItem,
+  organisationId,
+  locationId,
+  onAddRooms,
 }: PackagesPanelProps) {
   const editor = useContentEditor(packages, setPackages);
+  const [rooms, setRooms] = useState<OrganisationRoom[]>([]);
+
+  useEffect(() => {
+    if (organisationId <= 0 || locationId <= 0) {
+      setRooms([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const req = new OrganisationRoomSelectReq();
+        req.organisation_id = organisationId;
+        req.organisation_location_id = locationId;
+        const list = await hospitalityService.selectRooms(req);
+        if (!cancelled) {
+          setRooms((list ?? []).map((room) => normalizeOrganisationRoom(room)));
+        }
+      } catch {
+        if (!cancelled) setRooms([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organisationId, locationId]);
+
+  const matchingRooms = useMemo(() => {
+    const type = (editor.draft?.room_type || "").trim().toLowerCase();
+    if (!type) return rooms;
+    return rooms.filter((room) => room.room_type.trim().toLowerCase() === type);
+  }, [editor.draft?.room_type, rooms]);
 
   const title =
     editor.editorIndex != null ?
@@ -128,6 +178,11 @@ export function HospitalityPackagesPanel({
                   {pkg.description ?
                     <p className="line-clamp-2">{pkg.description}</p>
                   : <p className="text-stone-400">No description</p>}
+                  <p className="text-xs text-stone-500">
+                    {pkg.room_type
+                      ? `Rooms: ${formatRoomTypeLabel(pkg.room_type)}`
+                      : "Rooms: any type"}
+                  </p>
                   <Button
                     size="sm"
                     variant="outline"
@@ -154,7 +209,7 @@ export function HospitalityPackagesPanel({
           open={editor.editorOpen}
           onOpenChange={() => undefined}
           title={title}
-          subtitle="Stay and add-on packages for your public property site."
+          subtitle="Guests book this package with a room of the type you pick."
           isEdit={editor.editorIndex != null}
           saving={editor.saving}
           onCancel={editor.closeEditor}
@@ -190,6 +245,50 @@ export function HospitalityPackagesPanel({
                 onChange={(e) => editor.setDraft({ ...editor.draft!, description: e.target.value })}
                 rows={4}
               />
+            </div>
+            <div className="space-y-1">
+              <Label>Room type for this package</Label>
+              <Select
+                value={editor.draft.room_type?.trim() ? editor.draft.room_type : "any"}
+                onValueChange={(value) =>
+                  editor.setDraft({ ...editor.draft!, room_type: value === "any" ? "" : value })
+                }
+              >
+                <SelectTrigger className="h-11">
+                  <SelectValue placeholder="Pick a room type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="any">Any room type</SelectItem>
+                  {ROOM_TYPES.map((type) => (
+                    <SelectItem key={type} value={type}>
+                      {formatRoomTypeLabel(type)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-stone-500">
+                You do not pick one room number. You pick a type (for example Deluxe). Every room of
+                that type at this location can be used with the package.
+              </p>
+              {locationId <= 0 ? (
+                <p className="text-xs text-amber-700">Choose a location in the sidebar first.</p>
+              ) : matchingRooms.length > 0 ? (
+                <p className="text-xs text-stone-600">
+                  Rooms of this type here:{" "}
+                  {matchingRooms
+                    .map((room) => room.room_name || room.room_number || `#${room.id}`)
+                    .join(", ")}
+                </p>
+              ) : (
+                <p className="text-xs text-stone-500">
+                  No rooms of this type yet. Add them under Hospitality → Rooms, using the same type.
+                </p>
+              )}
+              {onAddRooms ? (
+                <Button type="button" variant="outline" className="mt-1 h-10" onClick={onAddRooms}>
+                  Add rooms
+                </Button>
+              ) : null}
             </div>
           </div>
         </ResponsiveEditSheet>

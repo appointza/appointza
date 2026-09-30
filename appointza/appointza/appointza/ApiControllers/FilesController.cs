@@ -82,12 +82,39 @@ namespace appointza.Controllers
             return Ok(response);
         }
         [HttpGet("Get")]
-        public async Task<FileStreamResult> Get(int id)
+        public async Task<IActionResult> Get(int id)
         {
             Files file = await filesService.Get(id);
-            Stream stream = new MemoryStream(file.content);
+            var etag = $"\"file-{file.id}-v{file.version}\"";
+            var ifNoneMatch = Request.Headers.IfNoneMatch.ToString();
+            if (!string.IsNullOrWhiteSpace(ifNoneMatch)
+                && ifNoneMatch.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Any(value => string.Equals(value, etag, StringComparison.Ordinal)))
+            {
+                Response.Headers.ETag = etag;
+                Response.Headers.CacheControl = "public, max-age=86400";
+                return StatusCode(StatusCodes.Status304NotModified);
+            }
 
-            return File(stream, "application/octet-stream", $"{file.id}.{file.type}");
+            Stream stream = new MemoryStream(file.content);
+            var contentType = ResolveContentType(file.type);
+            Response.Headers.ETag = etag;
+            Response.Headers.CacheControl = "public, max-age=86400";
+            return File(stream, contentType, $"{file.id}.{file.type}", enableRangeProcessing: true);
+        }
+
+        private static string ResolveContentType(string? fileType)
+        {
+            return (fileType ?? "").Trim().ToLowerInvariant() switch
+            {
+                "png" => "image/png",
+                "jpg" or "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                "svg" => "image/svg+xml",
+                "pdf" => "application/pdf",
+                _ => "application/octet-stream",
+            };
         }
     }
 }

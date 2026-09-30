@@ -34,6 +34,24 @@ export class OrganisationServiceTimingDeleteReq {
   organizationlocationid: number = 0;
 }
 
+export class OrganisationServiceTimingSlotReq {
+  day_of_week: number = 0;
+  start_time: string = "";
+  end_time: string = "";
+}
+
+export class OrganisationServiceTimingBulkSaveReq {
+  organisationid: number = 0;
+  organisationlocationid: number = 0;
+  counter: number = 0;
+  openbefore: number = 0;
+  slots: OrganisationServiceTimingSlotReq[] = [];
+}
+
+export class OrganisationServiceTimingHasAnyReq {
+  organisationid: number = 0;
+}
+
 export class OrganisationServiceTimingFinal {
   id: number = 0;
   localid: number = 0;
@@ -89,6 +107,9 @@ export class CalendarSlotOverviewItem {
   totime: string = "";
   statuscode: string = "";
   notes: string = "";
+  remaining: number = 0;
+  capacity: number = 0;
+  is_within_booking_window: boolean = true;
 }
 
 export class CalendarBookingOverviewItem {

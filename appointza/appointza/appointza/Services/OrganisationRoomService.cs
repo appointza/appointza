@@ -137,9 +137,7 @@ namespace appointza.Services
             var existing = await GetByIdTransaction(db, room.id, room.organisation_id)
                 ?? throw new InvalidOperationException("Room not found.");
 
-            room.guest ??= existing.guest;
-            room.booking ??= existing.booking;
-            room.payment ??= existing.payment;
+            RoomStayHistory.PreserveStaysOnUpdate(room, existing);
             room.cleaning_assignment ??= existing.cleaning_assignment;
             room.created_at = existing.created_at;
             EnsureDefaults(room);
@@ -217,8 +215,23 @@ namespace appointza.Services
             if (!string.IsNullOrWhiteSpace(req.date) && DateOnly.TryParse(req.date, out var parsed))
                 asOf = parsed;
 
+            var occupancyMonth = asOf;
+            if (!string.IsNullOrWhiteSpace(req.occupancy_month)
+                && DateOnly.TryParse($"{req.occupancy_month.Trim()}-01", out var occupancyParsed))
+            {
+                occupancyMonth = new DateOnly(occupancyParsed.Year, occupancyParsed.Month, 1);
+            }
+            else
+            {
+                occupancyMonth = new DateOnly(asOf.Year, asOf.Month, 1);
+            }
+
+            var occupancyByDay = RoomStayHistory.OccupancyByDay(rooms, occupancyMonth);
+
             foreach (var room in rooms)
                 ApplyStatusBoardViewForDate(room, asOf);
+
+            var availableCount = rooms.Count(r => r.availability_state == "Available");
 
             var counts = ValidStatuses.ToDictionary(s => s, _ => 0);
             foreach (var room in rooms)
@@ -262,6 +275,9 @@ namespace appointza.Services
                 status_summary = statusSummary,
                 floors = floors,
                 rooms = rooms,
+                occupancy_by_day = occupancyByDay,
+                available_count = availableCount,
+                occupied_count = Math.Max(0, rooms.Count - availableCount),
             };
         }
 
@@ -285,52 +301,51 @@ namespace appointza.Services
         static void ApplyStatusBoardViewForDate(OrganisationRoom room, DateOnly asOf)
         {
             var stored = ValidStatuses.Contains(room.status) ? room.status : "available";
+            var availabilityState = RoomStayHistory.GetAvailabilityState(room, asOf);
+            var hasBooking = RoomStayHistory.HasActiveBooking(room);
 
             // Manual ops overrides stay as-is (not date occupancy).
             if (stored is "maintenance" or "blocked" or "cleaning" or "hold")
-                return;
-
-            if (!TryGetStayDates(room, out var checkIn, out var checkOut))
             {
-                // Sticky reserved/occupied without valid dates → treat as free for the board day.
+                RoomStayHistory.OverlayBoardDay(room, asOf);
+                room.availability_state = availabilityState;
+                room.has_active_booking = hasBooking;
+                room.can_manage = hasBooking && availabilityState != "Available";
+                return;
+            }
+
+            if (!RoomStayHistory.HasAnyStay(room))
+            {
                 if (stored is "reserved" or "occupied" or "checkout_pending")
                 {
                     room.status = "available";
                     room.guest = null;
                 }
+                room.availability_state = availabilityState;
+                room.has_active_booking = false;
+                room.can_manage = false;
                 return;
             }
 
-            // Stay nights: check_in <= day < check_out
-            if (asOf >= checkIn && asOf < checkOut)
+            RoomStayHistory.OverlayBoardDay(room, asOf);
+
+            if (RoomStayHistory.AnyStayCoversDay(room, asOf))
             {
                 room.status = stored is "occupied" or "checkout_pending" ? stored : "reserved";
-                return;
             }
-
-            // Checkout morning
-            if (asOf == checkOut && stored == "checkout_pending")
+            else if (RoomStayHistory.AnyStayOnCheckoutMorning(room, asOf) && stored == "checkout_pending")
             {
                 room.status = "checkout_pending";
-                return;
+            }
+            else
+            {
+                room.status = "available";
+                room.guest = null;
             }
 
-            // Past or future stay relative to asOf — free today
-            room.status = "available";
-            room.guest = null;
-        }
-
-        static bool TryGetStayDates(OrganisationRoom room, out DateOnly checkIn, out DateOnly checkOut)
-        {
-            checkIn = default;
-            checkOut = default;
-            if (room.booking == null)
-                return false;
-            if (!DateOnly.TryParse(room.booking.check_in, out checkIn))
-                return false;
-            if (!DateOnly.TryParse(room.booking.check_out, out checkOut))
-                return false;
-            return checkOut > checkIn;
+            room.availability_state = availabilityState;
+            room.has_active_booking = hasBooking;
+            room.can_manage = hasBooking && availabilityState != "Available";
         }
 
         public async Task<bool> UpdateStatus(OrganisationRoomStatusUpdateReq req)
@@ -347,6 +362,8 @@ namespace appointza.Services
                 ?? throw new InvalidOperationException("Room not found.");
 
             var previousStatus = (room.status ?? "").Trim().ToLowerInvariant();
+            if (status == "available")
+                RoomStayHistory.CompleteCheckout(room, DateOnly.FromDateTime(DateTime.Now));
             room.status = status;
             if (status is not "checkout_pending" and not "cleaning")
                 room.cleaning_assignment = null;
@@ -373,7 +390,7 @@ namespace appointza.Services
             {
                 id = req.id,
                 organisation_id = req.organisation_id,
-                status = "checkout_pending",
+                status = "available",
                 source = "checkout",
             });
 
@@ -433,9 +450,7 @@ namespace appointza.Services
             var existing = await GetByIdTransaction(db, room.id, room.organisation_id)
                 ?? throw new InvalidOperationException("Room not found.");
 
-            room.guest ??= existing.guest;
-            room.booking ??= existing.booking;
-            room.payment ??= existing.payment;
+            RoomStayHistory.PreserveStaysOnUpdate(room, existing);
             room.cleaning_assignment ??= existing.cleaning_assignment;
             room.created_at = existing.created_at;
             EnsureDefaults(room);

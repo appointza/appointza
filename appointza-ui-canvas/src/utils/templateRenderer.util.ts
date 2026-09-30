@@ -3,7 +3,7 @@ import { environment, getUiBaseUrl } from "@/utils/environment";
 import { injectContactFormSupport } from "@/utils/templateContactForm.util";
 import {
   buildBookAppointmentPath,
-  buildTemplateBookingClickScript,
+  injectTemplateNavScript,
 } from "@/utils/templateBookingNav.util";
 import { getServiceStartingPrice } from "@/utils/servicePricing.util";
 import { toDateOnlyString } from "@/utils/eventDate.util";
@@ -609,26 +609,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
     'href=$1$2$1',
   );
 
-  // Remove legacy injected booking scripts (may contain wrong production org origin).
-  html = html.replace(/<script>[\s\S]*?MAIN_APP_ORIGIN[\s\S]*?<\/script>/gi, "");
-  html = html.replace(/<script>[\s\S]*?appointzaResolveMainAppOrigin[\s\S]*?<\/script>/gi, "");
-  html = html.replace(
-    /<script>[\s\S]*?appointza:booking-nav[\s\S]*?<\/script>/gi,
-    "",
-  );
-
-  // Inject booking link handler — login host resolved at click time.
-  const bookingNavScript = `
-<script>
-${buildTemplateBookingClickScript()}
-</script>`;
-
-  // Insert before </body> if present, otherwise append to end.
-  if (html.indexOf('</body>') !== -1) {
-    html = html.replace('</body>', bookingNavScript + '\n</body>');
-  } else {
-    html += bookingNavScript;
-  }
+  html = injectTemplateNavScript(html);
 
   html = injectContactFormSupport(
     html,

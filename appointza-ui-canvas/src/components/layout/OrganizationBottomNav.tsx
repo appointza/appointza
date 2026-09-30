@@ -6,21 +6,33 @@ import {
   Briefcase,
   Settings,
   Target,
+  ConciergeBell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/contexts/AuthContext';
+import { useOrganisationCatalogOfferings } from '@/hooks/useOrganisationCatalogOfferings';
+import {
+  bookingsNavVisible,
+  catalogNavLabel,
+  catalogNavShortLabel,
+  catalogServicesNavTo,
+} from '@/utils/organisationCatalogOfferings.util';
 
 interface NavItem {
+  id: string;
   to: string;
   icon: React.ElementType;
-  /** Full label (accessibility + tablet) */
   label: string;
-  /** Compact single-line label for narrow phones */
   shortLabel: string;
   hasAccess: boolean;
 }
 
 const OrganizationBottomNav = () => {
   const location = useLocation();
+  const { user } = useAuth();
+  const organisationId = user?.organisationid ?? 0;
+  const { offerings, offersRooms, offersServices, offersEvents } =
+    useOrganisationCatalogOfferings(organisationId);
 
   const getUserContext = () => {
     try {
@@ -51,8 +63,13 @@ const OrganizationBottomNav = () => {
       userpermission?.editandviewCreateEvent === true);
   const hasClientsAccess = !isStaff || userpermission?.editandviewClients === true;
 
+  const showBookingsNav = hasBookingsAccess && bookingsNavVisible(offerings);
+  const showCatalogNav =
+    hasServicesAccess && (offersServices || offersEvents);
+
   const navItems: NavItem[] = [
     {
+      id: 'dashboard',
       to: '/organization/dashboard',
       icon: Home,
       label: 'Dashboard',
@@ -60,20 +77,31 @@ const OrganizationBottomNav = () => {
       hasAccess: hasDashboardAccess,
     },
     {
+      id: 'bookings',
       to: '/organization/appointments',
       icon: CalendarDays,
       label: 'Bookings',
       shortLabel: 'Bookings',
-      hasAccess: hasBookingsAccess,
+      hasAccess: showBookingsNav,
     },
     {
-      to: '/organization/services',
+      id: 'catalog',
+      to: catalogServicesNavTo(offerings),
       icon: Briefcase,
-      label: 'Services & Events',
-      shortLabel: 'Services',
-      hasAccess: hasServicesAccess,
+      label: catalogNavLabel(offerings),
+      shortLabel: catalogNavShortLabel(offerings),
+      hasAccess: showCatalogNav,
     },
     {
+      id: 'hospitality',
+      to: '/organization/hospitality?section=room-status',
+      icon: ConciergeBell,
+      label: 'Hospitality',
+      shortLabel: 'Stay',
+      hasAccess: !isStaff && offersRooms,
+    },
+    {
+      id: 'leads',
       to: '/organization/leads',
       icon: Target,
       label: 'Leads',
@@ -81,6 +109,7 @@ const OrganizationBottomNav = () => {
       hasAccess: hasClientsAccess,
     },
     {
+      id: 'clients',
       to: '/organization/clients',
       icon: Users,
       label: 'Customers',
@@ -88,6 +117,7 @@ const OrganizationBottomNav = () => {
       hasAccess: hasClientsAccess,
     },
     {
+      id: 'settings',
       to: '/organization/profile',
       icon: Settings,
       label: 'Settings',
@@ -106,13 +136,15 @@ const OrganizationBottomNav = () => {
       <div className="flex min-h-[3.75rem] w-full overflow-x-auto pb-[env(safe-area-inset-bottom,0px)] pt-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {visibleNavItems.map((item) => {
           const Icon = item.icon;
+          const pathOnly = item.to.split('?')[0];
           const isActive =
-            location.pathname === item.to ||
-            (item.to !== '/organization/dashboard' && location.pathname.startsWith(item.to));
+            location.pathname === pathOnly ||
+            (pathOnly !== '/organization/dashboard' &&
+              location.pathname.startsWith(pathOnly));
 
           return (
             <Link
-              key={item.to}
+              key={item.id}
               to={item.to}
               aria-label={item.label}
               aria-current={isActive ? 'page' : undefined}

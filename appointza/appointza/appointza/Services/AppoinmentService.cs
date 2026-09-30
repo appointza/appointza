@@ -48,6 +48,21 @@ namespace appointza.Services
             this.creditWalletService = creditWalletService;
             this.organisationLoyaltyService = organisationLoyaltyService;
         }
+
+        /// <summary>
+        /// Appointments that still consume slot capacity (cancelled bookings free the slot).
+        /// </summary>
+        public static bool OccupiesBookingSlot(Appoinment? appointment)
+        {
+            if (appointment == null || !appointment.isactive)
+            {
+                return false;
+            }
+
+            var status = (appointment.statuscode ?? "").Trim();
+            return !string.Equals(status, "CANCELLED", StringComparison.OrdinalIgnoreCase);
+        }
+
         public async Task<List<Appoinment>> Select(AppoinmentSelectReq req)
         {
             List<Appoinment> result = null;

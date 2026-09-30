@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Link, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
@@ -29,6 +31,7 @@ import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
 import { 
+  Clock,
   MapPin, 
   Plus, 
   Edit, 
@@ -49,17 +52,12 @@ import {
   buildOrganisationCustomUrlHost,
   buildOrganisationPublicSiteOriginFromHost,
 } from "@/utils/orgPublicSiteUrl.util";
-import { OrganisationLocation, OrganisationLocationSelectReq, OrganisationLocationDeleteReq } from "@/models/organisationlocation.model";
+import { OrganisationLocation, OrganisationLocationDeleteReq } from "@/models/organisationlocation.model";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { OrganisationService } from "@/services/organisation.service";
-import { Organisation, OrganisationSelectReq, OrganisationType } from "@/models/organisation.model";
+import { Organisation, OrganisationType } from "@/models/organisation.model";
 import { FilesService } from "@/services/files.service";
-import {
-  OrganisationTypeSelector,
-  organisationTypeLabel,
-} from "@/components/organization/OrganisationTypeSelector";
-import { ReferenceValueService } from "@/services/referencevalue.service";
-import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
+import { organisationTypeLabel } from "@/components/organization/OrganisationTypeSelector";
 import { LocationPicker } from "@/components/organization/LocationPicker";
 import { GeocodingService } from "@/services/geocoding.service";
 import {
@@ -73,6 +71,26 @@ import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditShe
 import { OrgImageAssetField } from "@/components/organization/OrgImageAssetField";
 import { HospitalityProfileSettingsReq } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
+import { OrganisationCatalogOfferingsSelector } from "@/components/organization/OrganisationCatalogOfferingsSelector";
+import {
+  CATALOG_OFFERING_LABELS,
+  defaultOfferingsForOrganisationType,
+  mergeCatalogOfferingsIntoAttributes,
+  organisationTypeFromCatalogOfferings,
+  parseCatalogOfferings,
+  resolveInitialCatalogOfferings,
+  type CatalogOfferingKind,
+} from "@/utils/organisationCatalogOfferings.util";
+import {
+  mergeOrganisationAppointmentSettings,
+  parseOrganisationAppointmentSettings,
+} from "@/utils/organisationAppointmentSettings.util";
+import {
+  organisationLocationsQueryKey,
+  useOrganisationLocations,
+} from "@/hooks/useOrganisationLocations";
+import { organisationQueryKey, useOrganisation } from "@/hooks/useOrganisation";
+import { useReferenceValues } from "@/hooks/useReferenceValues";
 
 // Component for handling authenticated image loading
 const AuthenticatedImage = ({ imageId, alt, className, onError }: { 
@@ -162,16 +180,44 @@ const AuthenticatedImage = ({ imageId, alt, className, onError }: {
   );
 };
 
-const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
+const LocationsScreen = ({
+  embedded = false,
+  section,
+}: {
+  embedded?: boolean;
+  section?: "locations" | "organization";
+}) => {
   const { toast } = useToast();
   const { user, isAuthenticated, userType } = useAuth();
+  const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const organizationId = user?.organisationid || 1;
-  const locationSubtab = searchParams.get("subtab") === "organization" ? "organization" : "locations";
+  const locationSubtab: "locations" | "organization" =
+    section ?? (searchParams.get("subtab") === "organization" ? "organization" : "locations");
+  const hideInnerTabs = Boolean(section);
+
+  const {
+    data: locations = [],
+    isFetching: isLocationsFetching,
+    refetch: refetchLocations,
+  } = useOrganisationLocations({
+    organisationId: organizationId,
+    enabled: organizationId > 0,
+  });
+
+  const { data: fetchedOrganization, refetch: refetchOrganization } = useOrganisation({
+    organisationId: organizationId,
+    enabled: organizationId > 0,
+  });
+
+  const { data: referenceValues = [] } = useReferenceValues({
+    organisationId: organizationId,
+    referencetypeid: 6,
+    enabled: organizationId > 0,
+  });
 
   // State management
   const [isLoading, setIsLoading] = useState(false);
-  const [locations, setLocations] = useState<OrganisationLocation[]>([]);
   const [selectedLocation, setSelectedLocation] = useState<OrganisationLocation | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -185,6 +231,11 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     null,
   );
   const [savingOrganization, setSavingOrganization] = useState(false);
+  const [selectedCatalogOfferings, setSelectedCatalogOfferings] = useState<CatalogOfferingKind[]>(
+    [],
+  );
+  const [orgAppointmentCounter, setOrgAppointmentCounter] = useState(1);
+  const [orgAppointmentOpenBefore, setOrgAppointmentOpenBefore] = useState(0);
   
   // Form state
   const [location, setLocation] = useState<OrganisationLocation>(new OrganisationLocation());
@@ -201,74 +252,22 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const locationService = useMemo(() => new OrganisationLocationService(), []);
   const organisationService = useMemo(() => new OrganisationService(), []);
   const filesService = useMemo(() => new FilesService(), []);
-  const referenceValueService = useMemo(() => new ReferenceValueService(), []);
 
-  // ReferenceValue state for referencetypeid = 6
-  const [referenceValues, setReferenceValues] = useState<ReferenceValue[]>([]);
   const [selectedReferenceValueIds, setSelectedReferenceValueIds] = useState<number[]>([]);
   
 
-  // Fetch locations
-  const fetchLocations = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      const req = new OrganisationLocationSelectReq();
-      req.organisationid = organizationId;
-      
-      const response = await locationService.select(req);
-          
-          
-          setLocations(response || []);
-    } catch (error) {
-      console.error('❌ Error fetching locations:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch locations",
-        variant: "destructive"
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [organizationId, toast, locationService]);
+  const refreshLocations = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: organisationLocationsQueryKey(organizationId, 0),
+    });
+    await refetchLocations();
+  }, [organizationId, queryClient, refetchLocations]);
 
-  // Fetch ReferenceValues with referencetypeid = 6
-  const fetchReferenceValues = useCallback(async () => {
-    try {
-      const req = new ReferenceValueSelectReq();
-      req.referencetypeid = 6;
-      req.organisationid = organizationId;
-      
-      const response = await referenceValueService.select(req);
-      setReferenceValues(response || []);
-    } catch (error) {
-      console.error('❌ Error fetching ReferenceValues:', error);
+  useEffect(() => {
+    if (fetchedOrganization) {
+      setOrganization(fetchedOrganization);
     }
-  }, [organizationId, referenceValueService]);
-
-  // Fetch organization details
-  const fetchOrganization = useCallback(async () => {
-    try {
-      const req = new OrganisationSelectReq();
-      req.id = organizationId;
-      
-      const response = await organisationService.select(req);
-      if (response && response.length > 0) {
-        const org = response[0];
-        // Ensure attributes_json is properly set
-        if (!org.attributes_json) {
-          org.attributes_json = "{}";
-        }
-        setOrganization(org);
-      }
-    } catch (error) {
-      console.error('❌ Error fetching organization:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch organization details",
-        variant: "destructive"
-      });
-    }
-  }, [organizationId, organisationService, toast]);
+  }, [fetchedOrganization]);
 
   const loadHospitalitySettings = useCallback(async (orgType?: OrganisationType) => {
     if (organizationId <= 0) return;
@@ -290,6 +289,36 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
       setHospitalitySettings(null);
     }
   }, [organizationId]);
+
+  const syncCatalogOfferingsFromOrg = useCallback(() => {
+    const orgSnapshot = organization ?? fetchedOrganization;
+    if (!orgSnapshot) return;
+    setSelectedCatalogOfferings(
+      resolveInitialCatalogOfferings(orgSnapshot.attributes_json, orgSnapshot.organisation_type),
+    );
+    const appointmentSettings = parseOrganisationAppointmentSettings(orgSnapshot.attributes_json);
+    setOrgAppointmentCounter(appointmentSettings.counter);
+    setOrgAppointmentOpenBefore(appointmentSettings.openbefore);
+  }, [organization, fetchedOrganization]);
+
+  const displayedCatalogOfferings = useMemo(() => {
+    if (!organization) return [] as CatalogOfferingKind[];
+    const stored = parseCatalogOfferings(organization.attributes_json);
+    if (stored.length > 0) return stored;
+    return defaultOfferingsForOrganisationType(organization.organisation_type);
+  }, [organization]);
+
+  const displayedAppointmentSettings = useMemo(
+    () => parseOrganisationAppointmentSettings(organization?.attributes_json),
+    [organization],
+  );
+
+  const offersServiceAppointments = displayedCatalogOfferings.includes("services");
+
+  const editOrganisationType = useMemo(
+    (): OrganisationType => organisationTypeFromCatalogOfferings(selectedCatalogOfferings),
+    [selectedCatalogOfferings],
+  );
 
   const isHospitalityOrganisation =
     organization?.organisation_type === "hospitality" || organization?.organisation_type === "both";
@@ -318,6 +347,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
       { replace: true },
     );
     setShowOrgEditDialog(true);
+    syncCatalogOfferingsFromOrg();
     if (isHospitalityOrganisation) {
       void loadHospitalitySettings(organization?.organisation_type);
     }
@@ -336,10 +366,24 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
   };
 
   useEffect(() => {
+    if (locationSubtab === "organization" && organization) {
+      syncCatalogOfferingsFromOrg();
+    }
+  }, [locationSubtab, organization, syncCatalogOfferingsFromOrg]);
+
+  useEffect(() => {
+    if (!showOrgEditDialog) return;
+    if (editOrganisationType === "hospitality" || editOrganisationType === "both") {
+      void loadHospitalitySettings(editOrganisationType);
+    }
+  }, [showOrgEditDialog, editOrganisationType, loadHospitalitySettings]);
+
+  useEffect(() => {
     if (searchParams.get("edit") === "organization" && organization) {
       setShowOrgEditDialog(true);
+      syncCatalogOfferingsFromOrg();
     }
-  }, [organization, searchParams]);
+  }, [organization, searchParams, syncCatalogOfferingsFromOrg]);
 
   useEffect(() => {
     if (
@@ -351,13 +395,6 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
       setHospitalitySettings(null);
     }
   }, [organization, loadHospitalitySettings]);
-
-  // Initialize on mount
-  useEffect(() => {
-    fetchLocations();
-    fetchOrganization();
-    fetchReferenceValues();
-  }, [fetchLocations, fetchOrganization, fetchReferenceValues]);
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -570,7 +607,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
         setShowAddDialog(false);
         setShowEditDialog(false);
         resetForm();
-        fetchLocations();
+        await refreshLocations();
       } else {
         throw new Error('Empty response from server');
       }
@@ -608,7 +645,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
         });
         setShowDeleteDialog(false);
         setSelectedLocation(null);
-        fetchLocations();
+        await refreshLocations();
       } else {
         throw new Error('Failed to delete location');
       }
@@ -775,6 +812,29 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const handleSaveOrganization = async () => {
     if (!organization) return;
 
+    if (selectedCatalogOfferings.length === 0) {
+      toast({
+        title: "Select what you provide",
+        description: "Choose at least one option: services, events, or rooms.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const derivedOrganisationType =
+      organisationTypeFromCatalogOfferings(selectedCatalogOfferings);
+
+    const attributesJson = mergeOrganisationAppointmentSettings(
+      mergeCatalogOfferingsIntoAttributes(
+        organization.attributes_json,
+        selectedCatalogOfferings,
+      ),
+      {
+        counter: orgAppointmentCounter,
+        openbefore: orgAppointmentOpenBefore,
+      },
+    );
+
     const updatedOrganization = {
       ...organization,
       name: organization?.name?.trim() || "",
@@ -782,9 +842,9 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
       primarytypecode: organization?.primarytypecode?.trim() || "",
       secondarytypecode: organization?.secondarytypecode?.trim() || "",
       notes: organization?.notes?.trim() || "",
-      organisation_type: organization?.organisation_type ?? "service",
+      organisation_type: derivedOrganisationType,
       booking_amount: organization?.booking_amount ?? 0,
-      attributes_json: organization?.attributes_json || "{}",
+      attributes_json: attributesJson,
       attributes: organization?.attributes || new Organisation.AttributesData(),
     };
 
@@ -815,7 +875,8 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
         description: "Organization details updated successfully",
       });
       closeOrganizationEdit();
-      fetchOrganization();
+      await queryClient.invalidateQueries({ queryKey: organisationQueryKey(organizationId) });
+      await refetchOrganization();
     } catch (error: unknown) {
       console.error("❌ Error updating organization:", error);
       const err = error as { response?: { data?: { message?: string } }; message?: string };
@@ -851,7 +912,7 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     );
   }
 
-  if (isLoading && locations.length === 0) {
+  if ((isLoading || isLocationsFetching) && locations.length === 0) {
     return (
       <OrganizationPageShell embedded={embedded}>
         <div className="flex items-center justify-center h-64">
@@ -866,9 +927,13 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
     <OrganizationPageShell embedded={embedded}>
       {embedded ? (
         <SettingsEmbeddedHeader
-          icon={MapPin}
-          title="Location"
-          description="Manage your business locations and organization details."
+          icon={hideInnerTabs && locationSubtab === "organization" ? Building2 : MapPin}
+          title={hideInnerTabs && locationSubtab === "organization" ? "Organisation" : "Location"}
+          description={
+            hideInnerTabs && locationSubtab === "organization"
+              ? "Organisation details, what you provide, and appointment options."
+              : "Manage your business locations."
+          }
         />
       ) : null}
       <div className={cn(embedded ? settingsEmbedded.sectionBody : "space-y-6")}>
@@ -896,7 +961,10 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
           onValueChange={(value) => syncLocationSubtab(value as "locations" | "organization")}
           className="w-full"
         >
-          <TabsList className="grid w-full grid-cols-2 rounded-xl border border-stone-200 bg-white p-1 shadow-none">
+          <TabsList className={cn(
+            "grid w-full grid-cols-2 rounded-xl border border-stone-200 bg-white p-1 shadow-none",
+            hideInnerTabs && "hidden",
+          )}>
             <TabsTrigger value="locations" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
               <MapPin className="h-4 w-4" />
               Locations
@@ -1306,14 +1374,19 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
           </TabsContent>
 
           <TabsContent value="organization" className="space-y-6">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {!hideInnerTabs ? (
               <div>
                 <h3 className="text-xl font-semibold">Organization Details</h3>
                 <p className="text-muted-foreground">
                   Manage your organization information and branding.
                 </p>
               </div>
-              <Button onClick={openOrganizationEdit} className="bg-blue-600 shadow-none hover:bg-blue-700">
+              ) : null}
+              <Button
+                onClick={openOrganizationEdit}
+                className="min-h-11 w-full bg-blue-600 shadow-none hover:bg-blue-700 sm:ml-auto sm:w-auto"
+              >
                 <Edit className="mr-2 h-4 w-4" />
                 Edit Organization
               </Button>
@@ -1352,6 +1425,16 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
                         {organisationTypeLabel(organization?.organisation_type)}
                       </p>
                     </div>
+                    {displayedCatalogOfferings.length > 0 ? (
+                      <div className="md:col-span-2">
+                        <Label className="text-sm font-medium">What you provide</Label>
+                        <p className="text-sm text-gray-600">
+                          {displayedCatalogOfferings
+                            .map((kind) => CATALOG_OFFERING_LABELS[kind])
+                            .join(", ")}
+                        </p>
+                      </div>
+                    ) : null}
                     {isHospitalityOrganisation && hospitalitySettings ?
                       <div>
                         <Label className="text-sm font-medium">Booking type</Label>
@@ -1388,6 +1471,41 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
               </Card>
             )}
 
+            {organization && offersServiceAppointments ? (
+              <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Clock className="h-5 w-5" />
+                    Service appointment options
+                  </CardTitle>
+                  <CardDescription>
+                    Organisation-wide counters and how far ahead customers can book. Hours stay per location
+                    under Settings → Business hours.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <Label className="text-sm font-medium">Counters</Label>
+                    <p className="text-sm text-gray-600">{displayedAppointmentSettings.counter}</p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      How many customers can book the same time slot (e.g. 2 chairs).
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium">Booking window</Label>
+                    <p className="text-sm text-gray-600">
+                      {displayedAppointmentSettings.openbefore > 0
+                        ? `${displayedAppointmentSettings.openbefore} day${displayedAppointmentSettings.openbefore === 1 ? "" : "s"} in advance`
+                        : "No limit"}
+                    </p>
+                    <p className="mt-1 text-xs text-stone-500">
+                      Customers can only pick dates within this window.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
             {/* Organization Edit Panel */}
             <ResponsiveEditSheet
               open={showOrgEditDialog}
@@ -1404,20 +1522,56 @@ const LocationsScreen = ({ embedded = false }: { embedded?: boolean }) => {
             >
               {organization ?
                 <div className="space-y-4">
-                  <OrganisationTypeSelector
-                    value={(organization.organisation_type ?? "service") as OrganisationType}
-                    onChange={(value) => {
-                      setOrganization((prev) => (prev ? { ...prev, organisation_type: value } : null));
-                      if (value === "hospitality" || value === "both") {
-                        void loadHospitalitySettings(value);
-                      } else {
-                        setHospitalitySettings(null);
-                      }
-                    }}
+                  <OrganisationCatalogOfferingsSelector
+                    value={selectedCatalogOfferings}
+                    onChange={setSelectedCatalogOfferings}
                   />
 
-                  {(organization.organisation_type === "hospitality" ||
-                    organization.organisation_type === "both") &&
+                  {(selectedCatalogOfferings.includes("services") ||
+                    selectedCatalogOfferings.includes("events")) && (
+                    <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-stone-900">
+                          Service appointment options
+                        </p>
+                        <p className="text-xs text-stone-500">
+                          Applies to every location. Set opening hours separately under Business hours.
+                        </p>
+                      </div>
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        <div className="space-y-1">
+                          <Label htmlFor="org-appointment-counter">Counters</Label>
+                          <NumberInput
+                            id="org-appointment-counter"
+                            min={1}
+                            value={orgAppointmentCounter}
+                            onValueChange={setOrgAppointmentCounter}
+                            emptyWhenZero={false}
+                            className="h-11"
+                          />
+                          <p className="text-xs text-stone-500">
+                            Same time slot can be booked this many times (e.g. 8 slots × 2 counters).
+                          </p>
+                        </div>
+                        <div className="space-y-1">
+                          <Label htmlFor="org-appointment-window">Booking window (days)</Label>
+                          <NumberInput
+                            id="org-appointment-window"
+                            min={0}
+                            value={orgAppointmentOpenBefore}
+                            onValueChange={setOrgAppointmentOpenBefore}
+                            emptyWhenZero={false}
+                            className="h-11"
+                          />
+                          <p className="text-xs text-stone-500">
+                            How many days ahead customers can book. 0 means no limit.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {(editOrganisationType === "hospitality" || editOrganisationType === "both") &&
                   hospitalitySettings ?
                     <div className="space-y-4 rounded-xl border border-stone-200 bg-white p-4">
                       <div>

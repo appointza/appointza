@@ -21,9 +21,10 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { UsersService } from "@/services/users.service";
 import { FilesService } from "@/services/files.service";
-import { Users, UsersSelectReq, Organisationdeletereq } from "@/models/users.model";
+import { Users, UsersSelectReq, UsersGetOtpReq, Organisationdeletereq } from "@/models/users.model";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { ProfilePhotoSection } from "@/components/user/ProfilePhotoSection";
+import OtpInput from "@/components/auth/OtpInput";
 import {
   resolveProfileImageId,
   useAuthenticatedProfileImage,
@@ -77,6 +78,8 @@ const UserProfile = () => {
   const [profileImageVersion, setProfileImageVersion] = useState(0);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [deleteOtpSent, setDeleteOtpSent] = useState(false);
+  const [isSendingDeleteOtp, setIsSendingDeleteOtp] = useState(false);
   const [otp, setOtp] = useState("");
 
   const profileImageId = useMemo(() => {
@@ -274,45 +277,122 @@ const UserProfile = () => {
     }
   };
 
-  const handleDeleteProfile = async () => {
-    if (!isAuthenticated) return;
+  const handleDeleteProfile = async (event?: React.MouseEvent) => {
+    event?.preventDefault();
+    if (!isAuthenticated || !userId) return;
+
+    if (!deleteOtpSent || otp.length !== 6) {
+      toast({
+        title: "Verification required",
+        description:
+          "Send an OTP to your mobile number and enter the 6-digit code to confirm deletion.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setIsDeleting(true);
     try {
       const req = new Organisationdeletereq();
-      req.organisationid = user?.organisationid || 0;
       req.userid = userId;
       req.otp = otp;
 
-      let response;
       if (isCustomer) {
-        response = await usersService.Deleteuserpermanent(req);
+        req.organisationid = 0;
+        await usersService.Deleteuserpermanent(req);
         toast({
           title: "Success",
           description: "Account deleted successfully",
         });
       } else {
-        response = await usersService.DeleteOrganisationPermananet(req);
+        req.organisationid = user?.organisationid || 0;
+        await usersService.DeleteOrganisationPermananet(req);
         toast({
           title: "Success",
           description: "Organization deleted successfully",
         });
       }
 
-      if (response) {
-        localStorage.removeItem("user_context");
-        window.location.href = "/login";
-      }
+      localStorage.removeItem("user_context");
+      window.location.href = "/login";
     } catch (error) {
       console.error("Error deleting profile:", error);
       toast({
         title: "Error",
-        description: "Failed to delete profile",
+        description: getDeleteAccountErrorMessage(error),
         variant: "destructive",
       });
     } finally {
       setIsDeleting(false);
-      setShowDeleteDialog(false);
+    }
+  };
+
+  const deleteOtpMobile = (profile.mobile || user?.mobile || "").replace(/[\s\-()]/g, "");
+
+  const resetDeleteDialogState = () => {
+    setOtp("");
+    setDeleteOtpSent(false);
+    setIsSendingDeleteOtp(false);
+  };
+
+  const handleDeleteDialogOpenChange = (open: boolean) => {
+    setShowDeleteDialog(open);
+    if (!open) {
+      resetDeleteDialogState();
+    }
+  };
+
+  const sendDeleteConfirmationOtp = async () => {
+    if (!deleteOtpMobile) {
+      toast({
+        title: "Mobile number required",
+        description: "Add a mobile number to your profile before deleting your account.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsSendingDeleteOtp(true);
+    try {
+      const getOtpReq = new UsersGetOtpReq();
+      getOtpReq.mobile = deleteOtpMobile;
+      await usersService.getotp(getOtpReq);
+      setDeleteOtpSent(true);
+      setOtp("");
+      toast({
+        title: "OTP sent",
+        description: `Enter the verification code sent to ${deleteOtpMobile}.`,
+      });
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { key?: string; message?: string } }; message?: string };
+      const key = err?.response?.data?.key;
+      const message = err?.response?.data?.message || err?.message || "Failed to send OTP";
+      toast({
+        title: key === "UserNotFound" ? "Account not found" : "Failed to send OTP",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsSendingDeleteOtp(false);
+    }
+  };
+
+  const getDeleteAccountErrorMessage = (error: unknown) => {
+    const err = error as { response?: { data?: { key?: string; message?: string } }; message?: string };
+    const key = err?.response?.data?.key;
+    switch (key) {
+      case "OtpInvalid":
+        return "The verification code is incorrect. Request a new OTP and try again.";
+      case "OtpExpired":
+        return "The verification code has expired. Request a new OTP and try again.";
+      case "UsersNotFound":
+        return "Your account could not be found. Please sign in again.";
+      default:
+        return (
+          err?.response?.data?.message ||
+          err?.message ||
+          (isCustomer ? "Failed to delete account" : "Failed to delete organization")
+        );
     }
   };
 
@@ -539,7 +619,7 @@ const UserProfile = () => {
                   data. This cannot be undone.
                 </p>
 
-                <AlertDialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
+                <AlertDialog open={showDeleteDialog} onOpenChange={handleDeleteDialogOpenChange}>
                   <AlertDialogTrigger asChild>
                     <Button
                       type="button"
@@ -558,27 +638,46 @@ const UserProfile = () => {
                         This action cannot be undone. All related data will be lost forever.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
-                    <div className="py-4">
-                      <Label htmlFor="otp-user-profile" className={org.label}>
-                        Enter OTP (if required)
-                      </Label>
-                      <Input
-                        id="otp-user-profile"
-                        value={otp}
-                        onChange={(e) => setOtp(e.target.value)}
-                        placeholder="Enter OTP"
-                        inputMode="numeric"
-                        autoComplete="one-time-code"
-                        className={cn(profileFieldInputClass, "mt-1.5")}
-                      />
+                    <div className="space-y-4 py-4">
+                      <p className="text-sm text-stone-500">
+                        {deleteOtpMobile
+                          ? `We will send a verification code to ${deleteOtpMobile} to confirm this action.`
+                          : "Add a mobile number to your profile before deleting your account."}
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => void sendDeleteConfirmationOtp()}
+                        disabled={!deleteOtpMobile || isSendingDeleteOtp}
+                        className="min-h-11 w-full touch-manipulation"
+                      >
+                        {isSendingDeleteOtp ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Sending OTP...
+                          </>
+                        ) : deleteOtpSent ? (
+                          "Resend OTP"
+                        ) : (
+                          "Send OTP"
+                        )}
+                      </Button>
+                      {deleteOtpSent ? (
+                        <div className="space-y-2">
+                          <Label htmlFor="otp-user-profile" className={org.label}>
+                            Enter verification code
+                          </Label>
+                          <OtpInput onChange={setOtp} onComplete={setOtp} />
+                        </div>
+                      ) : null}
                     </div>
                     <AlertDialogFooter className="gap-2 md:gap-0">
                       <AlertDialogCancel className="min-h-11 w-full touch-manipulation md:w-auto">
                         Cancel
                       </AlertDialogCancel>
                       <AlertDialogAction
-                        onClick={handleDeleteProfile}
-                        disabled={isDeleting}
+                        onClick={(event) => void handleDeleteProfile(event)}
+                        disabled={isDeleting || !deleteOtpSent || otp.length !== 6}
                         className="min-h-11 w-full touch-manipulation bg-red-600 hover:bg-red-700 md:w-auto"
                       >
                         {isDeleting ? (

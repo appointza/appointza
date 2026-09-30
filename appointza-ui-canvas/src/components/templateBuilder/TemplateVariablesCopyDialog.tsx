@@ -27,10 +27,12 @@ type PromptMode = "html" | "blocks";
 
 export default function TemplateVariablesCopyDialog({
   triggerClassName,
+  triggerLabel = "Ask AI for help",
   locationId,
   locationName,
 }: {
   triggerClassName?: string;
+  triggerLabel?: string;
   locationId?: number;
   locationName?: string;
 }) {
@@ -122,18 +124,16 @@ export default function TemplateVariablesCopyDialog({
           className={cn("h-9 gap-1.5", triggerClassName)}
         >
           <Sparkles className="h-4 w-4 text-orange-600" />
-          <span className="hidden sm:inline">Copy AI prompts</span>
+          {triggerLabel}
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[90dvh] w-[calc(100vw-1.5rem)] max-w-3xl min-w-0 flex-col gap-3 overflow-hidden p-4 sm:p-6">
         <DialogHeader className="min-w-0 shrink-0 pr-8 text-left">
           <DialogTitle className="text-xl leading-tight text-appointza-navy sm:text-2xl">
-            AI prompts — HTML & Blocks
+            Ask AI to write this page
           </DialogTitle>
           <DialogDescription className="text-sm leading-relaxed sm:text-base">
-            For {businessContext.organisationName || "your business"} — pick HTML or Blocks, then set
-            theme and who the site is for. Prompts include scroll motion rules and hide empty
-            variable sections.
+            Copy a ready-made question for ChatGPT or Claude. Paste the answer into this app, then tap Save.
           </DialogDescription>
         </DialogHeader>
 

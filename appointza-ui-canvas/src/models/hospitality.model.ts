@@ -113,6 +113,9 @@ export class OrganisationRoom {
   payment?: RoomPaymentData | null;
   cleaning_assignment?: RoomCleaningAssignmentData | null;
   isactive: boolean = true;
+  availability_state: string = "Available";
+  has_active_booking: boolean = false;
+  can_manage: boolean = false;
 }
 
 export class RoomCapacityData {
@@ -148,17 +151,30 @@ export class RoomGuestData {
   email?: string;
 }
 
+export class RoomPaymentData {
+  total: number = 0;
+  paid: number = 0;
+  balance: number = 0;
+}
+
+export class RoomStayRecord {
+  booking_id: string = "";
+  booking_guid: string = "";
+  check_in: string = "";
+  check_out: string = "";
+  nights: number = 0;
+  guest?: RoomGuestData | null;
+  payment?: RoomPaymentData | null;
+  package_ids: string[] = [];
+  closed: boolean = false;
+}
+
 export class RoomBookingData {
   booking_id: string = "";
   check_in: string = "";
   check_out: string = "";
   nights: number = 0;
-}
-
-export class RoomPaymentData {
-  total: number = 0;
-  paid: number = 0;
-  balance: number = 0;
+  stays: RoomStayRecord[] = [];
 }
 
 export class RoomCleaningAssignmentData {
@@ -183,6 +199,7 @@ export class OrganisationRoomStatusReq {
   organisation_location_id: number = 0;
   room_id?: number;
   date?: string;
+  occupancy_month?: string;
 }
 
 export class OrganisationRoomStatusUpdateReq {
@@ -249,6 +266,9 @@ export class OrganisationRoomStatusBoardRes {
   status_summary: OrganisationRoomStatusSummaryItem[] = [];
   floors: OrganisationRoomStatusFloorGroup[] = [];
   rooms: OrganisationRoom[] = [];
+  occupancy_by_day: Record<string, number> = {};
+  available_count: number = 0;
+  occupied_count: number = 0;
 }
 
 export class OrganisationRoomStatusSummaryItem {
@@ -333,10 +353,21 @@ export function normalizeOrganisationRoom(raw: OrganisationRoom | Record<string,
     [...(source.gallery_photos as string[])]
   : [];
   room.guest = source.guest ? { ...new RoomGuestData(), ...(source.guest as RoomGuestData) } : null;
-  room.booking = source.booking ? { ...new RoomBookingData(), ...(source.booking as RoomBookingData) } : null;
+  room.booking = source.booking
+    ? {
+        ...new RoomBookingData(),
+        ...(source.booking as RoomBookingData),
+        stays: Array.isArray((source.booking as RoomBookingData).stays)
+          ? (source.booking as RoomBookingData).stays.map((stay) => ({ ...stay }))
+          : [],
+      }
+    : null;
   room.payment = source.payment ? { ...new RoomPaymentData(), ...(source.payment as RoomPaymentData) } : null;
   room.cleaning_assignment = source.cleaning_assignment ?
     { ...new RoomCleaningAssignmentData(), ...(source.cleaning_assignment as RoomCleaningAssignmentData) }
   : null;
+  room.availability_state = String(source.availability_state ?? "Available");
+  room.has_active_booking = source.has_active_booking === true;
+  room.can_manage = source.can_manage === true;
   return room;
 }

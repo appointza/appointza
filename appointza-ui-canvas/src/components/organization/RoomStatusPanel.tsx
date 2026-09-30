@@ -223,11 +223,11 @@ export function RoomStatusPanel({
                         id: selectedRoom.id,
                         organisation_id: organisationId,
                       }),
-                    "Checkout initiated.",
+                    "Room is available now.",
                   )
                 }
               >
-                Checkout
+                Checkout — room available
               </Button>
               <Button
                 disabled={busy}

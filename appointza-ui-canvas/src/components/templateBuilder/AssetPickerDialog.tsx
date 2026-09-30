@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
 import {
   Dialog,
   DialogContent,
@@ -6,9 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Loader2, Upload } from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
+import { Loader2 } from "lucide-react";
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 
 type AssetPickerDialogProps = {
@@ -24,36 +23,12 @@ export function AssetPickerDialog({
   onSelect,
   title = "Choose from assets",
 }: AssetPickerDialogProps) {
-  const { assets, isLoading, uploadFiles, getImageUrl, ensureLoaded } = useOrgTemplateAssets();
-  const { toast } = useToast();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const { assets, isLoading, getImageUrl, ensureLoaded } = useOrgTemplateAssets();
 
   useEffect(() => {
     if (!open) return;
     void ensureLoaded();
   }, [open, ensureLoaded]);
-
-  const handleUpload = async (fileList: FileList | null) => {
-    if (!fileList?.length) return;
-    const files = Array.from(fileList).filter((f) => f.type.startsWith("image/"));
-    if (files.length === 0) {
-      toast({ title: "Invalid file", description: "Choose image files only.", variant: "destructive" });
-      return;
-    }
-    setUploading(true);
-    try {
-      const ids = await uploadFiles(files);
-      if (ids[0]) {
-        onSelect(ids[0]);
-        onOpenChange(false);
-      }
-    } catch {
-      toast({ title: "Upload failed", variant: "destructive" });
-    } finally {
-      setUploading(false);
-    }
-  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -64,38 +39,9 @@ export function AssetPickerDialog({
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Organisation images stored in Files. Pick one to use its id in this block.
+            Pick an image from Assets. To add new photos, open Assets and upload there.
           </DialogDescription>
         </DialogHeader>
-
-        <input
-          ref={inputRef}
-          type="file"
-          accept="image/*"
-          multiple
-          className="hidden"
-          onChange={(e) => {
-            void handleUpload(e.target.files);
-            e.target.value = "";
-          }}
-        />
-
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="rounded-xl"
-            disabled={uploading}
-            onClick={() => inputRef.current?.click()}
-          >
-            {uploading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Upload className="mr-2 h-4 w-4" />
-            )}
-            Upload new
-          </Button>
-        </div>
 
         {isLoading ? (
           <div className="flex items-center justify-center py-12 text-sm text-gray-500">
@@ -104,7 +50,11 @@ export function AssetPickerDialog({
           </div>
         ) : assets.length === 0 ? (
           <p className="py-8 text-center text-sm text-gray-500">
-            No assets yet. Upload images — they are saved with a file id you can reuse in any block.
+            No images yet.{" "}
+            <Link to="/organization/assets" className="font-medium text-blue-600 hover:underline" onClick={() => onOpenChange(false)}>
+              Upload in Assets
+            </Link>
+            .
           </p>
         ) : (
           <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">

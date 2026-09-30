@@ -1,5 +1,5 @@
 import { useState, useRef, useMemo, useEffect } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -68,7 +68,6 @@ import {
   ComboEditorFields,
   ServiceEditorFields,
 } from "@/components/organization/ServiceEditorFields";
-import { RoomDefinitionsPanel } from "@/components/organization/RoomDefinitionsPanel";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
 import type { EventBookingFormField } from "@/utils/eventBookingFormFields.util";
@@ -78,6 +77,8 @@ import { FilesService } from "@/services/files.service";
 import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
 import { getServicePriceSummary } from "@/utils/servicePricing.util";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
+import { useOrganisationCatalogOfferings } from "@/hooks/useOrganisationCatalogOfferings";
+import { normalizeCatalogTab } from "@/utils/organisationCatalogOfferings.util";
 import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboarding";
 import { ServicesEventsExplainer } from "@/components/onboarding/ServicesEventsExplainer";
 import { onboardingStepRoute } from "@/utils/organizationOnboarding.util";
@@ -224,18 +225,23 @@ const OrganizationServices = () => {
   const { user, isAuthenticated, userType } = useAuth();
   const { id: globalLocationId, setId: setGlobalLocationId } = useGlobalId();
   const organizationId = user?.organisationid ?? 0;
+  const {
+    offerings: catalogOfferings,
+    offersServices,
+    offersEvents,
+    offersRooms,
+    isLoading: isLoadingCatalogOfferings,
+  } = useOrganisationCatalogOfferings(organizationId);
   const { locationId: scopedLocationId, locationLabel: scopedLocationLabel } =
     useOrganisationLocationScope(organizationId);
   type CatalogTab = "services" | "events" | "rooms";
   const kindFromUrl = searchParams.get("kind");
-  const [activeTab, setActiveTabState] = useState<CatalogTab>(() => {
-    if (kindFromUrl === "events" || kindFromUrl === "rooms" || kindFromUrl === "services") {
-      return kindFromUrl;
-    }
-    return "services";
-  });
+  const [activeTab, setActiveTabState] = useState<CatalogTab>(() =>
+    normalizeCatalogTab(kindFromUrl, ["services", "events", "rooms"]),
+  );
 
   const setActiveTab = (tab: CatalogTab) => {
+    if (!catalogOfferings.includes(tab)) return;
     setActiveTabState(tab);
     setSearchParams(
       (prev) => {
@@ -249,19 +255,39 @@ const OrganizationServices = () => {
   };
 
   useEffect(() => {
-    if (kindFromUrl === "events" || kindFromUrl === "rooms" || kindFromUrl === "services") {
-      setActiveTabState(kindFromUrl);
-      return;
+    if (isLoadingCatalogOfferings || organizationId <= 0) return;
+    const normalized = normalizeCatalogTab(kindFromUrl, catalogOfferings);
+    if (activeTab !== normalized) {
+      setActiveTabState(normalized);
     }
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        if (!next.get("kind")) next.set("kind", "services");
-        return next;
-      },
-      { replace: true },
-    );
-  }, [kindFromUrl, setSearchParams]);
+    if (kindFromUrl !== normalized) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("kind", normalized);
+          if (normalized !== "rooms") next.delete("roomId");
+          return next;
+        },
+        { replace: true },
+      );
+    } else if (!kindFromUrl) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.set("kind", normalized);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [
+    kindFromUrl,
+    catalogOfferings,
+    isLoadingCatalogOfferings,
+    organizationId,
+    activeTab,
+    setSearchParams,
+  ]);
 
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
   const { data: locationsData } = useOrganisationLocations({
@@ -307,7 +333,9 @@ const OrganizationServices = () => {
     isCreating: isCreatingEvent,
     isUpdating: isUpdatingEvent,
     isDeleting: isDeletingEvent,
-  } = useEvents(organizationId, eventLocationId);
+  } = useEvents(organizationId, eventLocationId, {
+    enabled: offersEvents && activeTab === "events",
+  });
 
   const {
     loadFormForEvent,
@@ -358,7 +386,9 @@ const OrganizationServices = () => {
     isCreating,
     isUpdating,
     isDeleting,
-  } = useOrganizationServices(organizationId, serviceLocationId);
+  } = useOrganizationServices(organizationId, serviceLocationId, {
+    enabled: offersServices && activeTab === "services",
+  });
 
   const organizationServiceCardImageUrls = useMemo(() => {
     const map: Record<number, string | undefined> = {};
@@ -967,6 +997,17 @@ const OrganizationServices = () => {
     return true;
   });
 
+  if (
+    !isLoadingCatalogOfferings &&
+    (kindFromUrl === "rooms" || (offersRooms && !offersServices && !offersEvents))
+  ) {
+    const next = new URLSearchParams();
+    next.set("section", "room-status");
+    const roomId = searchParams.get("roomId");
+    if (roomId) next.set("roomId", roomId);
+    return <Navigate to={`/organization/hospitality?${next.toString()}`} replace />;
+  }
+
   if (!isAuthenticated) {
     console.log(
       "OrganizationServices: Not authenticated, showing auth required message"
@@ -1013,7 +1054,7 @@ const OrganizationServices = () => {
         </div>
       )}
 
-      {showServicesEventsGuide && activeTab !== "rooms" && (
+      {showServicesEventsGuide && offersServices && offersEvents && (
         <ServicesEventsExplainer
           activeTab={activeTab === "events" ? "events" : "services"}
           onTabChange={(tab) => setActiveTab(tab)}
@@ -1023,32 +1064,36 @@ const OrganizationServices = () => {
 
         <Tabs
           value={activeTab}
-          onValueChange={(v) => setActiveTab(v as "services" | "events" | "rooms")}
+          onValueChange={(v) => setActiveTab(v as CatalogTab)}
           className="w-full"
         >
           {/* Tabs + primary action in one row */}
           <div className="org-panel-section px-6 md:px-8 py-4 sm:py-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {catalogOfferings.length > 1 ? (
               <TabsList className="flex w-full max-w-full overflow-x-auto rounded-xl border border-stone-200 bg-white p-1 shadow-none sm:w-auto">
+                {offersServices ? (
                 <TabsTrigger
                   value="services"
                   className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
                 >
                   Services
                 </TabsTrigger>
+                ) : null}
+                {offersEvents ? (
                 <TabsTrigger
                   value="events"
                   className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
                 >
                   Events
                 </TabsTrigger>
-                <TabsTrigger
-                  value="rooms"
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
-                >
-                  Rooms
-                </TabsTrigger>
+                ) : null}
               </TabsList>
+              ) : (
+                <p className="text-sm font-semibold text-appointza-navy">
+                  {offersServices ? "Services" : "Events"}
+                </p>
+              )}
 
               {/* Action button changes by tab */}
               {activeTab === "services" ? (
@@ -1472,19 +1517,6 @@ const OrganizationServices = () => {
                   </>
                 )}
               </div>
-          </TabsContent>
-
-          <TabsContent value="rooms" className="mt-0 px-6 md:px-8 py-6 space-y-6 focus-visible:outline-none">
-            <RoomDefinitionsPanel
-              locationId={scopedLocationId}
-              locationName={scopedLocationLabel}
-              onOpenRoomStatus={(roomId) => {
-                const next = new URLSearchParams();
-                next.set("section", "room-status");
-                if (roomId > 0) next.set("id", String(roomId));
-                navigate(`/organization/hospitality?${next.toString()}`);
-              }}
-            />
           </TabsContent>
         </Tabs>
 

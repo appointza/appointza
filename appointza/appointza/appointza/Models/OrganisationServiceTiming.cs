@@ -63,6 +63,27 @@ public string notes { get; set; }
         public long organizationlocationid { get; set; }
     }
 
+    public class OrganisationServiceTimingSlotReq
+    {
+        public long day_of_week { get; set; }
+        public string start_time { get; set; } = "";
+        public string end_time { get; set; } = "";
+    }
+
+    public class OrganisationServiceTimingBulkSaveReq
+    {
+        public long organisationid { get; set; }
+        public long organisationlocationid { get; set; }
+        public long counter { get; set; }
+        public long openbefore { get; set; }
+        public List<OrganisationServiceTimingSlotReq> slots { get; set; } = new List<OrganisationServiceTimingSlotReq>();
+    }
+
+    public class OrganisationServiceTimingHasAnyReq
+    {
+        public long organisationid { get; set; }
+    }
+
     public class CalendarOverviewReq
     {
         public long organisationid { get; set; }
@@ -77,6 +98,9 @@ public string notes { get; set; }
         public string totime { get; set; }
         public string statuscode { get; set; }
         public string notes { get; set; }
+        public int remaining { get; set; }
+        public int capacity { get; set; }
+        public bool is_within_booking_window { get; set; } = true;
     }
 
     public class CalendarBookingOverviewItem

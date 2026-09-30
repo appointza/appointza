@@ -46,8 +46,9 @@ export function OrganizationCalendarDayPanel({
   onManageRecord,
   onStatusChange,
 }: OrganizationCalendarDayPanelProps) {
-  const availableSlots = timeSlots.filter((s) => s.statuscode === "Available");
-  const bookedSlots = timeSlots.filter((s) => s.statuscode === "Booked");
+  const availableSeats = timeSlots.reduce((sum, s) => sum + Math.max(0, s.remaining ?? 0), 0);
+  const totalCapacity = timeSlots.reduce((sum, s) => sum + Math.max(0, s.capacity ?? 0), 0);
+  const bookedSeats = Math.max(0, totalCapacity - availableSeats);
 
   const sortedBookings = [...selectedDayBookings].sort((a, b) => {
     const ta = parseDotNetTimeSpanToMilliseconds(a.fromtime) ?? 0;
@@ -66,10 +67,10 @@ export function OrganizationCalendarDayPanel({
           </h2>
           <div className="flex flex-wrap gap-2 text-xs">
             <Badge className="border-transparent bg-emerald-50 text-emerald-700">
-              {availableSlots.length} available
+              {availableSeats} available
             </Badge>
             <Badge className="border-transparent bg-[#FFF0EB] text-[#E85D4C]">
-              {bookedSlots.length} booked slots
+              {bookedSeats} booked
             </Badge>
             <Badge variant="outline" className="text-stone-600">
               {sortedBookings.length} booking
@@ -95,7 +96,9 @@ export function OrganizationCalendarDayPanel({
           ) : (
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-3 2xl:grid-cols-4">
               {timeSlots.map((slot, index) => {
-                const isAvailable = slot.statuscode === "Available";
+                const remaining = Math.max(0, slot.remaining ?? 0);
+                const capacity = Math.max(0, slot.capacity ?? 0);
+                const isAvailable = remaining > 0;
                 return (
                   <div
                     key={`${String(slot.fromtime)}-${index}`}
@@ -110,11 +113,13 @@ export function OrganizationCalendarDayPanel({
                       {formatAppointmentTime(slot.fromtime)}
                     </div>
                     <div className="mt-0.5 text-[11px] font-medium">
-                      {isAvailable ? "Available" : "Booked"}
+                      {isAvailable
+                        ? `${remaining} of ${capacity || remaining} left`
+                        : slot.notes || "Fully booked"}
                     </div>
-                    {slot.notes ? (
-                      <div className="mt-0.5 line-clamp-2 text-[10px] text-stone-500">
-                        {slot.notes}
+                    {slot.is_within_booking_window === false ? (
+                      <div className="mt-0.5 text-[10px] text-amber-700">
+                        Outside booking window
                       </div>
                     ) : null}
                   </div>

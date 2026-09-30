@@ -1,6 +1,7 @@
 using appointza.Models;
 using appointza.Models.Hospitality;
 using appointza.Services;
+using appointza.Authentication.Utils;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -104,7 +105,7 @@ namespace appointza.Controllers
         }
 
         [HttpPost("Create")]
-        [AllowAnonymous]
+        [Authenticate]
         public async Task<ActionResult<ActionRes<GuestHospitalityBookingResult>>> Create(
             ActionReq<GuestHospitalityBookingCreateReq>? req)
         {
@@ -124,6 +125,26 @@ namespace appointza.Controllers
             {
                 logger.LogError(ex, "GuestHospitalityBooking Create failed");
                 return BadRequest(new ActionRes<GuestHospitalityBookingResult> { error = ex.Message });
+            }
+        }
+
+        [HttpGet("MyBookings")]
+        [Authenticate]
+        public async Task<ActionResult<ActionRes<List<GuestHospitalityBookingMineItem>>>> MyBookings()
+        {
+            try
+            {
+                var items = await guestHospitalityBookingService.ListMine();
+                return Ok(new ActionRes<List<GuestHospitalityBookingMineItem>> { item = items });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new ActionRes<List<GuestHospitalityBookingMineItem>> { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "GuestHospitalityBooking MyBookings failed");
+                return BadRequest(new ActionRes<List<GuestHospitalityBookingMineItem>> { error = ex.Message });
             }
         }
 

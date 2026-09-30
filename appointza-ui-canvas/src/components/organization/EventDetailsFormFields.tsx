@@ -146,7 +146,7 @@ export function EventDetailsFormFields({
           Event type *
         </Label>
         <Select
-          value={event.event_type}
+          value={event.event_type || undefined}
           onValueChange={(value) => setEvent({ ...event, event_type: value })}
         >
           <SelectTrigger id={`${idPrefix}-type`} className={selectTriggerClass}>
@@ -274,7 +274,7 @@ export function EventDetailsFormFields({
           Payment type *
         </Label>
         <Select
-          value={event.payment_type}
+          value={event.payment_type || undefined}
           onValueChange={(value) => setEvent({ ...event, payment_type: value })}
         >
           <SelectTrigger id={`${idPrefix}-payment-type`} className={selectTriggerClass}>
@@ -380,7 +380,7 @@ export function EventDetailsFormFields({
           Status
         </Label>
         <Select
-          value={event.status}
+          value={event.status || undefined}
           onValueChange={(value) => setEvent({ ...event, status: value })}
         >
           <SelectTrigger id={`${idPrefix}-status`} className={selectTriggerClass}>

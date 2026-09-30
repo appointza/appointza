@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -36,13 +36,16 @@ import { OrganisationLocation } from "@/models/organisationlocation.model";
 import { 
   OrganisationServiceTiming, 
   Leavereq, 
-  OrganisationServiceTimingSelectReq,
-  OrganisationServiceTimingDeleteReq,
-  OrganisationServiceTimingFinal
+  OrganisationServiceTimingBulkSaveReq,
+  OrganisationServiceTimingSlotReq,
 } from "@/models/organisationservicetiming.model";
 import { LeaveDates, LeaveDatesDeleteReq } from "@/models/leavedates.model";
 import { OrganisationServiceTimingService } from "@/services/organisationservicetiming.service";
 import { useOrganisationLocations } from "@/hooks/useOrganisationLocations";
+import {
+  organisationServiceTimingsQueryKey,
+  useOrganisationServiceTimings,
+} from "@/hooks/useOrganisationServiceTimings";
 import { LeaveDatesService } from "@/services/leavedates.service";
 import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
@@ -51,17 +54,59 @@ import { cn } from "@/lib/utils";
 import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
 import { onboardingStepRoute } from "@/utils/organizationOnboarding.util";
 
+function formatTimingTimeForApi(value: Date | string): string {
+  if (value instanceof Date) {
+    return value.toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+  }
+  return String(value);
+}
+
+function buildTimingBulkSaveReq(
+  organizationId: number,
+  locationId: number,
+  slotsByDay: Record<number, OrganisationServiceTiming[]>,
+  counter: number,
+  openBefore: number,
+): OrganisationServiceTimingBulkSaveReq {
+  const req = new OrganisationServiceTimingBulkSaveReq();
+  req.organisationid = organizationId;
+  req.organisationlocationid = locationId;
+  req.counter = counter;
+  req.openbefore = openBefore;
+  req.slots = [];
+
+  Object.entries(slotsByDay).forEach(([dayId, slots]) => {
+    slots.forEach((slot) => {
+      if (!slot.start_time || !slot.end_time) return;
+      const entry = new OrganisationServiceTimingSlotReq();
+      entry.day_of_week = parseInt(dayId, 10);
+      entry.start_time = formatTimingTimeForApi(slot.start_time);
+      entry.end_time = formatTimingTimeForApi(slot.end_time);
+      req.slots.push(entry);
+    });
+  });
+
+  return req;
+}
+
 const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const { toast } = useToast();
   const { user, isAuthenticated, userType } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const organizationId = user?.organisationid || 1;
-  const { hasCustomDomain, hasServices, hasWebsite, hasTiming, isComplete, isLoading: isLoadingOnboarding } = useOnboardingStatus();
+  const { hasCustomDomain, hasServices, hasWebsite, hasTiming, isComplete, isLoading: isLoadingOnboarding } =
+    useOnboardingStatus({ enabled: !embedded });
   const inOnboarding = !embedded && !isComplete && hasCustomDomain && hasServices;
 
   // State management
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLeaveBusy, setIsLeaveBusy] = useState(false);
+  const [isSavingTimings, setIsSavingTimings] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<OrganisationLocation | null>(null);
   const [showTimingForm, setShowTimingForm] = useState(false);
   const [showLeaveForm, setShowLeaveForm] = useState(false);
@@ -73,6 +118,16 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     enabled: !!organizationId,
   });
   const locations = locationsData ?? [];
+
+  const selectedLocationId = selectedLocation?.id ?? 0;
+  const {
+    data: timingRows = [],
+    isLoading: isFetchingTimings,
+  } = useOrganisationServiceTimings({
+    organisationId: organizationId,
+    locationId: selectedLocationId,
+    enabled: showTimingForm && selectedLocationId > 0,
+  });
   
   // API services - use useMemo to prevent recreation on every render
   const timingService = useMemo(() => new OrganisationServiceTimingService(), []);
@@ -112,54 +167,60 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     return initialSlots;
   };
 
-  // Fetch timing data for location
-  const fetchTimingData = useCallback(async (locationId: number) => {
-    try {
-      console.log('🔍 Fetching timing data for location:', locationId);
-      const req = new OrganisationServiceTimingSelectReq();
-      req.organisationid = organizationId;
-      req.organisationlocationid = locationId;
-      
-      const response = await timingService.select(req);
-      console.log('✅ Timing API response:', response);
-
-      const newDayTimeSlots = initializeDayTimeSlots();
-      
-      if (response && response.length > 0) {
-        response.forEach(timing => {
-          const slot = new OrganisationServiceTiming();
-          slot.id = timing.id;
-          slot.localid = timing.id || Date.now();
-          slot.start_time = timeStringToDate(timing.start_time as string);
-          slot.end_time = timeStringToDate(timing.end_time as string);
-          slot.day_of_week = timing.day_of_week;
-          
-          if (newDayTimeSlots[timing.day_of_week]) {
-            newDayTimeSlots[timing.day_of_week].push(slot);
-          }
-        });
-
-        setCounter(Math.max(1, response[0]?.counter || 0));
-        setOpenBefore(response[0]?.openbefore || 0);
-      }
-
-      setDayTimeSlots(newDayTimeSlots);
-    } catch (error) {
-      console.error('❌ Error fetching timing data:', error);
-      toast({
-        title: "Error",
-        description: "Failed to fetch timing data",
-        variant: "destructive"
-      });
-    }
-  }, [organizationId, timingService, toast]);
-
   // Convert time string to Date
   const timeStringToDate = (timeString: string): Date => {
     const [hours, minutes, seconds] = timeString.split(':').map(Number);
     const now = new Date();
     now.setHours(hours, minutes, seconds, 0);
     return now;
+  };
+
+  useEffect(() => {
+    if (!showTimingForm || selectedLocationId <= 0) return;
+
+    const newDayTimeSlots = initializeDayTimeSlots();
+    timingRows.forEach((timing) => {
+      const slot = new OrganisationServiceTiming();
+      slot.id = timing.id;
+      slot.localid = timing.id || Date.now();
+      slot.start_time = timeStringToDate(timing.start_time as string);
+      slot.end_time = timeStringToDate(timing.end_time as string);
+      slot.day_of_week = timing.day_of_week;
+
+      if (newDayTimeSlots[timing.day_of_week]) {
+        newDayTimeSlots[timing.day_of_week].push(slot);
+      }
+    });
+
+    setDayTimeSlots(newDayTimeSlots);
+    if (timingRows.length > 0) {
+      setCounter(Math.max(1, timingRows[0]?.counter || 0));
+      setOpenBefore(timingRows[0]?.openbefore || 0);
+    } else {
+      setCounter(0);
+      setOpenBefore(0);
+    }
+  }, [timingRows, selectedLocationId, showTimingForm]);
+
+  const persistTimingSlots = async (
+    locationId: number,
+    slotsByDay: Record<number, OrganisationServiceTiming[]>,
+    nextCounter: number,
+    nextOpenBefore: number,
+  ) => {
+    const payload = buildTimingBulkSaveReq(
+      organizationId,
+      locationId,
+      slotsByDay,
+      nextCounter,
+      nextOpenBefore,
+    );
+    await timingService.saveBulk(payload);
+    invalidatePublicSiteCacheForLocation(locationId);
+    await queryClient.invalidateQueries({
+      queryKey: organisationServiceTimingsQueryKey(organizationId, locationId),
+    });
+    await queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
   };
 
   // Add time slot
@@ -230,73 +291,27 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         }));
       }
 
-      // Update UI state
       setDayTimeSlots(newDayTimeSlots);
 
-      // Save to server
-      console.log('💾 Saving Monday hours to all days for location:', selectedLocation.id);
-      
-      // First delete existing timings
-      const deleteReq = new OrganisationServiceTimingDeleteReq();
-      deleteReq.organisationid = organizationId;
-      deleteReq.organizationlocationid = selectedLocation.id;
-      
-      await timingService.delete(deleteReq);
-      console.log('✅ Deleted existing timings');
-
-      // Prepare all time slots for saving
-      const promises: Promise<any>[] = [];
-
-      Object.entries(newDayTimeSlots).forEach(([dayId, slots]) => {
-        slots.forEach(slot => {
-          if (slot.start_time && slot.end_time) {
-            const req = new OrganisationServiceTimingFinal();
-            
-            req.start_time = (slot.start_time as Date).toLocaleTimeString('en-GB', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            });
-            
-            req.end_time = (slot.end_time as Date).toLocaleTimeString('en-GB', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            });
-            
-            req.modifiedby = user?.id || 0;
-            req.organisationid = organizationId;
-            req.organisationlocationid = selectedLocation.id;
-            req.day_of_week = parseInt(dayId);
-            req.counter = counter;
-            req.openbefore = openBefore;
-            
-            console.log('💾 Saving timing slot:', req);
-            promises.push(timingService.save(req as any));
-          }
+      setIsSavingTimings(true);
+      try {
+        await persistTimingSlots(selectedLocation.id, newDayTimeSlots, counter, openBefore);
+        toast({
+          title: "Success",
+          description: "Monday's hours applied and saved to all days (Tuesday to Sunday)",
         });
-      });
-
-      await Promise.all(promises);
-      console.log('✅ All timing slots saved successfully');
-      
-      invalidatePublicSiteCacheForLocation(selectedLocation.id);
-      // Invalidate onboarding status to refresh the check
-      queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
-      
-      toast({
-        title: "Success",
-        description: "Monday's hours applied and saved to all days (Tuesday to Sunday)",
-      });
+      } catch (error) {
+        console.error('❌ Error saving Monday hours:', error);
+        toast({
+          title: "Error",
+          description: "Failed to save Monday hours to server",
+          variant: "destructive"
+        });
+      } finally {
+        setIsSavingTimings(false);
+      }
     } catch (error) {
-      console.error('❌ Error saving Monday hours:', error);
-      toast({
-        title: "Error",
-        description: "Failed to save Monday hours to server",
-        variant: "destructive"
-      });
+      console.error('❌ Error preparing Monday hours:', error);
     }
   };
 
@@ -324,7 +339,6 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     }));
   };
 
-  // Save timing data
   const saveTimingData = async () => {
     try {
       if (!selectedLocation) {
@@ -336,56 +350,13 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         return;
       }
 
-      console.log('💾 Saving timing data for location:', selectedLocation.id);
-      
-      // First delete existing timings
-      const deleteReq = new OrganisationServiceTimingDeleteReq();
-      deleteReq.organisationid = organizationId;
-      deleteReq.organizationlocationid = selectedLocation.id;
-      
-      await timingService.delete(deleteReq);
-      console.log('✅ Deleted existing timings');
-
-      // Prepare all time slots for saving
-      const promises: Promise<any>[] = [];
-
-      Object.entries(dayTimeSlots).forEach(([dayId, slots]) => {
-        slots.forEach(slot => {
-          if (slot.start_time && slot.end_time) {
-            const req = new OrganisationServiceTimingFinal();
-            
-            req.start_time = (slot.start_time as Date).toLocaleTimeString('en-GB', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            });
-            
-            req.end_time = (slot.end_time as Date).toLocaleTimeString('en-GB', {
-              hour: '2-digit',
-              minute: '2-digit',
-              second: '2-digit',
-              hour12: false,
-            });
-            
-            req.modifiedby = user?.id || 0;
-            req.organisationid = organizationId;
-            req.organisationlocationid = selectedLocation.id;
-            req.day_of_week = parseInt(dayId);
-            req.counter = counter;
-            req.openbefore = openBefore;
-            
-            console.log('💾 Saving timing slot:', req);
-            promises.push(timingService.save(req as any));
-          }
-        });
-      });
-
-      await Promise.all(promises);
-      console.log('✅ All timing slots saved successfully');
-      
-      invalidatePublicSiteCacheForLocation(selectedLocation.id);
-      await queryClient.invalidateQueries({ queryKey: ['onboarding-status'] });
+      setIsSavingTimings(true);
+      await persistTimingSlots(
+        selectedLocation.id,
+        dayTimeSlots,
+        counter,
+        openBefore,
+      );
 
       if (!isComplete && hasCustomDomain && hasServices && hasWebsite && !embedded) {
         toast({
@@ -411,6 +382,8 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         description: "Failed to save business hours",
         variant: "destructive"
       });
+    } finally {
+      setIsSavingTimings(false);
     }
   };
 
@@ -504,7 +477,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   // Fetch leave list
   const fetchLeaveList = async (locationId: number) => {
     try {
-      setIsLoading(true);
+      setIsLeaveBusy(true);
       const req = {
         organisationid: organizationId,
         organisationlocationid: locationId
@@ -519,7 +492,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         variant: "destructive"
       });
     } finally {
-      setIsLoading(false);
+      setIsLeaveBusy(false);
     }
   };
 
@@ -530,7 +503,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     }
 
     try {
-      setIsLoading(true);
+      setIsLeaveBusy(true);
       const req = new LeaveDatesDeleteReq();
       req.id = leave.leaveid;  // Use leaveid from API response
       req.version = 1;  // Default version since API doesn't return it
@@ -554,11 +527,9 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         variant: "destructive"
       });
     } finally {
-      setIsLoading(false);
+      setIsLeaveBusy(false);
     }
   };
-
-  // Handle edit leave
   const handleEditLeave = (leave: any) => {
     setEditingLeave(leave);
     setSelectedLeaveDate(new Date(leave.appointmentdate));
@@ -730,7 +701,6 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   // Handle location selection for timing
   const handleLocationSelectForTiming = (location: OrganisationLocation) => {
     setSelectedLocation(location);
-    fetchTimingData(location.id);
     setShowTimingForm(true);
     setShowLeaveForm(false);
     setShowLeaveList(false);
@@ -761,13 +731,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     setSelectedLocation(location);
     setShowTimingForm(true);
     setShowLeaveForm(false);
-    void fetchTimingData(location.id);
-  }, [locations, fetchTimingData]);
-
-  // Initialize day slots on mount
-  useEffect(() => {
-    setDayTimeSlots(initializeDayTimeSlots());
-  }, []);
+  }, [locations]);
 
   if (!isAuthenticated) {
     return (
@@ -780,7 +744,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     );
   }
 
-  if (isLoadingLocations || isLoading || isLoadingOnboarding) {
+  if (isLoadingLocations || (showTimingForm && isFetchingTimings) || (!embedded && isLoadingOnboarding)) {
     return (
       <div className="flex h-64 items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -790,7 +754,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   }
 
   // Show message if no services exist
-  if (!hasCustomDomain) {
+  if (!embedded && !hasCustomDomain) {
     return (
       <div className="org-page">
         <div className="org-panel-section">
@@ -827,7 +791,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
     );
   }
 
-  if (!hasServices) {
+  if (!embedded && !hasServices) {
     return (
       <div className="org-page">
         <div className="org-panel-section">
@@ -1092,40 +1056,19 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               {/* Settings */}
               <Card className={cn(org.panel, "rounded-xl border-stone-200 bg-white shadow-none")}>
                 <CardHeader className="pb-3">
-                  <CardTitle className={org.title}>Quick settings</CardTitle>
+                  <CardTitle className={org.title}>Opening hours</CardTitle>
+                  <p className="text-sm text-stone-500">
+                    Counters and booking window are organisation options under{" "}
+                    <button
+                      type="button"
+                      className="font-medium text-blue-600 hover:underline"
+                      onClick={() => navigate("/organization/profile?tab=organization")}
+                    >
+                      Profile → Organization
+                    </button>
+                    .
+                  </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="counters" className={org.label}>Counters</Label>
-                      <NumberInput
-                        id="counters"
-                        min={1}
-                        value={counter}
-                        onValueChange={setCounter}
-                        placeholder="e.g. 1"
-                        className={cn(org.input, "h-11")}
-                      />
-                      <p className="text-xs text-stone-500">
-                        How many customers can be served at the same time — e.g. 1 for a solo provider, 3 for three chairs or staff.
-                      </p>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="booking-window" className={org.label}>Booking window (days)</Label>
-                      <NumberInput
-                        id="booking-window"
-                        min={0}
-                        value={openBefore}
-                        onValueChange={setOpenBefore}
-                        placeholder="e.g. 30"
-                        className={cn(org.input, "h-11")}
-                      />
-                      <p className="text-xs text-stone-500">
-                        How far ahead customers can book — e.g. 30 means up to 30 days from today. Use 0 for no limit.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
               </Card>
 
               {daysOfWeek.map((day) => (
@@ -1258,9 +1201,14 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
               <Button
                 type="button"
                 onClick={saveTimingData}
+                disabled={isSavingTimings}
                 className={cn(org.btnPrimary, "min-h-11 w-full sm:w-auto")}
               >
-                <Save className="mr-2 h-4 w-4" />
+                {isSavingTimings ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Save className="mr-2 h-4 w-4" />
+                )}
                 Save business hours
               </Button>
             </div>
@@ -1513,7 +1461,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                 </Button>
               </div>
 
-              {isLoading ? (
+              {isLeaveBusy ? (
                 <div className="flex justify-center py-8">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
                 </div>

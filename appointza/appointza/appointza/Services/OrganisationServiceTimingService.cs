@@ -77,7 +77,9 @@ namespace appointza.Services
             }
             queryBuilder.AddParameter("OrganisationServiceTiming.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
 
-                queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "OrganisationServiceTiming.id");
+            queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "OrganisationServiceTiming.day_of_week");
+            queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "OrganisationServiceTiming.start_time");
+            queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "OrganisationServiceTiming.id");
                 var command = queryBuilder.GetCommand(db);
                 using (DbDataReader reader = await db.Execute(command))
                 {
@@ -107,15 +109,107 @@ temp.notes = reader["notes"] == DBNull.Value ? "" : reader["notes"].ToString();
                 }
             return result;
         }
+
+        public async Task<bool> HasAnyForOrganisation(long organisationId)
+        {
+            if (organisationId <= 0)
+            {
+                return false;
+            }
+
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                return await HasAnyForOrganisationTransaction(db, organisationId);
+            }
+        }
+
+        public async Task<bool> HasAnyForOrganisationTransaction(IDb db, long organisationId)
+        {
+            const string query = @"
+                SELECT 1
+                FROM OrganisationServiceTiming
+                WHERE organisationid = @organisationid
+                  AND isactive = TRUE
+                LIMIT 1";
+
+            var command = db.GetCommand(query);
+            db.AddParameter(command, "organisationid", DbTypes.Types.Long).Value = organisationId;
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                return await reader.ReadAsync();
+            }
+        }
+
+        public async Task<bool> SaveBulk(OrganisationServiceTimingBulkSaveReq req)
+        {
+            if (req == null || req.organisationid <= 0 || req.organisationlocationid <= 0)
+            {
+                return false;
+            }
+
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                try
+                {
+                    await db.BeginTransaction();
+                    await DeleteTransaction(db, new OrganisationServiceTimingDeleteReq
+                    {
+                        organisationid = req.organisationid,
+                        organizationlocationid = req.organisationlocationid,
+                    });
+
+                    foreach (var slot in req.slots ?? new List<OrganisationServiceTimingSlotReq>())
+                    {
+                        if (slot.day_of_week <= 0)
+                        {
+                            continue;
+                        }
+
+                        if (!TimeSpan.TryParse(slot.start_time, out var startTime))
+                        {
+                            continue;
+                        }
+
+                        if (!TimeSpan.TryParse(slot.end_time, out var endTime))
+                        {
+                            continue;
+                        }
+
+                        await InsertTransaction(db, new OrganisationServiceTiming
+                        {
+                            organisationid = req.organisationid,
+                            organisationlocationid = req.organisationlocationid,
+                            day_of_week = slot.day_of_week,
+                            start_time = startTime,
+                            end_time = endTime,
+                            counter = req.counter,
+                            openbefore = req.openbefore,
+                        });
+                    }
+
+                    await db.CommitTransaction();
+                    return true;
+                }
+                catch
+                {
+                    await db.RollbackTransaction();
+                    throw;
+                }
+            }
+        }
+
         public async Task<OrganisationServiceTiming> Insert(OrganisationServiceTiming organisationservicetiming)
         {
-                using (IDb db = await dbprovider.GetDb())
-                {
-                    await db.Connect();
-                    await this.InsertTransaction(db, organisationservicetiming);
-                }
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                await this.InsertTransaction(db, organisationservicetiming);
+            }
             return organisationservicetiming;
         }
+
         public async Task InsertTransaction(IDb db, OrganisationServiceTiming organisationservicetiming)
         {
                 String query = @"
@@ -278,13 +372,19 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
         }
         public async Task<string> Bookappoinment(Appoinment appoinment)
         {
-            string result = "";
+            string result;
+            PostBookingNotificationContext? notificationContext = null;
             using (IDb db = await dbprovider.GetDb())
             {
-
                 await db.Connect();
-                result = await this.BookappoinmentTransaction(db, appoinment);
+                (result, notificationContext) = await this.BookappoinmentTransaction(db, appoinment);
             }
+
+            if (notificationContext != null && result == "Successfully booked.")
+            {
+                await SendPostBookingNotificationsAsync(notificationContext);
+            }
+
             return result;
         }
 
@@ -337,10 +437,24 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
 
             List<Appoinment> availableSlots = new List<Appoinment>();
 
+            var organisation = (await organisationService.SelectTransaction(db, new OrganisationSelectReq
+            {
+                id = organisationServiceTiming.organisationid,
+            })).FirstOrDefault();
+
             foreach (var timing in selectedTimingSlot.Where(t => t.isactive && !t.issuspended))
             {
                 TimeSpan currentSlotStart = timing.start_time;
-                int maxConcurrentBookings = (int)timing.counter;
+                long slotCounter = timing.counter;
+                long slotOpenBefore = timing.openbefore;
+                if (organisation != null)
+                {
+                    OrganisationAppointmentSettings.ApplyFromAttributes(
+                        organisation.attributes_json,
+                        ref slotCounter,
+                        ref slotOpenBefore);
+                }
+                int maxConcurrentBookings = (int)Math.Max(1, slotCounter);
 
                 while (currentSlotStart.Add(TimeSpan.FromMinutes(minTimePerSlot)) <=
             (timing.end_time > timing.start_time ? timing.end_time : timing.end_time.Add(TimeSpan.FromDays(1))))
@@ -356,6 +470,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                     {
                         // Check how many appointments overlap at this specific minute
                         int overlapsAtThisMinute = existingAppointments.Count(a =>
+                            AppoinmentService.OccupiesBookingSlot(a) &&
                             a.appoinmentdate.Date == organisationServiceTiming.appointmentdate.Date &&
                             checkTime >= a.fromtime &&
                             checkTime < a.totime);
@@ -370,7 +485,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                     }
 
                     bool isAvailable = minuteByMinuteOverlaps < maxConcurrentBookings;
-                    int remainingSlots = maxConcurrentBookings - minuteByMinuteOverlaps;
+                    int remainingSlots = Math.Max(0, maxConcurrentBookings - minuteByMinuteOverlaps);
 
                     // Block by event if any event overlaps this slot window
                     if (isAvailable && eventBlocked.Count > 0 && OverlapsAny(currentSlotStart, currentSlotEnd, eventBlocked))
@@ -379,14 +494,21 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                         remainingSlots = 0;
                     }
 
+                    long openBefore = slotOpenBefore;
+                    bool withinWindow = openBefore <= 0
+                        || organisationServiceTiming.appointmentdate.Date <= DateTime.Today.AddDays(openBefore);
+
                     availableSlots.Add(new Appoinment
                     {
                         fromtime = currentSlotStart,
                         totime = currentSlotEnd,
                         statuscode = isAvailable ? "Available" : "Booked",
-                        notes = isAvailable ?
-                            $"{remainingSlots} slots remaining" :
-                            (eventBlocked.Count > 0 && OverlapsAny(currentSlotStart, currentSlotEnd, eventBlocked))
+                        remaining = remainingSlots,
+                        capacity = maxConcurrentBookings,
+                        is_within_booking_window = withinWindow,
+                        notes = isAvailable
+                            ? $"{remainingSlots} of {maxConcurrentBookings} remaining"
+                            : (eventBlocked.Count > 0 && OverlapsAny(currentSlotStart, currentSlotEnd, eventBlocked))
                                 ? "Blocked by event"
                                 : "Fully booked",
                         appoinmentdate = organisationServiceTiming.appointmentdate,
@@ -447,14 +569,17 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                 var dayOverview = new CalendarDayOverview
                 {
                     date = date.Date,
-                    available_count = slots.Count(s => string.Equals(s.statuscode, "Available", StringComparison.OrdinalIgnoreCase)),
-                    booked_slot_count = slots.Count(s => string.Equals(s.statuscode, "Booked", StringComparison.OrdinalIgnoreCase)),
+                    available_count = slots.Sum(s => s.remaining),
+                    booked_slot_count = slots.Sum(s => Math.Max(0, s.capacity - s.remaining)),
                     slots = slots.Select(s => new CalendarSlotOverviewItem
                     {
                         fromtime = s.fromtime.ToString(@"hh\:mm\:ss"),
                         totime = s.totime.ToString(@"hh\:mm\:ss"),
                         statuscode = s.statuscode ?? "",
                         notes = s.notes ?? "",
+                        remaining = s.remaining,
+                        capacity = s.capacity,
+                        is_within_booking_window = s.is_within_booking_window,
                     }).ToList(),
                     bookings = dayBookings.Select(b =>
                     {
@@ -508,7 +633,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
             return (Weeks)dayNumber;
         }
             
-        public async Task<string> BookappoinmentTransaction(IDb db, Appoinment appoinment)
+        public async Task<(string message, PostBookingNotificationContext? notificationContext)> BookappoinmentTransaction(IDb db, Appoinment appoinment)
         {
             DateTime today = DateTime.Today;
             
@@ -529,7 +654,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
 
             if (leave != null && leave.isfullday)
             {
-                return "The shop is on leave that day.";
+                return ("The shop is on leave that day.", null);
             }
 
             var appointmentDay = GetAppointmentDayOfWeek(appoinment.appoinmentdate);
@@ -546,19 +671,30 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
 
             if (!selectedTimingSlot.Any())
             {
-                return "No available time slots for the selected date.";
+                return ("No available time slots for the selected date.", null);
             }
 
             var timingSlot = selectedTimingSlot[0];
             long counter = timingSlot.counter;
             long openBefore = timingSlot.openbefore;
+            var organisationForCapacity = (await organisationService.SelectTransaction(db, new OrganisationSelectReq
+            {
+                id = appoinment.organizationid,
+            })).FirstOrDefault();
+            if (organisationForCapacity != null)
+            {
+                OrganisationAppointmentSettings.ApplyFromAttributes(
+                    organisationForCapacity.attributes_json,
+                    ref counter,
+                    ref openBefore);
+            }
 
             DateTime maxBookingDate = today.AddDays(openBefore);
 
             // Check booking window (0 = no limit)
             if (openBefore > 0 && appoinment.appoinmentdate.Date > maxBookingDate)
             {
-                return $"Appointments can only be booked up to {maxBookingDate:dd MMM yyyy}.";
+                return ($"Appointments can only be booked up to {maxBookingDate:dd MMM yyyy}.", null);
             }
 
             // Fetch all existing appointments for the same date and location
@@ -592,11 +728,12 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                     .Select(s => $"{s.fromtime:hh\\:mm}-{s.totime:hh\\:mm}")
                     .ToList();
 
-                return $"This time slot is blocked by an event. Available slots: {string.Join(", ", availableTimes)}";
+                return ($"This time slot is blocked by an event. Available slots: {string.Join(", ", availableTimes)}", null);
             }
 
             // Check for overlapping appointments that would exceed counter limit
             int overlappingCount = existingAppointments.Count(a =>
+                AppoinmentService.OccupiesBookingSlot(a) &&
                 appoinment.appoinmentdate.Date == a.appoinmentdate.Date &&
                 appoinment.fromtime < a.totime &&
                 appoinment.totime > a.fromtime
@@ -618,7 +755,7 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                     .Select(s => $"{s.fromtime:hh\\:mm}-{s.totime:hh\\:mm}")
                     .ToList();
 
-                return $"This time slot has reached maximum capacity ({counter} concurrent bookings). Available slots: {string.Join(", ", availableTimes)}";
+                return ($"This time slot has reached maximum capacity ({counter} concurrent bookings). Available slots: {string.Join(", ", availableTimes)}", null);
             }
 
             // SECOND: After confirming slot is available, check if payment is required
@@ -631,7 +768,42 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
             {
                 // Payment is required but not paid - return special response
                 // Slot is available, so proceed with payment flow
-                return "PAYMENT_REQUIRED";
+                return ("PAYMENT_REQUIRED", null);
+            }
+
+            PostBookingNotificationContext? notificationContext = null;
+            string notificationMobile = organisationLocation?.whatsapp_mobile?.Trim() ?? "";
+            if (organisationLocation != null && !string.IsNullOrEmpty(notificationMobile))
+            {
+                var organisation = (await organisationService.SelectTransaction(db, new OrganisationSelectReq
+                {
+                    id = appoinment.organizationid
+                })).FirstOrDefault();
+
+                var customerUser = (await usersService.SelectTransaction(db, new UsersSelectReq
+                {
+                    id = appoinment.userid
+                })).FirstOrDefault();
+
+                if (organisation != null && customerUser != null)
+                {
+                    string serviceType = "General";
+                    if (appoinment.attributes != null && appoinment.attributes.servicelist != null && appoinment.attributes.servicelist.Any())
+                    {
+                        var serviceNames = appoinment.attributes.servicelist.Select(s => s.servicename).ToList();
+                        serviceType = string.Join(", ", serviceNames);
+                    }
+
+                    notificationContext = new PostBookingNotificationContext
+                    {
+                        Appoinment = appoinment,
+                        OrganisationName = organisation.name ?? "Organization",
+                        CustomerName = customerUser.name ?? "Customer",
+                        NotificationMobile = notificationMobile,
+                        ServiceType = serviceType,
+                        LocationName = organisationLocation.name ?? "N/A"
+                    };
+                }
             }
 
             // If we get here, slot is available - book it
@@ -641,10 +813,16 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
             }
             catch (InvalidOperationException ex)
             {
-                return ex.Message;
+                return (ex.Message, null);
             }
-            
-            // Send push notification for successful appointment booking
+
+            return ("Successfully booked.", notificationContext);
+        }
+
+        private async Task SendPostBookingNotificationsAsync(PostBookingNotificationContext context)
+        {
+            var appoinment = context.Appoinment;
+
             try
             {
                 await firebaseNotificationService.SendAppointmentSuccessNotificationAsync(
@@ -654,71 +832,39 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
             }
             catch (Exception ex)
             {
-                // Log error but don't fail the appointment booking
                 Console.WriteLine($"Error sending appointment success notification: {ex.Message}");
             }
-            
-            // Send booking notification to organization via WhatsApp/SMS
+
             try
             {
-                // Get organization details
-                var organisation = (await organisationService.SelectTransaction(db, new OrganisationSelectReq 
-                { 
-                    id = appoinment.organizationid 
-                })).FirstOrDefault();
+                string appointmentDate = appoinment.appoinmentdate.ToString("dd/MM/yy");
+                string appointmentTime = $"{appoinment.fromtime:hh\\:mm}";
 
-                // Get customer details
-                var customerUser = (await usersService.SelectTransaction(db, new UsersSelectReq 
-                { 
-                    id = appoinment.userid 
-                })).FirstOrDefault();
-
-                // Get organization location details (reuse variable name from earlier in method)
-                var organisationLocationForNotification = (await organisationLocationService.SelectTransaction(db, new OrganisationLocationSelectReq 
-                { 
-                    id = appoinment.organisationlocationid 
-                })).FirstOrDefault();
-
-                // Send only to organisation location's WhatsApp mobile (not organisation owner)
-                string notificationMobile = organisationLocationForNotification?.whatsapp_mobile?.Trim() ?? "";
-
-                if (organisation != null && customerUser != null && !string.IsNullOrEmpty(notificationMobile))
+                await smsService.SendUserBookAppointment(new UserBookAppointmentSmsReq
                 {
-                    // Get service type from appointment attributes
-                    string serviceType = "General";
-                    if (appoinment.attributes != null && appoinment.attributes.servicelist != null && appoinment.attributes.servicelist.Any())
-                    {
-                        var serviceNames = appoinment.attributes.servicelist.Select(s => s.servicename).ToList();
-                        serviceType = string.Join(", ", serviceNames);
-                    }
-
-                    // Format date and time
-                    string appointmentDate = appoinment.appoinmentdate.ToString("dd/MM/yy");
-                    string appointmentTime = $"{appoinment.fromtime:hh\\:mm}";
-
-                    // Prepare location name
-                    string locationName = organisationLocationForNotification?.name ?? "N/A";
-
-                    // Send notification to organization (location's WhatsApp or owner's mobile)
-                    await smsService.SendUserBookAppointment(new UserBookAppointmentSmsReq
-                    {
-                        mobilenumber = notificationMobile,
-                        OrganizationName = organisation.name ?? "Organization",
-                        CustomerName = customerUser.name ?? "Customer",
-                        AppointmentDate = appointmentDate,
-                        AppointmentTime = appointmentTime,
-                        ServiceType = serviceType,
-                        Location = locationName
-                    });
-                }
+                    mobilenumber = context.NotificationMobile,
+                    OrganizationName = context.OrganisationName,
+                    CustomerName = context.CustomerName,
+                    AppointmentDate = appointmentDate,
+                    AppointmentTime = appointmentTime,
+                    ServiceType = context.ServiceType,
+                    Location = context.LocationName
+                });
             }
             catch (Exception ex)
             {
-                // Log error but don't fail the appointment booking
                 Console.WriteLine($"Error sending organization booking notification: {ex.Message}");
             }
-            
-            return "Successfully booked.";
+        }
+
+        public sealed class PostBookingNotificationContext
+        {
+            public Appoinment Appoinment { get; init; }
+            public string OrganisationName { get; init; }
+            public string CustomerName { get; init; }
+            public string NotificationMobile { get; init; }
+            public string ServiceType { get; init; }
+            public string LocationName { get; init; }
         }
 
         private sealed class TimeWindow

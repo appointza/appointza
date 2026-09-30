@@ -12,12 +12,8 @@ import {
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { OrganisationRoom, ROOM_STATUSES } from "@/models/hospitality.model";
-import {
-  getRoomAvailabilityState,
-  parseDateOnlyLocal,
-  roomAvailabilityClassName,
-} from "@/utils/roomAmenities.util";
-import { roomGuestName, roomGuestPhone, roomHasActiveBooking } from "@/utils/roomBooking.util";
+import { parseDateOnlyLocal, roomAvailabilityClassName } from "@/utils/roomAmenities.util";
+import { roomGuestName, roomGuestPhone } from "@/utils/roomBooking.util";
 import { Link } from "react-router-dom";
 
 type OrganizationCalendarRoomsViewProps = {
@@ -89,25 +85,22 @@ export function OrganizationCalendarRoomsView({
             <BedDouble className="mx-auto mb-3 h-10 w-10 text-stone-300" />
             <p className="text-sm text-stone-600">No rooms defined for this location.</p>
             <Button asChild variant="outline" className="mt-4">
-              <Link to="/organization/services?kind=rooms">Add rooms</Link>
+              <Link to="/organization/hospitality?section=room-status">Add rooms</Link>
             </Button>
           </div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {rooms.map((room) => {
-              const state = getRoomAvailabilityState(room, selectedDate);
+              const state = room.availability_state || "Available";
               const isBusy = busyRoomId === room.id;
-              const hasGuestOrBooking =
-                roomHasActiveBooking(room) ||
-                state === "Reserved" ||
-                state === "Occupied" ||
-                state === "Check-out" ||
-                state === "Hold";
+              const canManage = room.can_manage;
               const guestName = room.guest?.name?.trim() ? roomGuestName(room) : null;
               const guestPhone = room.guest?.phone?.trim() ? roomGuestPhone(room) : null;
+              const guestEmail = room.guest?.email?.trim() || "";
               const checkInLabel = formatStayDate(room.booking?.check_in);
               const checkOutLabel = formatStayDate(room.booking?.check_out);
-              const canManage = hasGuestOrBooking && state !== "Available";
+              const nights = room.booking?.nights ?? 0;
+              const bookingRef = room.booking?.booking_id?.trim() || "";
 
               return (
                 <div
@@ -136,20 +129,20 @@ export function OrganizationCalendarRoomsView({
                       {guestPhone ? (
                         <p className="text-sm text-stone-600">{guestPhone}</p>
                       ) : null}
-                      {room.guest?.email?.trim() ? (
-                        <p className="text-xs text-stone-500">{room.guest.email}</p>
+                      {guestEmail ? (
+                        <p className="text-xs text-stone-500">{guestEmail}</p>
                       ) : null}
                       {checkInLabel || checkOutLabel ? (
                         <p className="text-xs text-stone-500">
                           Stay: {checkInLabel || "—"} – {checkOutLabel || "—"}
-                          {(room.booking?.nights ?? 0) > 0
-                            ? ` · ${room.booking?.nights} night${room.booking?.nights === 1 ? "" : "s"}`
+                          {(nights ?? 0) > 0
+                            ? ` · ${nights} night${nights === 1 ? "" : "s"}`
                             : ""}
                         </p>
                       ) : null}
-                      {room.booking?.booking_id?.trim() ? (
+                      {bookingRef ? (
                         <p className="text-xs text-stone-400">
-                          Ref {room.booking.booking_id}
+                          Ref {bookingRef}
                         </p>
                       ) : null}
                     </div>
@@ -197,22 +190,11 @@ export function OrganizationCalendarRoomsView({
                           {onCheckout ? (
                             <Button
                               type="button"
-                              variant="outline"
-                              className="h-9 flex-1 rounded-2xl"
+                              className="h-10 w-full rounded-2xl bg-blue-600 text-white hover:bg-blue-700"
                               disabled={isBusy}
                               onClick={() => onCheckout(room)}
                             >
-                              Checkout
-                            </Button>
-                          ) : null}
-                          {onMarkClean ? (
-                            <Button
-                              type="button"
-                              className="h-9 flex-1 rounded-2xl bg-gradient-coral text-white hover:opacity-95"
-                              disabled={isBusy}
-                              onClick={() => onMarkClean(room)}
-                            >
-                              Mark clean
+                              Checkout — room available
                             </Button>
                           ) : null}
                         </div>

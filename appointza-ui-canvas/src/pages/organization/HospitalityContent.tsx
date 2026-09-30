@@ -7,7 +7,7 @@ const HospitalityContentPage = () => {
   const organisationId = user?.organisationid ?? 0;
 
   return (
-    <OrganizationPageShell className="px-5 pb-4 pt-2 sm:px-8 sm:pt-4 lg:px-10">
+    <OrganizationPageShell embedded className="flex h-full min-h-0 flex-col">
       <HospitalityProfilePanel organisationId={organisationId} />
     </OrganizationPageShell>
   );

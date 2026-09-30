@@ -58,8 +58,10 @@ namespace appointza.Utils
                     var text = File.ReadAllText(path);
                     if (!TryParse(text, out var b, out var t) || string.IsNullOrWhiteSpace(b))
                         continue;
-                    baseUrl = b.Trim();
-                    templateBaseUrl = t?.Trim();
+                    baseUrl = b.Trim().TrimEnd('/');
+                    templateBaseUrl = string.IsNullOrWhiteSpace(t)
+                        ? $"{baseUrl}/template"
+                        : t.Trim();
                     loadedFromPath = path;
                     return true;
                 }

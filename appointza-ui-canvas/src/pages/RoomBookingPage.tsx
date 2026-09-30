@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Loader2, Minus, Plus, Users } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Minus, Plus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +16,11 @@ import {
 } from "@/services/guestHospitalityBooking.service";
 import { parseRoomBookingSearchParams } from "@/utils/roomBookingLinks.util";
 import { formatRoomTypeLabel } from "@/utils/roomAmenities.util";
+import { useAuth } from "@/contexts/AuthContext";
+import {
+  getCurrentAppPath,
+  redirectToLogin,
+} from "@/utils/authNavigation.util";
 
 function todayIsoLocal(): string {
   const d = new Date();
@@ -101,6 +106,7 @@ export default function RoomBookingPage() {
   const parsed = useMemo(() => parseRoomBookingSearchParams(searchParams), [searchParams]);
   const bookingService = useMemo(() => new GuestHospitalityBookingService(), []);
   const { toast } = useToast();
+  const { isAuthenticated, authReady, user, mobile } = useAuth();
 
   const [quote, setQuote] = useState<HospitalityBookingQuote | null>(null);
   const [quoteLoading, setQuoteLoading] = useState(false);
@@ -146,6 +152,31 @@ export default function RoomBookingPage() {
     const end = new Date(`${checkOut}T${checkOutTime || "11:00"}`);
     return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start;
   }, [checkIn, checkOut, checkInTime, checkOutTime]);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (!isAuthenticated) {
+      redirectToLogin(getCurrentAppPath());
+    }
+  }, [authReady, isAuthenticated]);
+
+  useEffect(() => {
+    if (!user) return;
+    const name =
+      [user.firstname, user.lastname].filter(Boolean).join(" ").trim() ||
+      user.username ||
+      "";
+    if (name && !form.getValues("guestName")) {
+      form.setValue("guestName", name);
+    }
+    const phone = (user.mobile || mobile || "").trim();
+    if (phone && !form.getValues("guestPhone")) {
+      form.setValue("guestPhone", phone);
+    }
+    if (user.email && !form.getValues("guestEmail")) {
+      form.setValue("guestEmail", user.email);
+    }
+  }, [user, mobile, form]);
 
   // Property / policy bootstrap (no room list until dates are chosen).
   const {
@@ -353,6 +384,15 @@ export default function RoomBookingPage() {
   }, [refreshQuote]);
 
   const onSubmit = form.handleSubmit(async (values) => {
+    if (!isAuthenticated) {
+      toast({
+        title: "Login required",
+        description: "Please log in to confirm your booking. You will be redirected to the login page.",
+        variant: "destructive",
+      });
+      redirectToLogin(getCurrentAppPath());
+      return;
+    }
     if (!datesReady) {
       toast({
         title: "Choose dates",
@@ -482,6 +522,24 @@ export default function RoomBookingPage() {
           </div>
         </div>
       </div>
+
+      {authReady && !isAuthenticated ? (
+        <div className="border-b border-orange-200 bg-orange-50">
+          <div className="mx-auto flex max-w-5xl items-center gap-3 px-4 py-3">
+            <AlertCircle className="h-5 w-5 shrink-0 text-orange-600" />
+            <p className="text-sm text-orange-800">
+              You need to be logged in to book a room.{" "}
+              <Button
+                variant="link"
+                className="h-auto p-0 text-orange-600 underline"
+                onClick={() => redirectToLogin(getCurrentAppPath())}
+              >
+                Click here to login
+              </Button>
+            </p>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mx-auto grid max-w-5xl gap-6 px-4 py-6 lg:grid-cols-[1.2fr_0.8fr]">
         <form onSubmit={onSubmit} className="space-y-6">
@@ -759,6 +817,12 @@ export default function RoomBookingPage() {
                       <span>{formatInr(quote.room_total ?? 0)}</span>
                     </div>
                   ) : null}
+                  {(quote.extra_bed_total ?? 0) > 0 ? (
+                    <div className="flex justify-between">
+                      <span>Extra beds</span>
+                      <span>{formatInr(quote.extra_bed_total ?? 0)}</span>
+                    </div>
+                  ) : null}
                   {(quote.extra_guest_total ?? 0) > 0 ? (
                     <div className="flex justify-between">
                       <span>Extra guests</span>
@@ -782,15 +846,25 @@ export default function RoomBookingPage() {
 
               <Button
                 className="w-full"
-                disabled={submitting || quoteLoading || !quote || !datesReady || !roomId}
-                onClick={onSubmit}
+                disabled={
+                  isAuthenticated
+                    ? submitting || quoteLoading || !quote || !datesReady || !roomId
+                    : !authReady
+                }
+                onClick={
+                  isAuthenticated
+                    ? onSubmit
+                    : () => redirectToLogin(getCurrentAppPath())
+                }
               >
                 {submitting ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Confirming…
                   </>
-                ) : (
+                ) : isAuthenticated ? (
                   "Confirm booking"
+                ) : (
+                  "Log in to book"
                 )}
               </Button>
 

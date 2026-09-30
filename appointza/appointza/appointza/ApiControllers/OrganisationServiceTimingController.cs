@@ -75,6 +75,26 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
+        [HttpPost("HasAny")]
+        public async Task<ActionResult<ActionRes<bool>>> HasAny(ActionReq<OrganisationServiceTimingHasAnyReq> req)
+        {
+            ActionRes<bool> result = new ActionRes<bool>
+            {
+                item = await organisationservicetimingService.HasAnyForOrganisation(req?.item?.organisationid ?? 0),
+            };
+            return Ok(result);
+        }
+
+        [HttpPost("SaveBulk")]
+        public async Task<ActionResult<ActionRes<bool>>> SaveBulk(ActionReq<OrganisationServiceTimingBulkSaveReq> req)
+        {
+            ActionRes<bool> result = new ActionRes<bool>
+            {
+                item = await organisationservicetimingService.SaveBulk(req.item),
+            };
+            return Ok(result);
+        }
+
         [HttpPost("selecttimingslot")]
         public async Task<ActionResult<ActionRes<List<Appoinment>>>> selecttimingslot(ActionReq<OrganisationServiceTimingSelectReq> req)
         {

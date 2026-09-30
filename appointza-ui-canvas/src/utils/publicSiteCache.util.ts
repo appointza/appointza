@@ -54,6 +54,18 @@ export function shouldForcePublicSiteRefresh(): boolean {
   return new URLSearchParams(window.location.search).has("refresh");
 }
 
+/** ETag sent to GetPublicHtml (quoted, stripped of embedded quotes). */
+export function formatPublicHtmlEtag(versionKey: string): string {
+  const safe = versionKey.replace(/"/g, "");
+  return `"${safe}"`;
+}
+
+/** Valid non-stale cache entry — skip network when present unless ?refresh. */
+export function readFreshPublicSiteCache(locationId: number): PublicSiteCacheEntry | null {
+  if (locationId <= 0 || isPublicSiteCacheStale(locationId)) return null;
+  return readPublicSiteCache(locationId);
+}
+
 export function readPublicSiteCache(locationId: number): PublicSiteCacheEntry | null {
   if (locationId <= 0) return null;
   const entry = readJson<PublicSiteCacheEntry>(cacheKey(locationId));

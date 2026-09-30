@@ -3,6 +3,7 @@ import { ActionRes } from '../models/actionres.model';
 import {
   OrganisationServices,
   OrganisationServicesDeleteReq,
+  OrganisationServicesHasAnyReq,
   OrganisationServicesSelectReq,
   PublicServiceCatalogueItem,
 } from '../models/organisationservices.model';
@@ -28,6 +29,16 @@ export class OrganisationServicesService {
             postdata
         );
         return resp.item;
+    }
+
+    async hasAny(req: OrganisationServicesHasAnyReq) {
+        const postdata = new ActionReq<OrganisationServicesHasAnyReq>();
+        postdata.item = req;
+        const resp = await this.http.post<ActionRes<boolean>>(
+            this.baseurl + '/HasAny',
+            postdata,
+        );
+        return !!resp.item;
     }
 
     async selectPublicCatalogue(req: OrganisationServicesSelectReq) {

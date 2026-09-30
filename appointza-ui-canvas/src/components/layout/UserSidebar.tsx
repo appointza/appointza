@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import {
   CalendarDays,
   CalendarCheck,
+  BedDouble,
   Home,
   LayoutDashboard,
   Settings,
@@ -196,7 +197,10 @@ const UserSidebar = () => {
             Appointments
           </SidebarLink>
           <SidebarLink to="/user/my-event-bookings" icon={CalendarCheck} collapsed={isCollapsed}>
-            My Event Bookings
+            Events
+          </SidebarLink>
+          <SidebarLink to="/user/my-room-bookings" icon={BedDouble} collapsed={isCollapsed}>
+            Rooms
           </SidebarLink>
         </div>
 

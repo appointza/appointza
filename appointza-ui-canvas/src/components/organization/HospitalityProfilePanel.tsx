@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import {
   ClipboardList,
   FileText,
@@ -10,9 +10,21 @@ import {
   UtensilsCrossed,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
+import { org } from "@/lib/orgTheme";
+import { settingsEmbedded } from "@/lib/settingsEmbedded";
+import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { useOrganisationLocationScope } from "@/hooks/useOrganisationLocationScope";
 import { RoomStatusPanel } from "@/components/organization/RoomStatusPanel";
+import { RoomDefinitionsPanel } from "@/components/organization/RoomDefinitionsPanel";
 import { HospitalityPoliciesPanel } from "@/components/organization/HospitalityPoliciesPanel";
 import {
   HospitalityFoodPanel,
@@ -29,6 +41,8 @@ import {
   OrganisationHospitalityProfile,
 } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
+import { useOrganisationCatalogOfferings } from "@/hooks/useOrganisationCatalogOfferings";
+import { normalizeCatalogTab } from "@/utils/organisationCatalogOfferings.util";
 
 type HospitalitySection =
   | "room-status"
@@ -54,8 +68,8 @@ const SECTIONS: {
 }[] = [
   {
     id: "room-status",
-    label: "Room status",
-    description: "Operational view of room availability, occupancy, and housekeeping.",
+    label: "Rooms",
+    description: "Add rooms, then track occupancy and housekeeping for this location.",
     icon: ClipboardList,
   },
   {
@@ -90,16 +104,21 @@ const SECTIONS: {
   },
 ];
 
-function parseSection(value: string | null): HospitalitySection | "room-definitions" {
-  if (value === "room-definitions") return "room-definitions";
+function parseSection(value: string | null): HospitalitySection {
+  if (value === "room-definitions" || value === "rooms") return "room-status";
   if (value && SECTIONS.some((section) => section.id === value)) {
     return value as HospitalitySection;
   }
   return "room-status";
 }
 
-const hospitalityTabTriggerClass =
-  "shrink-0 whitespace-nowrap rounded-xl px-3 py-2 text-sm font-semibold text-stone-600 shadow-none transition-colors hover:text-stone-800 data-[state=active]:bg-gradient-coral data-[state=active]:text-white data-[state=active]:shadow-sm sm:px-4";
+const hospitalitySidebarTriggerClass =
+  "h-auto w-full justify-start gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-semibold text-stone-600 shadow-none hover:bg-blue-50 hover:text-blue-700 data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none";
+
+const hospitalitySidebarListClass =
+  "hidden !h-auto w-full flex-col items-stretch justify-start gap-0.5 rounded-none border-0 bg-transparent p-0 shadow-none lg:flex";
+
+const hospitalityTabPanelClass = "m-0 mt-0 focus-visible:outline-none";
 
 function newPackage(index: number): HospitalityPackage {
   return {
@@ -150,15 +169,15 @@ type HospitalityProfilePanelProps = {
 
 export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePanelProps) {
   const { toast } = useToast();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { offersRooms, offerings, isLoading: isLoadingOfferings } = useOrganisationCatalogOfferings(
+    organisationId,
+  );
   const { locationId, locationLabel } = useOrganisationLocationScope(organisationId);
   const requestedSection = parseSection(searchParams.get("section"));
   const selectedRoomIdParam = searchParams.get("id") || searchParams.get("roomId");
   const selectedRoomId = selectedRoomIdParam ? Number(selectedRoomIdParam) : undefined;
-  const redirectToRoomsCatalog = requestedSection === "room-definitions";
-  const activeSection: HospitalitySection =
-    requestedSection === "room-definitions" ? "room-status" : requestedSection;
+  const activeSection: HospitalitySection = requestedSection;
 
   const [contentLoading, setContentLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -274,10 +293,16 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
   };
 
   const openRoomDefinitions = (roomId?: number) => {
-    const next = new URLSearchParams();
-    next.set("kind", "rooms");
-    if (roomId && roomId > 0) next.set("roomId", String(roomId));
-    navigate(`/organization/services?${next.toString()}`);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set("section", "room-status");
+        if (roomId && roomId > 0) next.set("roomId", String(roomId));
+        else next.delete("roomId");
+        return next;
+      },
+      { replace: true },
+    );
   };
 
   const persistContent = async (
@@ -324,115 +349,165 @@ export function HospitalityProfilePanel({ organisationId }: HospitalityProfilePa
     );
   }
 
-  if (redirectToRoomsCatalog) {
-    const next = new URLSearchParams();
-    next.set("kind", "rooms");
-    if (selectedRoomId && selectedRoomId > 0) next.set("roomId", String(selectedRoomId));
-    return <Navigate to={`/organization/services?${next.toString()}`} replace />;
+  if (!isLoadingOfferings && !offersRooms) {
+    const kind = normalizeCatalogTab(null, offerings.filter((item) => item !== "rooms"));
+    return <Navigate to={`/organization/services?kind=${kind}`} replace />;
   }
 
   return (
     <Tabs
       value={activeSection}
       onValueChange={(v) => setSection(v as HospitalitySection)}
-      className="flex flex-col gap-4"
+      className={cn(org.page, "flex h-full min-h-0 flex-col bg-white lg:flex-row")}
     >
-      <TabsList className="inline-flex h-auto w-full min-w-0 max-w-full flex-row flex-wrap justify-start gap-1 overflow-x-auto bg-white p-1 shadow-sm [scrollbar-width:thin]">
-        {SECTIONS.map((section) => {
-          const Icon = section.icon;
-          return (
-            <TabsTrigger key={section.id} value={section.id} className={hospitalityTabTriggerClass}>
-              <Icon className="mr-1.5 h-4 w-4 shrink-0" />
-              {section.label}
-            </TabsTrigger>
-          );
-        })}
-      </TabsList>
-
-      <div className="min-w-0 flex-1">
-        {SECTIONS.map((section) => (
-          <TabsContent key={section.id} value={section.id} className="mt-0 space-y-4">
-            <p className="text-sm text-stone-600">{section.description}</p>
-            {section.id === "room-status" ? (
-              <p className="text-xs text-stone-500">
-                To add or edit rooms, open{" "}
-                <button
-                  type="button"
-                  className="font-semibold text-[#E85D4C] underline-offset-2 hover:underline"
-                  onClick={() => openRoomDefinitions()}
+      <aside className="shrink-0 border-b border-stone-200 bg-white lg:h-full lg:w-56 lg:overflow-y-auto lg:border-b-0 lg:border-r">
+        <div className="px-4 py-3 md:px-6 lg:px-3 lg:py-5">
+          <p className="mb-3 hidden px-3 text-xs font-semibold uppercase tracking-wide text-stone-400 lg:block">
+            Hospitality
+          </p>
+          <div className="lg:hidden">
+            <label htmlFor="hospitality-settings-nav" className="sr-only">
+              Hospitality
+            </label>
+            <Select
+              value={activeSection}
+              onValueChange={(value) => setSection(value as HospitalitySection)}
+            >
+              <SelectTrigger
+                id="hospitality-settings-nav"
+                className="h-11 min-h-11 border-stone-200 shadow-none"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent position="item-aligned" className="z-[110] max-h-[min(24rem,70dvh)]">
+                {SECTIONS.map((section) => {
+                  const Icon = section.icon;
+                  return (
+                    <SelectItem key={section.id} value={section.id} className="min-h-11">
+                      <span className="flex items-center gap-2">
+                        <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                        {section.label}
+                      </span>
+                    </SelectItem>
+                  );
+                })}
+              </SelectContent>
+            </Select>
+          </div>
+          <TabsList className={hospitalitySidebarListClass}>
+            {SECTIONS.map((section) => {
+              const Icon = section.icon;
+              return (
+                <TabsTrigger
+                  key={section.id}
+                  value={section.id}
+                  className={hospitalitySidebarTriggerClass}
                 >
-                  Services → Rooms
-                </button>
-                .
-              </p>
-            ) : null}
+                  <Icon className="h-4 w-4 shrink-0" />
+                  {section.label}
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </div>
+      </aside>
 
-            {section.id === "room-status" && activeSection === "room-status" ?
-              <RoomStatusPanel
-                locationId={locationId}
-                locationName={locationLabel}
-                selectedRoomId={selectedRoomId}
-                onEditRoom={(roomId) => openRoomDefinitions(roomId)}
-              />
-            : null}
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-white">
+        {SECTIONS.map((section) => (
+          <TabsContent key={section.id} value={section.id} className={hospitalityTabPanelClass}>
+            <SettingsEmbeddedHeader
+              icon={section.icon}
+              title={section.label}
+              description={section.description}
+            />
+            <div className={cn(settingsEmbedded.sectionBody, "space-y-4")}>
+              {section.id === "room-status" && activeSection === "room-status" ?
+                <>
+                  <RoomDefinitionsPanel
+                    locationId={locationId}
+                    locationName={locationLabel}
+                    onOpenRoomStatus={(roomId) => {
+                      setSearchParams(
+                        (prev) => {
+                          const next = new URLSearchParams(prev);
+                          next.set("section", "room-status");
+                          if (roomId > 0) next.set("id", String(roomId));
+                          return next;
+                        },
+                        { replace: true },
+                      );
+                    }}
+                  />
+                  <RoomStatusPanel
+                    locationId={locationId}
+                    locationName={locationLabel}
+                    selectedRoomId={selectedRoomId}
+                    onEditRoom={(roomId) => openRoomDefinitions(roomId)}
+                  />
+                </>
+              : null}
 
-            {section.id === "policies" && activeSection === "policies" ?
-              <HospitalityPoliciesPanel
-                organisationId={organisationId}
-                profile={profile}
-                loading={contentLoading}
-                onSaved={(updated) => {
-                  loadedForOrgRef.current = organisationId;
-                  applyProfile(updated);
-                }}
-              />
-            : null}
+              {section.id === "policies" && activeSection === "policies" ?
+                <HospitalityPoliciesPanel
+                  organisationId={organisationId}
+                  profile={profile}
+                  loading={contentLoading}
+                  onSaved={(updated) => {
+                    loadedForOrgRef.current = organisationId;
+                    applyProfile(updated);
+                  }}
+                />
+              : null}
 
-            {CONTENT_SECTIONS.has(section.id) && section.id !== "policies" && contentLoading ?
-              <div className="flex items-center gap-2 py-12 text-stone-500">
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Loading…
-              </div>
-            : null}
+              {CONTENT_SECTIONS.has(section.id) && section.id !== "policies" && contentLoading ?
+                <div className="flex items-center gap-2 py-12 text-stone-500">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                  Loading…
+                </div>
+              : null}
 
-            {section.id === "packages" && !contentLoading && (
-              <HospitalityPackagesPanel
-                packages={packages}
-                setPackages={setPackages}
-                newItem={() => newPackage(packages.length)}
-                onPersist={async (next) => persistContent("packages", { packages: next })}
-              />
-            )}
+              {section.id === "packages" && !contentLoading && (
+                <HospitalityPackagesPanel
+                  packages={packages}
+                  setPackages={setPackages}
+                  newItem={() => newPackage(packages.length)}
+                  onPersist={async (next) => persistContent("packages", { packages: next })}
+                  organisationId={organisationId}
+                  locationId={locationId}
+                  onAddRooms={() => openRoomDefinitions()}
+                />
+              )}
 
-            {section.id === "food" && !contentLoading && (
-              <HospitalityFoodPanel
-                foodMenu={foodMenu}
-                setFoodMenu={setFoodMenu}
-                newItem={newFoodItem}
-                onPersist={async (next) => persistContent("food", { food_menu: next })}
-              />
-            )}
+              {section.id === "food" && !contentLoading && (
+                <HospitalityFoodPanel
+                  foodMenu={foodMenu}
+                  setFoodMenu={setFoodMenu}
+                  newItem={newFoodItem}
+                  onPersist={async (next) => persistContent("food", { food_menu: next })}
+                />
+              )}
 
-            {section.id === "nearby" && !contentLoading && (
-              <HospitalityNearbyPanel
-                nearbyPlaces={nearbyPlaces}
-                setNearbyPlaces={setNearbyPlaces}
-                newItem={newNearbyPlace}
-                onPersist={async (next) => persistContent("nearby", { nearby_places: next })}
-              />
-            )}
+              {section.id === "nearby" && !contentLoading && (
+                <HospitalityNearbyPanel
+                  nearbyPlaces={nearbyPlaces}
+                  setNearbyPlaces={setNearbyPlaces}
+                  newItem={newNearbyPlace}
+                  onPersist={async (next) => persistContent("nearby", { nearby_places: next })}
+                />
+              )}
 
-            {section.id === "guest-services" && !contentLoading && (
-              <HospitalityGuestServicesPanel
-                guestServices={guestServices}
-                setGuestServices={setGuestServices}
-                newItem={() => newGuestService(guestServices.length)}
-                onPersist={async (next) => persistContent("guest-services", { guest_services: next })}
-              />
-            )}
+              {section.id === "guest-services" && !contentLoading && (
+                <HospitalityGuestServicesPanel
+                  guestServices={guestServices}
+                  setGuestServices={setGuestServices}
+                  newItem={() => newGuestService(guestServices.length)}
+                  onPersist={async (next) => persistContent("guest-services", { guest_services: next })}
+                />
+              )}
+            </div>
           </TabsContent>
         ))}
-        </div>
-      </Tabs>
+      </div>
+    </Tabs>
   );
 }

@@ -1,10 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { OrganisationServices, OrganisationServicesSelectReq, OrganisationServicesDeleteReq } from '@/models/organisationservices.model';
+import { OrganisationServices, OrganisationServicesDeleteReq, OrganisationServicesSelectReq } from '@/models/organisationservices.model';
 import { useToast } from '@/hooks/use-toast';
 import { OrganisationServicesService } from '@/services/organisationservices.service';
 import { invalidatePublicSiteCacheForLocation } from '@/utils/publicSiteCache.util';
 
-export const useOrganizationServices = (organizationId?: number, locationId?: number) => {
+export const organizationServicesQueryKey = (
+  organizationId?: number,
+  locationId?: number,
+) => ['organization-services', organizationId, locationId] as const;
+
+export const useOrganizationServices = (
+  organizationId?: number,
+  locationId?: number,
+  options?: { enabled?: boolean },
+) => {
+  const queryEnabled = options?.enabled !== false;
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const service = new OrganisationServicesService();
@@ -15,7 +25,7 @@ export const useOrganizationServices = (organizationId?: number, locationId?: nu
     error,
     refetch
   } = useQuery({
-    queryKey: ['organization-services', organizationId, locationId],
+    queryKey: organizationServicesQueryKey(organizationId, locationId),
     queryFn: async () => {
       if (!organizationId) return [];
       
@@ -28,7 +38,7 @@ export const useOrganizationServices = (organizationId?: number, locationId?: nu
       const response = await service.select(req);
       return response || [];
     },
-    enabled: !!organizationId && (locationId ?? 0) > 0,
+    enabled: !!organizationId && (locationId ?? 0) > 0 && queryEnabled,
   });
 
   const createServiceMutation = useMutation({
@@ -86,14 +96,11 @@ export const useOrganizationServices = (organizationId?: number, locationId?: nu
 
   const deleteServiceMutation = useMutation({
     mutationFn: async (serviceId: number) => {
-      const req = new OrganisationServicesSelectReq();
-      req.organisationid = organizationId || 0;
-      if (locationId && locationId > 0) {
-        req.organisationlocationid = locationId;
-      }
-      const services = await service.select(req);
-      const serviceToDelete = services?.find(s => s.id === serviceId);
-      
+      const cached = queryClient.getQueryData<OrganisationServices[]>(
+        organizationServicesQueryKey(organizationId, locationId),
+      );
+      const serviceToDelete = cached?.find((item) => item.id === serviceId);
+
       const deleteReq = new OrganisationServicesDeleteReq();
       deleteReq.id = serviceId;
       deleteReq.version = serviceToDelete?.version || 1;

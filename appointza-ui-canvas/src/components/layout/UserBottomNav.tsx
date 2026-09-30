@@ -3,7 +3,8 @@ import {
   CalendarDays, 
   Home, 
   User,
-  Calendar
+  Calendar,
+  BedDouble,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -38,6 +39,11 @@ const UserBottomNav = () => {
       to: '/user/my-event-bookings',
       icon: Calendar,
       label: 'Events'
+    },
+    {
+      to: '/user/my-room-bookings',
+      icon: BedDouble,
+      label: 'Rooms'
     },
     {
       to: '/user/profile',

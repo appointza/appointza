@@ -100,4 +100,9 @@ public string notes { get; set; }
         public long id { get; set; }
         public int version { get; set; }
     }
+
+    public class OrganisationServicesHasAnyReq
+    {
+        public long organisationid { get; set; }
+    }
 }

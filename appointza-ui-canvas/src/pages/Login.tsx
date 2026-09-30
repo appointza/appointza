@@ -34,12 +34,22 @@ const Login = () => {
   const [mobile, setMobileState] = useState('');
   const [mobileError, setMobileError] = useState('');
   
-  // Return path after login (query `from` from org subdomain, or router state).
-  // Captured once via lazy state — resolveLoginReturnPath consumes (clears) the
-  // stashed sessionStorage value on read, and this component re-renders many
-  // times (typing, loading spinners) before the user actually submits, so a
-  // plain `const` recomputed every render would lose the real return path.
+  // Return path after login (cookie / window.name / sessionStorage — not the ugly ?from= URL).
+  // Captured once via lazy state — resolveLoginReturnPath consumes stashed values on read.
   const [from] = useState(() => resolveLoginReturnPath(location));
+
+  // Drop legacy ?from= clutter from the address bar once return path is captured.
+  useEffect(() => {
+    if (!location.search.includes("from=")) return;
+    const next = new URLSearchParams(location.search);
+    next.delete("from");
+    const qs = next.toString();
+    window.history.replaceState(
+      null,
+      "",
+      `${location.pathname}${qs ? `?${qs}` : ""}${location.hash || ""}`,
+    );
+  }, [location.hash, location.pathname, location.search]);
 
   // Check if user is already authenticated on page load
   useEffect(() => {

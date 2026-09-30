@@ -109,6 +109,33 @@ namespace appointza.Models.Hospitality
         public int extra_beds { get; set; }
     }
 
+    public class GuestHospitalityBookingMineItem
+    {
+        public string booking_id { get; set; } = "";
+        public string booking_guid { get; set; } = "";
+        public long organisation_id { get; set; }
+        public long organisation_location_id { get; set; }
+        public string organisation_name { get; set; } = "";
+        public string location_name { get; set; } = "";
+        public string city { get; set; } = "";
+        public string state { get; set; } = "";
+        public long room_id { get; set; }
+        public string room_number { get; set; } = "";
+        public string room_name { get; set; } = "";
+        public string room_type { get; set; } = "";
+        public string guest_name { get; set; } = "";
+        public string phone { get; set; } = "";
+        public string email { get; set; } = "";
+        public string check_in { get; set; } = "";
+        public string check_out { get; set; } = "";
+        public int nights { get; set; }
+        public bool closed { get; set; }
+        public string status { get; set; } = "";
+        public decimal total { get; set; }
+        public decimal paid { get; set; }
+        public decimal balance { get; set; }
+    }
+
     public class PublicBookableRoom
     {
         public string id { get; set; } = "";

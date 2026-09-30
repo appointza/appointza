@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { Images, Loader2, Upload, X } from "lucide-react";
+import { useState } from "react";
+import { Images, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
@@ -7,6 +7,7 @@ import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 import { AssetPickerDialog } from "@/components/templateBuilder/AssetPickerDialog";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+import { Link } from "react-router-dom";
 
 export type OrgImageAssetFieldProps = {
   label?: string;
@@ -28,13 +29,10 @@ export function OrgImageAssetField({
   maxImages,
   multiple = true,
   className,
-  idPrefix = "org-image",
   disabled = false,
 }: OrgImageAssetFieldProps) {
-  const { uploadFiles, getImageUrl } = useOrgTemplateAssets();
+  const { getImageUrl } = useOrgTemplateAssets();
   const { toast } = useToast();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
 
   const limit = multiple ? maxImages : 1;
@@ -55,71 +53,6 @@ export function OrgImageAssetField({
       if (!merged.includes(id)) merged.push(id);
     }
     onChange(limit != null ? merged.slice(0, limit) : merged);
-  };
-
-  const handleUpload = async (fileList: FileList | null) => {
-    if (!fileList?.length || !canAdd) return;
-
-    const files = Array.from(fileList).filter((file) => file.type.startsWith("image/"));
-    if (files.length === 0) {
-      toast({
-        title: "Invalid file",
-        description: "Choose image files only.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const oversized = files.find((file) => file.size > 5 * 1024 * 1024);
-    if (oversized) {
-      toast({
-        title: "File too large",
-        description: "Each image must be under 5 MB.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const allowedCount =
-      limit != null ? Math.max(0, limit - imageIds.length) : files.length;
-    const batch = multiple ? files.slice(0, allowedCount || files.length) : [files[0]];
-
-    if (limit != null && files.length > allowedCount && allowedCount > 0) {
-      toast({
-        title: "Image limit reached",
-        description: `Only ${allowedCount} more image${allowedCount === 1 ? "" : "s"} can be added.`,
-      });
-    }
-
-    if (batch.length === 0) {
-      toast({
-        title: "Image limit reached",
-        description: `Maximum ${limit} image${limit === 1 ? "" : "s"} allowed.`,
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setUploading(true);
-    try {
-      const ids = await uploadFiles(batch);
-      addIds(ids);
-      toast({
-        title: "Uploaded",
-        description:
-          ids.length === 1 ?
-            "Image saved to organisation assets."
-          : `${ids.length} images saved to organisation assets.`,
-      });
-    } catch {
-      toast({
-        title: "Upload failed",
-        description: "Could not upload image.",
-        variant: "destructive",
-      });
-    } finally {
-      setUploading(false);
-    }
   };
 
   const removeId = (id: number) => {
@@ -169,59 +102,26 @@ export function OrgImageAssetField({
       ) : null}
 
       {canAdd ? (
-        <>
-          <input
-            ref={inputRef}
-            id={`${idPrefix}-upload`}
-            type="file"
-            accept="image/*"
-            multiple={multiple}
-            className="hidden"
-            disabled={disabled || uploading}
-            onChange={(event) => {
-              void handleUpload(event.target.files);
-              event.target.value = "";
-            }}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              disabled={disabled || uploading}
-              className={cn(org.btnOutline, "min-h-10")}
-              onClick={() => inputRef.current?.click()}
-            >
-              {uploading ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Uploading…
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  {multiple ? "Upload image" : "Upload image"}
-                </>
-              )}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={disabled || uploading}
-              className={cn(org.btnOutline, "min-h-10")}
-              onClick={() => setPickerOpen(true)}
-            >
-              <Images className="mr-2 h-4 w-4" />
-              From assets
-            </Button>
-            {limit != null ? (
-              <span className="text-xs text-stone-500">
-                {imageIds.length}/{limit}
-              </span>
-            ) : (
-              <span className="text-xs text-stone-500">JPG, PNG · max 5 MB</span>
-            )}
-          </div>
-        </>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={disabled}
+            className={cn(org.btnOutline, "min-h-10")}
+            onClick={() => setPickerOpen(true)}
+          >
+            <Images className="mr-2 h-4 w-4" />
+            Choose from assets
+          </Button>
+          {limit != null ? (
+            <span className="text-xs text-stone-500">
+              {imageIds.length}/{limit}
+            </span>
+          ) : null}
+          <Link to="/organization/assets" className="text-xs font-medium text-blue-600 hover:underline">
+            Upload new images in Assets
+          </Link>
+        </div>
       ) : null}
 
       <AssetPickerDialog

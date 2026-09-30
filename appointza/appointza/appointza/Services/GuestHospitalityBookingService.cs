@@ -9,6 +9,7 @@ namespace appointza.Services
         readonly IDbProvider dbprovider;
         readonly OrganisationRoomService roomService;
         readonly OrganisationHospitalityContentService hospitalityContentService;
+        readonly RequestState requeststate;
 
         /// <summary>
         /// Permanent / operational blocks only. Occupied/reserved/etc. are date-window conflicts,
@@ -22,11 +23,13 @@ namespace appointza.Services
         public GuestHospitalityBookingService(
             IDbProvider dbprovider,
             OrganisationRoomService roomService,
-            OrganisationHospitalityContentService hospitalityContentService)
+            OrganisationHospitalityContentService hospitalityContentService,
+            RequestState requeststate)
         {
             this.dbprovider = dbprovider;
             this.roomService = roomService;
             this.hospitalityContentService = hospitalityContentService;
+            this.requeststate = requeststate;
         }
 
         public async Task<object> Index(GuestHospitalityBookingIndexReq req)
@@ -183,26 +186,36 @@ namespace appointza.Services
             var bookingCode = GenerateBookingCode();
             var bookingId = Guid.NewGuid().ToString("N");
 
-            room.status = "reserved";
-            room.guest = new RoomGuestData
+            var guest = new RoomGuestData
             {
                 name = req.guest_name.Trim(),
                 phone = req.phone.Trim(),
                 email = string.IsNullOrWhiteSpace(req.email) ? null : req.email.Trim(),
             };
-            room.booking = new RoomBookingData
-            {
-                booking_id = bookingCode,
-                check_in = checkIn,
-                check_out = checkOut,
-                nights = quote.nights,
-            };
-            room.payment = new RoomPaymentData
+            var payment = new RoomPaymentData
             {
                 total = quote.total,
                 paid = 0,
                 balance = quote.total,
             };
+            var stays = RoomStayHistory.Collect(room);
+            var loggedInUserId = requeststate.usercontext?.userid > 0
+                ? requeststate.usercontext.userid
+                : 0;
+            stays.Add(new RoomStayRecord
+            {
+                booking_id = bookingCode,
+                booking_guid = bookingId,
+                check_in = checkIn,
+                check_out = checkOut,
+                nights = quote.nights,
+                guest = guest,
+                payment = payment,
+                package_ids = req.package_ids ?? [],
+                user_id = loggedInUserId,
+            });
+            room.status = "reserved";
+            RoomStayHistory.ApplyToRoom(room, stays, DateOnly.FromDateTime(DateTime.Now));
 
             await roomService.Save(room);
 
@@ -213,13 +226,179 @@ namespace appointza.Services
                 room_number = room.room_number,
                 room_name = room.room_name,
                 quote = quote,
-                guest_name = room.guest.name,
+                guest_name = guest.name,
                 check_in = checkIn,
                 check_out = checkOut,
                 check_in_time = checkInTime,
                 check_out_time = checkOutTime,
                 persons = req.persons,
                 extra_beds = req.extra_beds,
+            };
+        }
+
+        public async Task<List<GuestHospitalityBookingMineItem>> ListMine()
+        {
+            var ctx = requeststate.usercontext;
+            if (ctx == null || ctx.userid <= 0)
+                throw new UnauthorizedAccessException("Sign in to view your room bookings.");
+
+            var email = (ctx.useremail ?? "").Trim().ToLowerInvariant();
+            var phoneDigits = new string((ctx.usermobile ?? "").Where(char.IsDigit).ToArray());
+            var phoneTail = phoneDigits.Length >= 10 ? phoneDigits[^10..] : phoneDigits;
+
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
+
+            var query = @"
+                SELECT r.id, r.organisation_id, r.organisation_location_id, r.room_number, r.room_name,
+                       r.room_type, r.status, r.booking, r.guest, r.payment,
+                       COALESCE(o.name, 'Property') AS organisation_name,
+                       COALESCE(ol.name, '') AS location_name,
+                       COALESCE(ol.city, '') AS city,
+                       COALESCE(ol.state, '') AS state
+                FROM organisation_rooms r
+                LEFT JOIN Organisation o ON o.id = r.organisation_id
+                LEFT JOIN organisationlocation ol ON ol.id = r.organisation_location_id
+                WHERE r.isactive = TRUE
+                  AND (
+                    (@phone_tail <> '' AND (
+                      regexp_replace(COALESCE(r.guest->>'phone', ''), '[^0-9]', '', 'g') LIKE '%' || @phone_tail
+                      OR regexp_replace(COALESCE(r.booking::text, ''), '[^0-9]', '', 'g') LIKE '%' || @phone_tail
+                    ))
+                    OR (@email <> '' AND (
+                      lower(trim(COALESCE(r.guest->>'email', ''))) = @email
+                      OR lower(r.booking::text) LIKE '%' || @email || '%'
+                    ))
+                    OR (@userid > 0 AND (
+                      r.booking::text LIKE '%""user_id"":' || @userid_text || '%'
+                      OR r.booking::text LIKE '%""user_id"": ' || @userid_text || '%'
+                    ))
+                  )";
+
+            DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "phone_tail", DbTypes.Types.String).Value = phoneTail;
+            db.AddParameter(command, "email", DbTypes.Types.String).Value = email;
+            db.AddParameter(command, "userid", DbTypes.Types.Long).Value = ctx.userid;
+            db.AddParameter(command, "userid_text", DbTypes.Types.String).Value = ctx.userid.ToString();
+
+            var items = new List<GuestHospitalityBookingMineItem>();
+            using (DbDataReader reader = await db.Execute(command))
+            {
+                while (await reader.ReadAsync())
+                {
+                    var room = new OrganisationRoom
+                    {
+                        id = Convert.ToInt64(reader["id"]),
+                        organisation_id = Convert.ToInt64(reader["organisation_id"]),
+                        organisation_location_id = Convert.ToInt64(reader["organisation_location_id"]),
+                        room_number = reader["room_number"]?.ToString() ?? "",
+                        room_name = reader["room_name"]?.ToString() ?? "",
+                        room_type = reader["room_type"]?.ToString() ?? "",
+                        status = reader["status"]?.ToString() ?? "",
+                    };
+                    room.booking_json = reader["booking"] == DBNull.Value ? "null" : reader["booking"].ToString() ?? "null";
+                    room.guest_json = reader["guest"] == DBNull.Value ? "null" : reader["guest"].ToString() ?? "null";
+                    room.payment_json = reader["payment"] == DBNull.Value ? "null" : reader["payment"].ToString() ?? "null";
+
+                    var orgName = reader["organisation_name"]?.ToString() ?? "Property";
+                    var locationName = reader["location_name"]?.ToString() ?? "";
+                    var city = reader["city"]?.ToString() ?? "";
+                    var state = reader["state"]?.ToString() ?? "";
+
+                    var stays = RoomStayHistory.Collect(room);
+                    if (stays.Count == 0 && StayGuestMatches(room.guest, email, phoneTail))
+                    {
+                        stays.Add(new RoomStayRecord
+                        {
+                            booking_id = room.booking?.booking_id ?? "",
+                            check_in = room.booking?.check_in ?? "",
+                            check_out = room.booking?.check_out ?? "",
+                            nights = room.booking?.nights ?? 0,
+                            guest = room.guest,
+                            payment = room.payment,
+                            user_id = ctx.userid,
+                        });
+                    }
+
+                    foreach (var stay in stays)
+                    {
+                        if (!StayMatches(stay, ctx.userid, email, phoneTail))
+                            continue;
+
+                        items.Add(ToMineItem(room, stay, orgName, locationName, city, state));
+                    }
+                }
+            }
+
+            return items
+                .GroupBy(i => string.IsNullOrWhiteSpace(i.booking_guid) ? $"{i.room_id}:{i.booking_id}:{i.check_in}" : i.booking_guid)
+                .Select(g => g.First())
+                .OrderByDescending(i => i.check_in)
+                .ThenByDescending(i => i.booking_id)
+                .ToList();
+        }
+
+        static bool StayMatches(RoomStayRecord stay, long userId, string email, string phoneTail)
+        {
+            if (userId > 0 && stay.user_id == userId)
+                return true;
+            return StayGuestMatches(stay.guest, email, phoneTail);
+        }
+
+        static bool StayGuestMatches(RoomGuestData? guest, string email, string phoneTail)
+        {
+            if (guest == null)
+                return false;
+            if (!string.IsNullOrEmpty(email)
+                && string.Equals((guest.email ?? "").Trim(), email, StringComparison.OrdinalIgnoreCase))
+                return true;
+            var digits = new string((guest.phone ?? "").Where(char.IsDigit).ToArray());
+            if (phoneTail.Length >= 10 && digits.Length >= 10 && digits.EndsWith(phoneTail, StringComparison.Ordinal))
+                return true;
+            if (phoneTail.Length is > 0 and < 10 && digits == phoneTail)
+                return true;
+            return false;
+        }
+
+        static GuestHospitalityBookingMineItem ToMineItem(
+            OrganisationRoom room,
+            RoomStayRecord stay,
+            string orgName,
+            string locationName,
+            string city,
+            string state)
+        {
+            var guest = stay.guest ?? room.guest;
+            var payment = stay.payment ?? room.payment;
+            var status = stay.closed
+                ? "completed"
+                : string.IsNullOrWhiteSpace(room.status) ? "reserved" : room.status;
+            return new GuestHospitalityBookingMineItem
+            {
+                booking_id = stay.booking_id,
+                booking_guid = stay.booking_guid,
+                organisation_id = room.organisation_id,
+                organisation_location_id = room.organisation_location_id,
+                organisation_name = orgName,
+                location_name = locationName,
+                city = city,
+                state = state,
+                room_id = room.id,
+                room_number = room.room_number,
+                room_name = room.room_name,
+                room_type = room.room_type,
+                guest_name = guest?.name ?? "",
+                phone = guest?.phone ?? "",
+                email = guest?.email ?? "",
+                check_in = stay.check_in,
+                check_out = stay.check_out,
+                nights = stay.nights,
+                closed = stay.closed,
+                status = status,
+                total = payment?.total ?? 0,
+                paid = payment?.paid ?? 0,
+                balance = payment?.balance ?? 0,
             };
         }
 
@@ -298,6 +477,9 @@ namespace appointza.Services
             var requestStart = DateOnly.FromDateTime(windowStart);
             var requestEnd = DateOnly.FromDateTime(windowEnd);
 
+            if (RoomStayHistory.OverlapsAnyStay(room, requestStart, requestEnd))
+                return true;
+
             // Hourly same calendar day — check that one day.
             if (requestEnd <= requestStart)
                 return !IsDayAvailableForGuest(room, requestStart);
@@ -324,14 +506,14 @@ namespace appointza.Services
             if (status == "cleaning")
                 return false;
 
-            if (TryGetStayDates(room, out var checkIn, out var checkOut))
+            if (RoomStayHistory.HasAnyStay(room))
             {
-                // Booked nights: check_in <= day < check_out
-                if (day >= checkIn && day < checkOut)
+                if (RoomStayHistory.AnyStayCoversDay(room, day))
                     return false;
 
                 // Org board: checkout morning still occupied / check-out pending
-                if (day == checkOut && status is "occupied" or "checkout_pending")
+                if (RoomStayHistory.AnyStayOnCheckoutMorning(room, day) &&
+                    status is "occupied" or "checkout_pending")
                     return false;
 
                 return true;
@@ -343,37 +525,6 @@ namespace appointza.Services
                 return true;
 
             return status is not ("occupied" or "reserved" or "checkout_pending" or "hold");
-        }
-
-        static bool TryGetStayDates(OrganisationRoom room, out DateOnly checkIn, out DateOnly checkOut)
-        {
-            checkIn = default;
-            checkOut = default;
-            if (room.booking == null)
-                return false;
-            if (!TryParseDateOnlyFlexible(room.booking.check_in, out checkIn))
-                return false;
-            if (!TryParseDateOnlyFlexible(room.booking.check_out, out checkOut))
-                return false;
-            // Allow same-day hourly stays; overnight requires checkOut > checkIn.
-            return checkOut >= checkIn;
-        }
-
-        static bool TryParseDateOnlyFlexible(string? value, out DateOnly date)
-        {
-            date = default;
-            if (string.IsNullOrWhiteSpace(value))
-                return false;
-            var trimmed = value.Trim();
-            // Prefer yyyy-MM-dd prefix so ISO datetimes don't shift by timezone.
-            if (trimmed.Length >= 10
-                && trimmed[4] == '-'
-                && trimmed[7] == '-'
-                && DateOnly.TryParse(trimmed[..10], out date))
-            {
-                return true;
-            }
-            return DateOnly.TryParse(trimmed, out date);
         }
 
         static bool HasValidWindow(

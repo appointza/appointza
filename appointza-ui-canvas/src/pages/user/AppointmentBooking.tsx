@@ -21,7 +21,12 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import UserLayout from "@/components/layout/UserLayout";
 import { useAuth } from "@/contexts/AuthContext";
-import { redirectToLogin } from "@/utils/authNavigation.util";
+import {
+  getCurrentAppPath,
+  getMainAppAuthUrl,
+  mustUseMainAppForAuth,
+  redirectToLogin,
+} from "@/utils/authNavigation.util";
 import { useToast } from "@/hooks/use-toast";
 import { OrganisationService } from "@/services/organisation.service";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
@@ -43,6 +48,7 @@ import {
   isTimeSlotInPastForToday,
 } from "@/utils/appointmentBookingTime.util";
 import { BookingTimeSlotPicker } from "@/components/booking/BookingTimeSlotPicker";
+import { parseOrganisationAppointmentSettings } from "@/utils/organisationAppointmentSettings.util";
 
 interface HolidayInfo {
   date: Date;
@@ -92,6 +98,12 @@ const AppointmentBooking = () => {
   const [isLoadingLeaveRequests, setIsLoadingLeaveRequests] = useState(false);
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(5); // Default to 5 days if not loaded
   const appliedServicePreselect = useRef(false);
+
+  // Auth tokens live on the main app host only. Never book on org subdomains.
+  useEffect(() => {
+    if (!mustUseMainAppForAuth()) return;
+    window.location.replace(getMainAppAuthUrl(getCurrentAppPath()));
+  }, []);
 
   const preselectedServiceId = useMemo(() => {
     const raw = searchParams.get("serviceId") || searchParams.get("serviceid") || "";
@@ -269,19 +281,22 @@ const AppointmentBooking = () => {
 
     setIsLoading(true);
     try {
-      // Load organization
       const orgReq = new OrganisationSelectReq();
       orgReq.id = parseInt(organisationId);
-      const orgRes = await organisationService.select(orgReq);
+
+      const locReq = new OrganisationLocationSelectReq();
+      locReq.organisationid = parseInt(organisationId);
+      locReq.id = parseInt(organisationLocationId);
+
+      const [orgRes, locRes] = await Promise.all([
+        organisationService.select(orgReq),
+        organisationLocationService.selectPublic(locReq),
+      ]);
+
       if (orgRes && orgRes.length > 0) {
         setOrganisationDetails(orgRes[0]);
       }
 
-      // Load location
-      const locReq = new OrganisationLocationSelectReq();
-      locReq.organisationid = parseInt(organisationId);
-      locReq.id = parseInt(organisationLocationId);
-      const locRes = await organisationLocationService.selectPublic(locReq);
       if (locRes && locRes.length > 0) {
         console.log('🔍 Location data loaded:', locRes[0]);
         console.log('🔍 isPaymentRequired value:', locRes[0].isPaymentRequired);
@@ -428,13 +443,6 @@ const AppointmentBooking = () => {
             end_time: leave.end_time
           }))
         });
-        
-        // Show warning if there are any leave requests
-        toast({
-          title: "Location Has Leave Requests",
-          description: `This location has ${response.length} leave request(s). Some time slots may be unavailable.`,
-          variant: "destructive"
-        });
       } else {
         console.log('ℹ️ No leave requests found');
         setLeaveRequests([]);
@@ -446,7 +454,7 @@ const AppointmentBooking = () => {
     } finally {
       setIsLoadingLeaveRequests(false);
     }
-  }, [organisationId, organisationLocationId, selectedDate, organisationServiceTimingService, toast]);
+  }, [organisationId, organisationLocationId, selectedDate, organisationServiceTimingService]);
 
   // Convert leave requests to holidays whenever leave requests change
   useEffect(() => {
@@ -458,33 +466,31 @@ const AppointmentBooking = () => {
     if (!organisationId || !organisationLocationId) return;
 
     try {
+      const orgReq = new OrganisationSelectReq();
+      orgReq.id = parseInt(organisationId);
+      const orgRes = await organisationService.select(orgReq);
+      if (orgRes && orgRes.length > 0) {
+        const fromOrg = parseOrganisationAppointmentSettings(orgRes[0].attributes_json);
+        if (fromOrg.hasOpenbefore) {
+          setBookingWindowDays(fromOrg.openbefore);
+          return;
+        }
+      }
+
       const req = new OrganisationServiceTimingSelectReq();
       req.organisationid = parseInt(organisationId);
       req.organisationlocationid = parseInt(organisationLocationId);
-      
-      // Get any day's timing to fetch the booking window setting
-      req.day_of_week = 1; // Monday
+      req.day_of_week = 1;
       req.appointmentdate = sendToApi(new Date());
 
       const response = await organisationServiceTimingService.select(req);
-      
       if (response && response.length > 0) {
-        const openBefore = response[0].openbefore || 0;
-        setBookingWindowDays(openBefore);
-        console.log('📅 Booking window loaded:', {
-          organisationId,
-          organisationLocationId,
-          openBefore,
-          responseLength: response.length,
-          firstItem: response[0]
-        });
-      } else {
-        console.log('⚠️ No booking window data found for:', { organisationId, organisationLocationId });
+        setBookingWindowDays(response[0].openbefore || 0);
       }
     } catch (error) {
-      console.error('❌ Error loading booking window:', error);
+      console.error("Error loading booking window:", error);
     }
-  }, [organisationId, organisationLocationId, organisationServiceTimingService]);
+  }, [organisationId, organisationLocationId, organisationService, organisationServiceTimingService]);
 
   // Load time slots
   const loadTimeSlots = useCallback(async () => {
@@ -624,7 +630,7 @@ const AppointmentBooking = () => {
         variant: "destructive"
       });
       // Redirect to login with return URL
-      redirectToLogin(window.location.pathname, navigate);
+      redirectToLogin(getCurrentAppPath(), navigate);
       return;
     }
 
@@ -841,7 +847,7 @@ const AppointmentBooking = () => {
           variant: "destructive"
         });
         setIsProcessingPayment(false);
-        redirectToLogin(window.location.pathname, navigate);
+        redirectToLogin(getCurrentAppPath(), navigate);
         return;
       }
 
@@ -1061,14 +1067,15 @@ const AppointmentBooking = () => {
     }
   };
 
-  // Load data on mount
+  // Load data on mount (leave requests load via selectedDate effect)
   useEffect(() => {
-    loadOrganisationDetails();
-    loadServices();
-    loadLeaveRequests();
-    loadBookingWindow();
+    void Promise.all([
+      loadOrganisationDetails(),
+      loadServices(),
+      loadBookingWindow(),
+    ]);
     initializeHolidayDates();
-  }, [loadOrganisationDetails, loadServices, loadLeaveRequests, loadBookingWindow, initializeHolidayDates]);
+  }, [loadOrganisationDetails, loadServices, loadBookingWindow, initializeHolidayDates]);
 
   // Reset carousel when location changes
   useEffect(() => {
@@ -1174,7 +1181,7 @@ const AppointmentBooking = () => {
                 <Button
                   variant="link"
                   className="h-auto p-0 text-orange-600 underline"
-                  onClick={() => redirectToLogin(window.location.pathname, navigate)}
+                  onClick={() => redirectToLogin(getCurrentAppPath(), navigate)}
                 >
                   Click here to login
                 </Button>

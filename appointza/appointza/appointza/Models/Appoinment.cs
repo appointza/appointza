@@ -78,6 +78,13 @@ public string notes { get; set; }
         
         public DateTime? resheduledate { get; set; }
         public bool ishasreshedule { get; set; }
+
+        /// <summary>Concurrent seats left in this time window (counter minus overlapping bookings). Not a DB column.</summary>
+        public int remaining { get; set; }
+        /// <summary>Max concurrent bookings for this window (timing.counter). Not a DB column.</summary>
+        public int capacity { get; set; }
+        /// <summary>False when appointmentdate is beyond timing.openbefore. Not a DB column.</summary>
+        public bool is_within_booking_window { get; set; } = true;
                 public class AttributesData
                 {
 

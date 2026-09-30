@@ -37,6 +37,8 @@ import { org } from "@/lib/orgTheme";
 import { hospitalityService } from "@/services/hospitality.service";
 import { normalizeOrganisationRoom, OrganisationRoom } from "@/models/hospitality.model";
 import type { OrganisationType } from "@/models/organisation.model";
+import { useOrganisationCatalogOfferings } from "@/hooks/useOrganisationCatalogOfferings";
+import { normalizeCatalogTab } from "@/utils/organisationCatalogOfferings.util";
 import { OrganisationServiceTimingService } from "@/services/organisationservicetiming.service";
 import {
   OrganisationServiceTimingSelectReq,
@@ -45,7 +47,6 @@ import OrganizationCalendarRoomsView from "@/pages/organization/OrganizationCale
 import OrganizationCalendarDayPanel, {
   TimingSlot,
 } from "@/pages/organization/OrganizationCalendarDayPanel";
-import { getRoomAvailabilityState } from "@/utils/roomAmenities.util";
 import {
   getAppointmentDayNumber,
   sendAppointmentDateToApi,
@@ -67,6 +68,12 @@ const OrganizationBookings = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const organizationId = user?.organisationid || 1;
+  const {
+    offerings: catalogOfferings,
+    offersServices,
+    offersEvents,
+    offersRooms,
+  } = useOrganisationCatalogOfferings(organizationId);
   const eventBookingsRef = useRef<EventBookingsPanelHandle>(null);
   const [eventFiltersHost, setEventFiltersHost] = useState<HTMLDivElement | null>(null);
 
@@ -77,6 +84,8 @@ const OrganizationBookings = () => {
   );
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [allRooms, setAllRooms] = useState<OrganisationRoom[]>([]);
+  const [roomOccupancyByDay, setRoomOccupancyByDay] = useState<Record<string, number>>({});
+  const [selectedDayRoomStats, setSelectedDayRoomStats] = useState({ available: 0, occupied: 0 });
   const [organisationType, setOrganisationType] = useState<OrganisationType>("service");
   const [timeSlots, setTimeSlots] = useState<TimingSlot[]>([]);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
@@ -96,8 +105,26 @@ const OrganizationBookings = () => {
     ? Number(globalLocationId)
     : user?.locationid || 0;
 
-  const showRoomsCalendar =
-    organisationType === "hospitality" || organisationType === "both";
+  const showRoomsCalendar = offersRooms;
+
+  useEffect(() => {
+    if (catalogOfferings.length === 0) return;
+    const normalized = normalizeCatalogTab(searchParams.get("kind"), catalogOfferings);
+    setCalendarKind((prev) => (prev === normalized ? prev : normalized));
+    const urlKind = searchParams.get("kind");
+    const expectedUrlKind = normalized === "services" ? null : normalized;
+    if (urlKind !== expectedUrlKind && (urlKind || expectedUrlKind)) {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          if (normalized === "services") next.delete("kind");
+          else next.set("kind", normalized);
+          return next;
+        },
+        { replace: true },
+      );
+    }
+  }, [catalogOfferings, searchParams, setSearchParams]);
 
   const [bookingCountByDay, setBookingCountByDay] = useState<Map<string, number>>(
     () => new Map(),
@@ -158,23 +185,40 @@ const OrganizationBookings = () => {
     try {
       if (!organisationlocationid) {
         setAllRooms([]);
+        setRoomOccupancyByDay({});
+        setSelectedDayRoomStats({ available: 0, occupied: 0 });
         return [];
       }
 
-      const rooms = await hospitalityService.selectRooms({
-        id: 0,
+      const board = await hospitalityService.getStatusBoard({
         organisation_id: organizationId,
         organisation_location_id: organisationlocationid,
+        date: toDateKey(selectedDate),
+        occupancy_month: format(calendarMonth, "yyyy-MM"),
       });
-      const normalized = (rooms || []).map((room) => normalizeOrganisationRoom(room));
+      const normalized = (board?.rooms || []).map((room) => normalizeOrganisationRoom(room));
       setAllRooms(normalized);
+      setRoomOccupancyByDay(board?.occupancy_by_day || {});
+      setSelectedDayRoomStats({
+        available: board?.available_count ?? 0,
+        occupied: board?.occupied_count ?? 0,
+      });
       return normalized;
     } catch (error) {
       console.error("❌ Error fetching room bookings:", error);
       setAllRooms([]);
+      setRoomOccupancyByDay({});
+      setSelectedDayRoomStats({ available: 0, occupied: 0 });
       return [];
     }
-  }, [isAuthenticated, organizationId, globalLocationId, user?.locationid]);
+  }, [
+    isAuthenticated,
+    organizationId,
+    globalLocationId,
+    user?.locationid,
+    selectedDate,
+    calendarMonth,
+  ]);
 
   // Initialize location from shared locations list when not already set
   useEffect(() => {
@@ -246,26 +290,20 @@ const OrganizationBookings = () => {
   }, [appointments, selectedDate, calendarKind]);
 
   useEffect(() => {
-    if (calendarKind !== "services") return;
+    if (calendarKind !== "services" || !organizationId) return;
     void fetchStatusReferenceTypes();
+  }, [calendarKind, organizationId, fetchStatusReferenceTypes]);
+
+  useEffect(() => {
+    if (calendarKind !== "services") return;
     void fetchSlotsForDate(selectedDate);
-  }, [
-    calendarKind,
-    selectedDate,
-    fetchStatusReferenceTypes,
-    fetchSlotsForDate,
-  ]);
+  }, [calendarKind, selectedDate, fetchSlotsForDate]);
 
   useEffect(() => {
     if (calendarKind === "rooms") {
       void fetchRoomBookings();
     }
   }, [calendarKind, fetchRoomBookings, organisationLocationId]);
-
-  useEffect(() => {
-    const kindFromUrl = parseCalendarKind(searchParams.get("kind"));
-    setCalendarKind((prev) => (prev === kindFromUrl ? prev : kindFromUrl));
-  }, [searchParams]);
 
   // Handle refresh
   const handleRefresh = async () => {
@@ -293,6 +331,7 @@ const OrganizationBookings = () => {
   };
 
   const handleCalendarKindChange = (kind: CalendarKind) => {
+    if (!catalogOfferings.includes(kind)) return;
     setCalendarKind(kind);
     setSearchParams(
       (prev) => {
@@ -348,7 +387,10 @@ const OrganizationBookings = () => {
       req.organisationid = organizationId;
       req.organisationlocationid = organisationlocationid;
       await appointmentService.UpdateStatus(req);
-      await refetchAppointments();
+      await Promise.all([
+        refetchAppointments(),
+        fetchSlotsForDate(selectedDate),
+      ]);
       toast({
         title: "Status updated",
         description: `Appointment status changed to ${status}.`,
@@ -420,7 +462,7 @@ const OrganizationBookings = () => {
           id: room.id,
           organisation_id: organizationId,
         }),
-      `Checkout started for room ${room.room_number}.`,
+      `Room ${room.room_number} is available now.`,
     );
   };
 
@@ -438,39 +480,10 @@ const OrganizationBookings = () => {
 
   const selectedDayBookings = appointments;
 
-  const roomOccupancyByDay = useMemo(() => {
-    const counts = new Map<string, number>();
-    if (!allRooms.length) return counts;
-
-    const monthStart = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth(), 1);
-    const monthEnd = new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 0);
-
-    for (let d = new Date(monthStart); d <= monthEnd; d.setDate(d.getDate() + 1)) {
-      const date = new Date(d);
-      const key = toDateKey(date);
-      const busy = allRooms.filter((room) => {
-        const state = getRoomAvailabilityState(room, date);
-        return state !== "Available";
-      }).length;
-      if (busy > 0) counts.set(key, busy);
-    }
-    return counts;
-  }, [allRooms, calendarMonth]);
-
-  const selectedDayRoomStats = useMemo(() => {
-    let available = 0;
-    let occupied = 0;
-    for (const room of allRooms) {
-      const state = getRoomAvailabilityState(room, selectedDate);
-      if (state === "Available") available += 1;
-      else occupied += 1;
-    }
-    return { available, occupied };
-  }, [allRooms, selectedDate]);
-
   const calendarControls = (
     <div className="space-y-3">
       <div className={cn(org.segmentGroup, "w-full flex-wrap")}>
+        {offersServices ? (
         <button
           type="button"
           onClick={() => handleCalendarKindChange("services")}
@@ -482,6 +495,7 @@ const OrganizationBookings = () => {
           <Clock className="h-4 w-4" />
           Services
         </button>
+        ) : null}
         {showRoomsCalendar ? (
           <button
             type="button"
@@ -495,6 +509,7 @@ const OrganizationBookings = () => {
             Rooms
           </button>
         ) : null}
+        {offersEvents ? (
         <button
           type="button"
           onClick={() => handleCalendarKindChange("events")}
@@ -506,6 +521,7 @@ const OrganizationBookings = () => {
           <CalendarCheck className="h-4 w-4" />
           Events
         </button>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -557,7 +573,7 @@ const OrganizationBookings = () => {
               className="pointer-events-auto rounded-xl border border-stone-100 p-2"
               modifiers={{
                 hasBookings: (date) => (bookingCountByDay.get(toDateKey(date)) ?? 0) > 0,
-                hasRoomActivity: (date) => (roomOccupancyByDay.get(toDateKey(date)) ?? 0) > 0,
+                hasRoomActivity: (date) => (roomOccupancyByDay[toDateKey(date)] ?? 0) > 0,
               }}
               modifiersClassNames={{
                 hasBookings:

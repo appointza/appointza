@@ -193,7 +193,6 @@ namespace appointza.Services
 
                 public async Task<List<Sitedetails>> GetSiteDetailsTransaction(IDb db, long organisationlocationid)
         {
-            await organisationservicesService.EnsureLocationColumnAsync(db);
             List<Sitedetails> result = new List<Sitedetails>();
             string query = @"
                 SELECT 
@@ -502,10 +501,53 @@ namespace appointza.Services
             }
             
             result = locationGroups.Values.ToList();
-            await LoadLocationServicesForSitesTransaction(db, result);
-            await EnrichHospitalityDataTransaction(db, result);
-            await EnrichFacilitiesTransaction(db, result);
+
+            ApplyDisplayPricesToServices(result);
+
+            var templateHtml = result.FirstOrDefault()?.template_html ?? "";
+            var loadHospitality = PublicTemplateContentRequirements.RequiresHospitality(templateHtml);
+            var loadFacilities = PublicTemplateContentRequirements.RequiresFacilities(templateHtml);
+
+            if (loadHospitality)
+            {
+                await EnrichHospitalityDataTransaction(db, result);
+            }
+            else
+            {
+                foreach (var site in result)
+                {
+                    site.hospitality_profile = null;
+                    site.hospitality_rooms = [];
+                }
+            }
+
+            if (loadFacilities)
+            {
+                await EnrichFacilitiesTransaction(db, result);
+            }
+            else
+            {
+                foreach (var site in result)
+                {
+                    site.facilities = [];
+                }
+            }
+
             return result;
+        }
+
+        static void ApplyDisplayPricesToServices(List<Sitedetails> sites)
+        {
+            foreach (var site in sites)
+            {
+                if (site.orgnaisatinservice == null)
+                    continue;
+
+                foreach (var service in site.orgnaisatinservice)
+                {
+                    service.prize = CalculateDisplayPrice(service);
+                }
+            }
         }
 
         async Task EnrichFacilitiesTransaction(IDb db, List<Sitedetails> sites)
@@ -515,25 +557,26 @@ namespace appointza.Services
                 site.facilities ??= [];
                 site.facilities.Clear();
                 var facilityIds = site.locationdetail?.facility_list ?? [];
-                foreach (var id in facilityIds.Where(x => x > 0).Distinct())
+                if (facilityIds.Count == 0)
+                    continue;
+
+                try
                 {
-                    try
+                    var labelsById = await referenceValueService.SelectDisplayTextByIdsTransaction(db, facilityIds);
+                    foreach (var id in facilityIds)
                     {
-                        var values = await referenceValueService.SelectTransaction(db, new ReferenceValueSelectReq
-                        {
-                            id = id,
-                            referencetypeid = 0,
-                            organisationid = 0,
-                            parentid = 0,
-                        });
-                        var label = values?.FirstOrDefault()?.displaytext?.Trim();
-                        if (!string.IsNullOrWhiteSpace(label))
-                            site.facilities.Add(label);
+                        if (id <= 0)
+                            continue;
+
+                        if (!labelsById.TryGetValue(id, out var label) || string.IsNullOrWhiteSpace(label))
+                            continue;
+
+                        site.facilities.Add(label);
                     }
-                    catch
-                    {
-                        // skip unresolved facility ids
-                    }
+                }
+                catch
+                {
+                    // skip unresolved facility ids — matches prior per-id behavior
                 }
             }
         }
@@ -552,33 +595,6 @@ namespace appointza.Services
             }
 
             return service.weekday_price > 0 ? service.weekday_price : service.prize;
-        }
-
-        async Task LoadLocationServicesForSitesTransaction(IDb db, List<Sitedetails> sites)
-        {
-            foreach (var site in sites)
-            {
-                var orgId = site.organisationdetail?.id ?? site.locationdetail?.organisationid ?? 0;
-                var locId = site.locationdetail?.id ?? 0;
-                if (orgId <= 0 || locId <= 0)
-                {
-                    site.orgnaisatinservice = [];
-                    continue;
-                }
-
-                var services = await organisationservicesService.SelectTransaction(db, new OrganisationServicesSelectReq
-                {
-                    organisationid = orgId,
-                    organisationlocationid = locId,
-                });
-
-                foreach (var service in services)
-                {
-                    service.prize = CalculateDisplayPrice(service);
-                }
-
-                site.orgnaisatinservice = services;
-            }
         }
 
         async Task EnrichHospitalityDataTransaction(IDb db, List<Sitedetails> sites)

@@ -25,6 +25,9 @@ export class Appoinment {
   tasklist: { tasks: TaskItem[] } = { tasks: [] };  // List of tasks with TaskItem structure
   resheduledate: Date = new Date();                  // Rescheduled date
   ishasreshedule: boolean = false;                   // Has reschedule flag
+  remaining: number = 0;
+  capacity: number = 0;
+  is_within_booking_window: boolean = true;
 }
 
 export namespace Appoinment {
@@ -65,6 +68,9 @@ export class AppoinmentFinal {
   tasklist: { tasks: TaskItem[] } = { tasks: [] };  // List of tasks with TaskItem structure
   resheduledate: Date = new Date();                  // Rescheduled date
   ishasreshedule: boolean = false;                   // Has reschedule flag
+  remaining: number = 0;
+  capacity: number = 0;
+  is_within_booking_window: boolean = true;
 }
 
 export class SelectedSerivice{

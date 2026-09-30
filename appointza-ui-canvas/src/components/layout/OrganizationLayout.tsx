@@ -32,6 +32,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const location = useLocation();
   const isMobile = useIsMobile();
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readOrgSidebarCollapsed);
+  const isProfileSettingsRoute = location.pathname.startsWith("/organization/profile");
   const {
     hasCustomDomain,
     hasServices,
@@ -40,7 +41,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
     isComplete,
     isLoading: isLoadingOnboarding,
     nextStep,
-  } = useOnboardingStatus();
+  } = useOnboardingStatus({ enabled: !isProfileSettingsRoute });
   
   // Get user context from localStorage
   const getUserContext = () => {
@@ -61,7 +62,6 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   
   const isOnboardingRoute = isOrganizationOnboardingRoute(location.pathname);
 
-  // Check if staff user has access to current route based on new permission structure
   const checkRouteAccess = (route: string): boolean => {
     // Non-staff users (organization owners) have full access
     if (!isStaff) return true;
@@ -212,7 +212,8 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
 
   // Show onboarding blocking screen if incomplete and not on onboarding routes
   // Skip onboarding check for staff users - they don't need to set up services/timing
-  if (userType === "organization" && !isOnboardingRoute && !isStaff) {
+  // Profile settings remain accessible during setup
+  if (userType === "organization" && !isOnboardingRoute && !isStaff && !isProfileSettingsRoute) {
     if (!isLoadingOnboarding && !isComplete) {
       return (
         <OnboardingSetupScreen
@@ -231,12 +232,14 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const isClientBookPage = /^\/organization\/clients\/\d+\/book\/?$/.test(location.pathname);
   const isLeadsPage = /^\/organization\/leads\/?$/.test(location.pathname);
   const isProfilePage = /^\/organization\/profile\/?$/.test(location.pathname);
+  const isHospitalityPage = /^\/organization\/hospitality\/?$/.test(location.pathname);
   const isFullBleedPage =
     isTemplateBuilder ||
     isClientManagement ||
     isClientBookPage ||
     isLeadsPage ||
-    isProfilePage;
+    isProfilePage ||
+    isHospitalityPage;
   const inOnboardingFlow =
     userType === "organization" && !isStaff && !isComplete && isOnboardingRoute;
 

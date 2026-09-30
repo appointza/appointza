@@ -228,6 +228,7 @@ const AppRoutes = () => {
           <Route path="settings" element={<UserSettings />} />
           <Route path="events" element={<UserEvents />} />
           <Route path="my-event-bookings" element={<MyEventBookings />} />
+          <Route path="my-room-bookings" element={<MyEventBookings />} />
         </Route>
         <Route path="/user/events/:eventId/book" element={<EventBookingPage />} />
         <Route path="/book" element={<RoomBookingPage />} />

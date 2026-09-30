@@ -30,7 +30,7 @@ export function TemplateBuilderStructurePanel({
         <Layers className="mb-3 h-8 w-8 text-stone-400" />
         <p className="text-sm font-medium text-stone-700">No sections yet</p>
         <p className="mt-1 max-w-[220px] text-xs text-stone-500">
-          Pick a block from the left panel to start building your booking page.
+          Tap Add, then tap a piece to put it on your page.
         </p>
       </div>
     );
@@ -39,7 +39,7 @@ export function TemplateBuilderStructurePanel({
   return (
     <div className="space-y-2">
       <p className="text-xs text-stone-500">
-        Top to bottom on your live page. Click a section to customize it.
+        Top to bottom on the live page. Tap one to change it.
       </p>
       {blocks.map((block, idx) => {
         const meta = getBlockMeta(block.type);
