@@ -154,6 +154,28 @@ namespace appointza.Authentication.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Any logged-in user can ask "am I a super admin?". The answer comes from users.isfactory in the
+        /// database (never from the client or the token), so the UI can refresh a stale/old session.
+        /// </summary>
+        [HttpGet("SuperAdminStatus")]
+        [Authenticate]
+        public async Task<ActionResult<ActionRes<SuperAdminStatus>>> SuperAdminStatus()
+        {
+            var userContext = requestState.usercontext;
+            if (userContext == null || userContext.userid <= 0)
+            {
+                return Unauthorized(new { message = "Unauthorized" });
+            }
+            var isSuperAdmin = await HttpContext.RequestServices
+                .GetRequiredService<appointza.Services.SuperAdminService>()
+                .IsSuperAdminUser(userContext.userid);
+            return Ok(new ActionRes<SuperAdminStatus>
+            {
+                item = new SuperAdminStatus { issuperadmin = isSuperAdmin, userid = userContext.userid }
+            });
+        }
+
         [HttpGet("ValidateToken")]
         [Authenticate]
         public async Task<ActionResult<ActionRes<UsersContext>>> ValidateToken()
@@ -166,6 +188,10 @@ namespace appointza.Authentication.Controllers
                 {
                     return Unauthorized(new { message = "Unauthorized" });
                 }
+                // Always report the live (database) super admin state, not the possibly stale JWT claim.
+                userContext.issuperadmin = await HttpContext.RequestServices
+                    .GetRequiredService<appointza.Services.SuperAdminService>()
+                    .IsSuperAdminUser(userContext.userid);
                 result.item = userContext;
             }
             catch (Exception ex)

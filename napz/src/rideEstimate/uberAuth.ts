@@ -1,40 +1,40 @@
-import { Linking } from 'react-native';
-import { napzFunctions } from '../services/firebase/functionsClient';
-import type { RidePlace } from './types';
+import { appointzaRequest, unwrapAppointzaItem } from '../billing/appointzaHttp';
 import type { UberProductOffer } from './uberCatalog';
 
-export const UBER_APP_RETURN_SCHEME = 'napz://uber-oauth';
-
-export async function startUberConnect(): Promise<void> {
-  const result = await napzFunctions().httpsCallable('uberAuthStart')();
-  const authorizeUrl = String((result.data as { authorizeUrl?: string } | null)?.authorizeUrl ?? '');
-  if (!authorizeUrl.startsWith('https://auth.uber.com/')) {
-    throw new Error('Uber sign-in URL was not returned.');
-  }
-  await Linking.openURL(authorizeUrl);
-}
-
-export async function fetchUberConnection(): Promise<{ connected: boolean; scope: string | null }> {
-  const result = await napzFunctions().httpsCallable('uberConnectionStatus')();
-  const data = (result.data ?? {}) as { connected?: boolean; scope?: string | null };
-  return { connected: data.connected === true, scope: data.scope ?? null };
-}
-
-export async function disconnectUber(): Promise<void> {
-  await napzFunctions().httpsCallable('uberDisconnect')();
-}
-
-export async function fetchUberRideCatalog(
-  pickup: RidePlace,
-  destination: RidePlace
-): Promise<{ connected: boolean; products: UberProductOffer[] }> {
-  const result = await napzFunctions().httpsCallable('uberRideCatalog')({
-    pickup: { lat: pickup.lat, lng: pickup.lng },
-    destination: { lat: destination.lat, lng: destination.lng },
+export async function uberAuthStart(): Promise<{ authorizeUrl?: string; redirectUri?: string }> {
+  const payload = await appointzaRequest('/api/Napz/RideCatalog?provider=uber_auth_start', {
+    body: {},
   });
-  const data = (result.data ?? {}) as { connected?: boolean; products?: UberProductOffer[] };
-  return {
-    connected: data.connected === true,
-    products: Array.isArray(data.products) ? data.products : [],
-  };
+  return unwrapAppointzaItem(payload) as { authorizeUrl?: string; redirectUri?: string };
+}
+
+export async function uberConnectionStatus(): Promise<{ connected: boolean; scope?: string }> {
+  const payload = await appointzaRequest('/api/Napz/RideCatalog?provider=uber_status', {
+    body: {},
+  });
+  const item = unwrapAppointzaItem(payload);
+  return { connected: item.connected === true, scope: typeof item.scope === 'string' ? item.scope : undefined };
+}
+
+export async function uberDisconnect(): Promise<void> {
+  await appointzaRequest('/api/Napz/RideCatalog?provider=uber_disconnect', { body: {} });
+}
+
+export async function uberRideCatalog(
+  pickup: { lat: number; lng: number },
+  destination: { lat: number; lng: number }
+): Promise<{ connected: boolean; products: UberProductOffer[] }> {
+  try {
+    const payload = await appointzaRequest(
+      `/api/Napz/RideCatalog?provider=uber&pickupLat=${pickup.lat}&pickupLng=${pickup.lng}&destLat=${destination.lat}&destLng=${destination.lng}`,
+      { body: {} }
+    );
+    const item = unwrapAppointzaItem(payload);
+    return {
+      connected: item.connected === true,
+      products: Array.isArray(item.products) ? (item.products as UberProductOffer[]) : [],
+    };
+  } catch {
+    return { connected: false, products: [] };
+  }
 }

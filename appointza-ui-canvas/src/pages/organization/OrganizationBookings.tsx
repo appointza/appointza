@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import {
@@ -514,9 +513,8 @@ const OrganizationBookings = () => {
   const selectedDayBookings = appointments;
 
   const calendarControls = (
-    <div className="space-y-3">
-      <div className={cn(org.segmentGroup, "w-full flex-wrap")}>
-        {offersServices ? (
+    <div className={cn(org.segmentGroup, "w-full")}>
+      {offersServices ? (
         <button
           type="button"
           onClick={() => handleCalendarKindChange("services")}
@@ -528,21 +526,21 @@ const OrganizationBookings = () => {
           <Clock className="h-4 w-4" />
           Services
         </button>
-        ) : null}
-        {showRoomsCalendar ? (
-          <button
-            type="button"
-            onClick={() => handleCalendarKindChange("rooms")}
-            className={cn(
-              "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 px-2.5 text-[13px] font-medium transition-colors sm:flex-none",
-              calendarKind === "rooms" ? org.segmentActive : org.segmentInactive,
-            )}
-          >
-            <BedDouble className="h-4 w-4" />
-            Rooms
-          </button>
-        ) : null}
-        {offersEvents ? (
+      ) : null}
+      {showRoomsCalendar ? (
+        <button
+          type="button"
+          onClick={() => handleCalendarKindChange("rooms")}
+          className={cn(
+            "inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 px-2.5 text-[13px] font-medium transition-colors sm:flex-none",
+            calendarKind === "rooms" ? org.segmentActive : org.segmentInactive,
+          )}
+        >
+          <BedDouble className="h-4 w-4" />
+          Rooms
+        </button>
+      ) : null}
+      {offersEvents ? (
         <button
           type="button"
           onClick={() => handleCalendarKindChange("events")}
@@ -554,27 +552,23 @@ const OrganizationBookings = () => {
           <CalendarCheck className="h-4 w-4" />
           Events
         </button>
-        ) : null}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="min-w-0 flex-1" />
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={isRefreshing}
-          className={cn(org.btnOutline, "h-9 shrink-0")}
-        >
-          {isRefreshing ? (
-            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="mr-1.5 h-4 w-4" />
-          )}
-          Refresh
-        </Button>
-      </div>
+      ) : null}
+      <button
+        type="button"
+        onClick={() => void handleRefresh()}
+        disabled={isRefreshing}
+        className={cn(
+          "inline-flex min-h-9 w-9 shrink-0 items-center justify-center border-l border-[#e6eaf0] text-[#5b6572] transition-colors hover:bg-[#f4f6f9] hover:text-[#1a1a1a] disabled:opacity-50",
+        )}
+        aria-label="Refresh"
+        title="Refresh"
+      >
+        {isRefreshing ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <RefreshCw className="h-4 w-4" />
+        )}
+      </button>
     </div>
   );
 

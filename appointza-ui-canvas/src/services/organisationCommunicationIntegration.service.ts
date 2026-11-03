@@ -50,6 +50,19 @@ export class OrganisationCommunicationIntegrationService {
     return resp.item;
   }
 
+  async syncInboundWebhook(
+    req: OrganisationIntegrationDisconnectReq,
+  ): Promise<OrganisationIntegrationSafe> {
+    const resp = await this.http.post<ActionRes<OrganisationIntegrationSafe>>(
+      `${this.baseurl}/SyncInboundWebhook`,
+      { item: req },
+    );
+    if (!resp.item) {
+      throw new Error("Failed to repair inbound WhatsApp webhook delivery");
+    }
+    return resp.item;
+  }
+
   async disconnect(req: OrganisationIntegrationDisconnectReq): Promise<boolean> {
     const resp = await this.http.post<ActionRes<boolean>>(`${this.baseurl}/Disconnect`, {
       item: req,

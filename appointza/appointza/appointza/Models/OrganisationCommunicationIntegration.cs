@@ -63,6 +63,15 @@ namespace appointza.Models
         public bool notify_booking_confirmation { get; set; } = true;
         public bool notify_booking_reminder { get; set; } = true;
         public bool notify_event_registration { get; set; } = true;
+
+        /// <summary>Expected public callback Appointza registers with Meta.</summary>
+        public string inbound_webhook_url_expected { get; set; } = string.Empty;
+        /// <summary>Phone-number-level override from Meta (real inbound routes here).</summary>
+        public string inbound_webhook_url_phone { get; set; } = string.Empty;
+        /// <summary>App-level webhook from Meta (Test button / fallback).</summary>
+        public string inbound_webhook_url_application { get; set; } = string.Empty;
+        public bool inbound_delivery_ok { get; set; }
+        public string inbound_delivery_message { get; set; } = string.Empty;
     }
 
     public class EmailConnectionSafe

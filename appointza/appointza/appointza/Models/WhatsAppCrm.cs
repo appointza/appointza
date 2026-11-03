@@ -174,4 +174,25 @@ namespace appointza.Models
         /// </summary>
         public bool outcome_uncertain { get; set; }
     }
+
+    /// <summary>Meta Graph result for WABA subscribe / phone webhook override.</summary>
+    public class WhatsAppCloudGraphResult
+    {
+        public bool success { get; set; }
+        public string error { get; set; } = string.Empty;
+        public int http_status { get; set; }
+        public bool is_auth_error { get; set; }
+        public bool is_transient { get; set; }
+    }
+
+    public class WhatsAppPhoneWebhookConfiguration
+    {
+        public bool success { get; set; }
+        public string error { get; set; } = string.Empty;
+        public string phone_number_callback_url { get; set; } = string.Empty;
+        public string application_callback_url { get; set; } = string.Empty;
+        public int http_status { get; set; }
+        public bool is_auth_error { get; set; }
+        public bool is_transient { get; set; }
+    }
 }

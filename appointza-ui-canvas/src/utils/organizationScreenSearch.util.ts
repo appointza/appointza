@@ -170,10 +170,24 @@ export const ORGANIZATION_SCREEN_SEARCH_ITEMS: OrgScreenSearchItem[] = [
   },
   {
     id: "crm-business-profile",
-    label: "CRM Business Profile",
+    label: "Find businesses",
     to: "/organization/crm/business-profile",
     group: "CRM",
-    keywords: ["business profile", "catalogue", "crm"],
+    keywords: ["business profile", "places", "map", "google", "leads", "crm"],
+  },
+  {
+    id: "crm-catalogue",
+    label: "Org catalogue",
+    to: "/organization/crm/catalogue",
+    group: "CRM",
+    keywords: ["catalogue", "services", "rooms", "events", "crm"],
+  },
+  {
+    id: "crm-sales-profile",
+    label: "Sell a service",
+    to: "/organization/crm/catalogue#sales-profile",
+    group: "CRM",
+    keywords: ["sell a service", "sales profile", "catalogue", "crm"],
   },
 
   // Settings

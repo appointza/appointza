@@ -24,6 +24,14 @@ export interface WhatsAppConnectionSafe {
   notify_booking_confirmation: boolean;
   notify_booking_reminder: boolean;
   notify_event_registration: boolean;
+  /** Expected public callback Appointza registers with Meta. */
+  inbound_webhook_url_expected?: string;
+  /** Phone-number override from Meta (real inbound routes here). */
+  inbound_webhook_url_phone?: string;
+  /** App-level webhook from Meta (Test button / fallback). */
+  inbound_webhook_url_application?: string;
+  inbound_delivery_ok?: boolean;
+  inbound_delivery_message?: string;
 }
 
 export interface EmailConnectionSafe {

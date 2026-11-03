@@ -66,6 +66,20 @@ namespace appointza.Authentication.Services
             return MapProfile(reader);
         }
 
+        public async Task EnsureActiveProfileTransaction(
+            IDb db,
+            long userid,
+            string product,
+            string role,
+            string externalOrgId,
+            string profileId,
+            string status = "active")
+        {
+            var existing = await SelectPrimaryForLoginTransaction(db, userid, product);
+            if (existing != null) return;
+            await InsertTransaction(db, userid, product, role, externalOrgId, profileId, status);
+        }
+
         public async Task UpdateProfileForStaffTransaction(
             IDb db,
             string profileId,

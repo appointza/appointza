@@ -28,6 +28,8 @@ namespace appointza.Authentication.Services
         private readonly StaffService staffService;
         private readonly UsersService usersService;
         private readonly OrganisationReferralService organisationReferralService;
+        private readonly UserProductProfileService productProfileService;
+        private readonly NapzService napzService;
 
         public AuthService(
             IDbProvider dbprovider,
@@ -41,7 +43,9 @@ namespace appointza.Authentication.Services
             OrganisationService organisationService,
             StaffService staffservice,
             UsersService usersService,
-            OrganisationReferralService organisationReferralService)
+            OrganisationReferralService organisationReferralService,
+            UserProductProfileService productProfileService,
+            NapzService napzService)
         {
             this.dbprovider = dbprovider;
             this.querybuilderprovider = querybuilderprovider;
@@ -55,6 +59,8 @@ namespace appointza.Authentication.Services
             this.staffService = staffservice;
             this.usersService = usersService;
             this.organisationReferralService = organisationReferralService;
+            this.productProfileService = productProfileService;
+            this.napzService = napzService;
         }
 
         public UsersContext JwtTokenToUserContext(string token)
@@ -88,6 +94,8 @@ namespace appointza.Authentication.Services
                     organisationtype = int.Parse(jwtToken.Claims.First(x => x.Type == "organisationtype").Value),
                     organisationlocationid = long.Parse(jwtToken.Claims.First(x => x.Type == "organisationlocationid").Value),
                     organisationlocationname = jwtToken.Claims.First(x => x.Type == "organisationlocationname").Value,
+                    // Absent on tokens issued before the claim existed.
+                    issuperadmin = string.Equals(jwtToken.Claims.FirstOrDefault(x => x.Type == "issuperadmin")?.Value, "true", StringComparison.OrdinalIgnoreCase),
                 };
             }
             catch (SecurityTokenExpiredException)
@@ -122,6 +130,7 @@ namespace appointza.Authentication.Services
                 new Claim("organisationtype", req.organisationtype.ToString()),
                 new Claim("organisationlocationid", req.organisationlocationid.ToString()),
                 new Claim("organisationlocationname", ClaimVal(req.organisationlocationname)),
+                new Claim("issuperadmin", req.issuperadmin ? "true" : "false"),
             };
 
             var token = new JwtSecurityToken(
@@ -404,8 +413,8 @@ namespace appointza.Authentication.Services
 
             if (createFullOrg || createDraftOrg)
             {
-                organisation = new Organisation
-                {
+            organisation = new Organisation
+            {
                     name = createDraftOrg
                         ? $"Pending setup · {normalizedMobile}"
                         : req.organisationname,
@@ -414,10 +423,10 @@ namespace appointza.Authentication.Services
                     primarytypecode = createDraftOrg ? "" : req.primarytypecode,
                     secondarytypecode = createDraftOrg ? "" : req.secondarytypecode,
                     gstnumber = createDraftOrg ? "" : req.organisationgstnumber,
-                    imageid = req.organisationimageid,
+                imageid = req.organisationimageid,
                     subscription_plan_code = string.IsNullOrWhiteSpace(req.plan_code) ? "free" : req.plan_code,
                     notes = createDraftOrg ? OnboardingDraftOrgNotes : "",
-                };
+            };
                 await organisationservice.InsertTransaction(db, organisation);
 
                 if (!createDraftOrg && organisation.id > 0 && !string.IsNullOrWhiteSpace(req.referral_code))
@@ -474,23 +483,23 @@ namespace appointza.Authentication.Services
                     latitude = req.latitude != 0 ? req.latitude : 0;
                     longitude = req.longitude != 0 ? req.longitude : 0;
                     googlelocation = req.googlelocation ?? $"{req.locationcity}, {req.locationstate}, {req.locationcountry}";
-                }
+            }
 
                 organisationlocation = new OrganisationLocation
-                {
+            {
                     organisationid = organisation.id,
-                    name = req.locationname,
-                    addressline1 = req.locationaddressline1,
-                    addressline2 = req.locationaddressline2,
-                    city = req.locationcity,
-                    state = req.locationstate,
-                    country = req.locationcountry,
-                    pincode = req.locationpincode,
-                    longitude = longitude,
-                    latitude = latitude,
-                    googlelocation = googlelocation,
-                    templateid = 0
-                };
+                name = req.locationname,
+                addressline1 = req.locationaddressline1,
+                addressline2 = req.locationaddressline2,
+                city = req.locationcity,
+                state = req.locationstate,
+                country = req.locationcountry,
+                pincode = req.locationpincode,
+                longitude = longitude,
+                latitude = latitude,
+                googlelocation = googlelocation,
+                templateid = 0
+            };
                 await organisationlocationservice.InsertTransaction(db, organisationlocation);
             }
 
@@ -721,6 +730,7 @@ namespace appointza.Authentication.Services
             result.profileimage = user.profileimage;
             result.userpermission = user.attributes.permission;
             result.isStaff = isStaff;
+            result.issuperadmin = user.isfactory;
             result.refreshtoken = usersession.code;
             result.accesstoken = GenerateJwtToken(new GenerateJwtTokenRequest
             {
@@ -733,7 +743,8 @@ namespace appointza.Authentication.Services
                 organisationid = organisation?.id ?? 0,
                 organisationname = organisation?.name ?? "",
                 organisationlocationid = organisationlocation?.id ?? 0,
-                organisationlocationname = organisationlocation?.name ?? ""
+                organisationlocationname = organisationlocation?.name ?? "",
+                issuperadmin = user.isfactory
             });
 
             return result;
@@ -830,6 +841,7 @@ namespace appointza.Authentication.Services
             result.organisationid = organisation.id;
             result.organisationlocationid = organisationlocation.id;
             result.organisationlocationname = organisationlocation.name;
+            result.issuperadmin = user.isfactory;
             result.refreshtoken = usersession.code;
             result.accesstoken = GenerateJwtToken(new GenerateJwtTokenRequest
             {
@@ -842,7 +854,8 @@ namespace appointza.Authentication.Services
                 organisationid = organisation.id,
                 organisationname = organisation.name,
                 organisationlocationid = organisationlocation.id,
-                organisationlocationname = organisationlocation.name
+                organisationlocationname = organisationlocation.name,
+                issuperadmin = user.isfactory
             });
             return result;
         }
@@ -870,20 +883,20 @@ namespace appointza.Authentication.Services
             }
 
             using IDb db = await dbprovider.GetDb();
-            await db.Connect();
-            try
-            {
-                await db.BeginTransaction();
+                await db.Connect();
+                try
+                {
+                    await db.BeginTransaction();
                 var result = await CompleteBusinessOnboardingTransaction(db, userId, req);
-                await db.CommitTransaction();
+                    await db.CommitTransaction();
                 return result;
-            }
+                }
             catch
-            {
+                {
                 try { await db.RollbackTransaction(); } catch { /* ignore */ }
-                throw;
+                    throw;
+                }
             }
-        }
 
         public async Task<UsersContext> CompleteBusinessOnboardingTransaction(
             IDb db,
@@ -1075,6 +1088,7 @@ namespace appointza.Authentication.Services
                 profileimage = user.profileimage,
                 userpermission = user.attributes?.permission ?? new UsersPermissionData(),
                 isStaff = false,
+                issuperadmin = user.isfactory,
                 organisationid = organisation?.id ?? 0,
                 organisationname = organisation?.name ?? "",
                 organisationlocationid = organisationlocation?.id ?? 0,
@@ -1093,6 +1107,7 @@ namespace appointza.Authentication.Services
                 organisationname = organisation?.name ?? "",
                 organisationlocationid = organisationlocation?.id ?? 0,
                 organisationlocationname = organisationlocation?.name ?? "",
+                issuperadmin = user.isfactory,
             });
             return result;
         }
@@ -1126,27 +1141,89 @@ namespace appointza.Authentication.Services
             }
 
             var email = req.email.Trim();
+            var isNapz = string.Equals(req.client?.Trim(), ProductCodes.Napz, StringComparison.OrdinalIgnoreCase);
+
             var users = await usersService.SelectTransaction(db, new UsersSelectReq
             {
                 email = email
             });
 
+            Users user;
             if (users == null || users.Count == 0)
             {
-                throw new AppException(
-                    AppException.ErrorCodes.UsersNotFound,
-                    "No account found for this Google email. Please sign up first.");
+                if (!isNapz)
+                {
+                    throw new AppException(
+                        AppException.ErrorCodes.UsersNotFound,
+                        "No account found for this Google email. Please sign up first.");
+                }
+
+                // Napz: create user on first Google sign-in (no booking onboarding).
+                user = new Users
+                {
+                    name = string.IsNullOrWhiteSpace(req.name) ? email.Split('@')[0] : req.name.Trim(),
+                    email = email,
+                    mobile = "",
+                    mobilecountrycode = "",
+                    designation = "",
+                    organisationid = 0,
+                    locationid = 0,
+                    attributes = new Users.AttributesData
+                    {
+                        permission = new UsersPermissionData(),
+                    },
+                    notes = "product:napz",
+                    otpexpirationtime = DateTime.UtcNow,
+                };
+                await usersService.InsertTransaction(db, user);
+            }
+            else
+            {
+                user = users.First();
+                if (!string.IsNullOrWhiteSpace(req.name) && string.IsNullOrWhiteSpace(user.name))
+                {
+                    user.name = req.name.Trim();
+                }
             }
 
-            var user = users.First();
-            if (!string.IsNullOrWhiteSpace(req.name) && string.IsNullOrWhiteSpace(user.name))
+            if (isNapz)
             {
-                user.name = req.name.Trim();
-            }
+                // Never run booking draft-org onboarding for Napz.
+                await napzService.EnsureSchemaTransaction(db);
+                var napzOrg = await napzService.EnsureProductOrganisationTransaction(db);
 
-            // Business Google continue: attach a draft org when the user has none yet.
-            if (req.is_business_registration && user.organisationid <= 0)
+                // Link Napz-only / draft accounts to the product org. Keep real booking orgs intact.
+                if (user.organisationid <= 0)
+                {
+                    user.organisationid = napzOrg.id;
+                }
+                else if (user.organisationid != napzOrg.id)
+                {
+                    var currentOrg = (await organisationservice.SelectTransaction(db, new OrganisationSelectReq
+                    {
+                        id = user.organisationid,
+                    })).FirstOrDefault();
+                    var isBookingDraft = currentOrg != null
+                        && string.Equals(currentOrg.notes, OnboardingDraftOrgNotes, StringComparison.OrdinalIgnoreCase);
+                    var alreadyNapz = currentOrg != null
+                        && string.Equals(currentOrg.gstnumber, ProductOrganisationMarkers.NapzGst, StringComparison.OrdinalIgnoreCase);
+                    if (isBookingDraft || alreadyNapz)
+                    {
+                        user.organisationid = napzOrg.id;
+                    }
+                }
+
+                await productProfileService.EnsureActiveProfileTransaction(
+                    db,
+                    user.id,
+                    ProductCodes.Napz,
+                    "user",
+                    napzOrg.id.ToString(),
+                    user.id.ToString());
+            }
+            else if (req.is_business_registration && user.organisationid <= 0)
             {
+                // Business Google continue: attach a draft org when the user has none yet.
                 var draftKey = !string.IsNullOrWhiteSpace(user.mobile)
                     ? NormalizeIndianMobile(user.mobile)
                     : email;

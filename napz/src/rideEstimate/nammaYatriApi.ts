@@ -1,25 +1,27 @@
-import { napzFunctions } from '../services/firebase/functionsClient';
-import type { RidePlace } from './types';
+import { appointzaRequest, unwrapAppointzaItem } from '../billing/appointzaHttp';
 
 export type NammaYatriOffer = {
-  bppId: string;
-  sellerName: string;
-  vehicle: string;
-  estimate: string | null;
-  durationMinutes: number | null;
+  id?: string;
+  provider?: string;
+  price?: string;
+  etaMinutes?: number | null;
 };
 
-export async function fetchNammaYatriCatalog(
-  pickup: RidePlace,
-  destination: RidePlace
-): Promise<{ configured: boolean; offers: NammaYatriOffer[] }> {
-  const result = await napzFunctions().httpsCallable('nammaYatriRideCatalog')({
-    pickup: { lat: pickup.lat, lng: pickup.lng },
-    destination: { lat: destination.lat, lng: destination.lng },
-  });
-  const data = (result.data ?? {}) as { configured?: boolean; offers?: NammaYatriOffer[] };
-  return {
-    configured: data.configured === true,
-    offers: Array.isArray(data.offers) ? data.offers : [],
-  };
+export async function fetchNammaYatriRideCatalog(input: {
+  pickup: { lat: number; lng: number };
+  destination: { lat: number; lng: number };
+}): Promise<{ configured: boolean; offers: NammaYatriOffer[] }> {
+  try {
+    const payload = await appointzaRequest(
+      `/api/Napz/RideCatalog?provider=nammayatri&pickupLat=${input.pickup.lat}&pickupLng=${input.pickup.lng}&destLat=${input.destination.lat}&destLng=${input.destination.lng}`,
+      { body: {} }
+    );
+    const item = unwrapAppointzaItem(payload);
+    return {
+      configured: item.configured === true,
+      offers: Array.isArray(item.offers) ? (item.offers as NammaYatriOffer[]) : [],
+    };
+  } catch {
+    return { configured: false, offers: [] };
+  }
 }

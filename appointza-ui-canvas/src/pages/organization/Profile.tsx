@@ -210,10 +210,11 @@ const OrganizationProfile = () => {
   const activeTab = useMemo(() => {
     const raw = searchParams.get("tab");
     if (raw === "integrations") return "whatsapp";
-    const tab = raw as ProfileSettingsTab | null;
-    if (tab === "location" && searchParams.get("subtab") === "organization") {
+    // Legacy deep link: ?tab=location&subtab=organization → Organisation tab
+    if (raw === "location" && searchParams.get("subtab") === "organization") {
       return hasLocationManagementAccess ? "organization" : "profile";
     }
+    const tab = raw as ProfileSettingsTab | null;
     if (tab && accessibleTabValues.includes(tab)) return tab;
     return "profile";
   }, [searchParams, accessibleTabValues, hasLocationManagementAccess]);
@@ -1318,21 +1319,22 @@ const OrganizationProfile = () => {
               </TabsContent>
             )}
 
-            {hasLocationManagementAccess && (
-              <TabsContent value="organization" className={profileTabPanelClass}>
-                {activeTab === "organization" ? (
-                  <LocationsScreen embedded section="organization" />
-                ) : null}
-              </TabsContent>
-            )}
+            {/*
+              Render outside TabsContent so LocationsScreen's own Tabs are not nested under
+              Profile's Tabs context (nested TabsContent value="locations" stayed hidden while
+              parent value was "location").
+            */}
+            {hasLocationManagementAccess && activeTab === "organization" ? (
+              <div className={profileTabPanelClass}>
+                <LocationsScreen embedded section="organization" />
+              </div>
+            ) : null}
 
-            {hasLocationManagementAccess && (
-              <TabsContent value="location" className={profileTabPanelClass}>
-                {activeTab === "location" ? (
-                  <LocationsScreen embedded section="locations" />
-                ) : null}
-              </TabsContent>
-            )}
+            {hasLocationManagementAccess && activeTab === "location" ? (
+              <div className={profileTabPanelClass}>
+                <LocationsScreen embedded section="locations" />
+              </div>
+            ) : null}
 
             {hasTemplatesAccess && (
               <TabsContent value="templates" className={profileTabPanelClass}>

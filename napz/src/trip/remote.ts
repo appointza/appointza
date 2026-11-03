@@ -1,12 +1,18 @@
-import auth from '@react-native-firebase/auth';
-import firestore from '@react-native-firebase/firestore';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  appointzaComputeRoute,
+  appointzaDeleteTrip,
+  appointzaListTrips,
+  appointzaNarrateTrip,
+  appointzaOpenSharedTrip,
+  appointzaPublishTrip,
+  appointzaSaveTrip,
+} from '../billing/appointzaCloud';
+import { getAppointzaAccessToken } from '../billing/appointzaSession';
 import { decodePolyline } from '../rideEstimate/decodePolyline';
-import { computeRoutesHttp } from '../rideEstimate/googleRoutesHttp';
 import { downsample, ghatSpansFromElevation, ghatSpansFromNames, offsetFor } from './geo';
 import { adjustMinutesForMode, parseWeather } from './forecast';
 import { applyDescriptions } from './planTrip';
-import { napzFunctions } from '../services/firebase/functionsClient';
 import { fill, t } from './i18n';
 import { formatHours, formatInr, localParts } from './time';
 import type { TravelMode, TripPlace, TripPlan } from './types';
@@ -63,8 +69,13 @@ async function finishRoute(
 export async function fetchTripRoute(origin: TripPlace, destination: TripPlace, mode: TravelMode) {
   try {
     const travelMode = mode === 'bike' ? 'TWO_WHEELER' : 'DRIVE';
-    const google = await computeRoutesHttp(origin, destination, travelMode);
-    const found = google.routes?.[0];
+    const google = await appointzaComputeRoute(
+      { lat: origin.lat, lng: origin.lng, address: origin.name },
+      { lat: destination.lat, lng: destination.lng, address: destination.name },
+      travelMode
+    );
+    const routes = (google.routes as { polyline?: { encodedPolyline?: string }; staticDuration?: string; duration?: string; distanceMeters?: number }[] | undefined) ?? [];
+    const found = routes[0];
     const geometry = decodePolyline(found?.polyline?.encodedPolyline ?? '');
     const durationSeconds = secondsFromDuration(found?.staticDuration) || secondsFromDuration(found?.duration);
     if (geometry.length >= 2 && found?.distanceMeters && durationSeconds > 0) {
@@ -125,20 +136,25 @@ export async function saveTrip(plan: TripPlan): Promise<'cloud' | 'local'> {
   })) as TripPlan;
   const local = await readLocal();
   await writeLocal([slim, ...local.filter((item) => item.id !== slim.id)]);
-  const uid = auth().currentUser?.uid;
-  if (!uid) return 'local';
-  await firestore().collection('users').doc(uid).collection('trips').doc(slim.id).set(slim);
-  return 'cloud';
+  if (!(await getAppointzaAccessToken())) return 'local';
+  try {
+    await appointzaSaveTrip(slim);
+    return 'cloud';
+  } catch {
+    return 'local';
+  }
 }
 
 export async function listTrips(): Promise<TripPlan[]> {
-  const uid = auth().currentUser?.uid;
-  if (!uid) return readLocal();
+  if (!(await getAppointzaAccessToken())) return readLocal();
   try {
-    const snap = await firestore().collection('users').doc(uid).collection('trips').get();
-    const cloud = snap.docs.map((doc) => doc.data() as TripPlan);
+    const cloud = await appointzaListTrips();
     cloud.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-    return cloud;
+    if (cloud.length) {
+      await writeLocal(cloud);
+      return cloud;
+    }
+    return readLocal();
   } catch {
     return readLocal();
   }
@@ -147,36 +163,21 @@ export async function listTrips(): Promise<TripPlan[]> {
 export async function deleteTrip(plan: TripPlan) {
   const local = await readLocal();
   await writeLocal(local.filter((item) => item.id !== plan.id));
-  const uid = auth().currentUser?.uid;
-  if (!uid) return;
-  await firestore().collection('users').doc(uid).collection('trips').doc(plan.id).delete().catch(() => {});
-  if (plan.shareCode) {
-    await firestore().collection('sharedTrips').doc(plan.shareCode).delete().catch(() => {});
-  }
-}
-
-function makeCode() {
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
-  return code;
+  if (!(await getAppointzaAccessToken())) return;
+  await appointzaDeleteTrip(plan).catch(() => {});
 }
 
 export async function publishTrip(plan: TripPlan): Promise<TripPlan> {
-  const uid = auth().currentUser?.uid;
-  if (!uid) return plan;
-  const shareCode = plan.shareCode || makeCode();
-  const next = { ...plan, shareCode };
-  await firestore().collection('sharedTrips').doc(shareCode).set({ ownerUid: uid, plan: next });
-  await firestore().collection('users').doc(uid).collection('trips').doc(plan.id).set(next).catch(() => {});
-  return next;
+  if (!(await getAppointzaAccessToken())) return plan;
+  return appointzaPublishTrip(plan);
 }
 
 export async function openSharedTrip(code: string): Promise<TripPlan | null> {
-  const snap = await firestore().collection('sharedTrips').doc(code.trim().toUpperCase()).get();
-  if (!snap.exists) return null;
-  const data = snap.data() as { plan?: TripPlan } | undefined;
-  return data?.plan ?? null;
+  try {
+    return await appointzaOpenSharedTrip(code);
+  } catch {
+    return null;
+  }
 }
 
 export function itineraryText(plan: TripPlan): string {
@@ -209,11 +210,10 @@ export function itineraryText(plan: TripPlan): string {
 }
 
 export async function narratePlan(plan: TripPlan): Promise<TripPlan | null> {
-  if (!auth().currentUser) return null;
+  if (!(await getAppointzaAccessToken())) return null;
   try {
-    const call = napzFunctions().httpsCallable('narrateTrip');
-    const result = await Promise.race([
-      call({
+    const data = await Promise.race([
+      appointzaNarrateTrip({
         lang: plan.request.lang,
         stops: plan.days.flatMap((day) => day.stops).map((stop) => ({
           id: stop.id,
@@ -224,7 +224,6 @@ export async function narratePlan(plan: TripPlan): Promise<TripPlan | null> {
       }),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
     ]);
-    const data = (result as { data?: { descriptions?: Record<string, string> | null } }).data;
     if (!data?.descriptions) return null;
     return applyDescriptions(plan, data.descriptions);
   } catch {

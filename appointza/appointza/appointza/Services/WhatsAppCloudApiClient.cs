@@ -444,6 +444,212 @@ namespace appointza.Services
                 is_transient = transient,
             };
 
+        /// <summary>
+        /// Subscribes this Meta app to the WhatsApp Business Account so real inbound
+        /// webhooks are delivered. POST /{waba-id}/subscribed_apps
+        /// </summary>
+        public async Task<WhatsAppCloudGraphResult> SubscribeWabaAppsAsync(
+            string wabaId,
+            string accessToken,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(wabaId) || string.IsNullOrWhiteSpace(accessToken))
+            {
+                return GraphFail("WhatsApp WABA credentials are missing.", auth: true);
+            }
+
+            var url = $"{BaseUrl}/{ApiVersion}/{wabaId.Trim()}/subscribed_apps";
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Trim());
+            request.Content = new StringContent("{}", Encoding.UTF8, "application/json");
+
+            try
+            {
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = ExtractGraphError(body) ?? $"Meta API returned {(int)response.StatusCode}";
+                    _logger.LogWarning("WhatsApp subscribed_apps failed ({Status}): {Error}", (int)response.StatusCode, err);
+                    return GraphFail(err, IsAuthStatus(response.StatusCode), IsTransientStatus(response.StatusCode), (int)response.StatusCode);
+                }
+
+                return new WhatsAppCloudGraphResult { success = true, http_status = (int)response.StatusCode };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WhatsApp subscribed_apps exception");
+                return GraphFail("Transient network error contacting Meta.", transient: true);
+            }
+        }
+
+        /// <summary>
+        /// Reads phone-number and application webhook callback URLs.
+        /// GET /{phone-number-id}?fields=webhook_configuration
+        /// </summary>
+        public async Task<WhatsAppPhoneWebhookConfiguration> GetPhoneWebhookConfigurationAsync(
+            string phoneNumberId,
+            string accessToken,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(phoneNumberId) || string.IsNullOrWhiteSpace(accessToken))
+            {
+                return new WhatsAppPhoneWebhookConfiguration
+                {
+                    success = false,
+                    error = "Phone Number ID or access token is missing.",
+                    is_auth_error = true,
+                };
+            }
+
+            var url =
+                $"{BaseUrl}/{ApiVersion}/{phoneNumberId.Trim()}" +
+                "?fields=id,display_phone_number,webhook_configuration";
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Trim());
+
+            try
+            {
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = ExtractGraphError(body) ?? $"Meta API returned {(int)response.StatusCode}";
+                    _logger.LogWarning(
+                        "WhatsApp phone webhook_configuration get failed ({Status}): {Error}",
+                        (int)response.StatusCode,
+                        err);
+                    return new WhatsAppPhoneWebhookConfiguration
+                    {
+                        success = false,
+                        error = err,
+                        http_status = (int)response.StatusCode,
+                        is_auth_error = IsAuthStatus(response.StatusCode),
+                        is_transient = IsTransientStatus(response.StatusCode),
+                    };
+                }
+
+                using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(body) ? "{}" : body);
+                var phoneUrl = "";
+                var appUrl = "";
+                if (doc.RootElement.TryGetProperty("webhook_configuration", out var cfg) &&
+                    cfg.ValueKind == JsonValueKind.Object)
+                {
+                    if (cfg.TryGetProperty("phone_number", out var phoneProp))
+                    {
+                        phoneUrl = phoneProp.GetString() ?? "";
+                    }
+                    if (cfg.TryGetProperty("application", out var appProp))
+                    {
+                        appUrl = appProp.GetString() ?? "";
+                    }
+                }
+
+                return new WhatsAppPhoneWebhookConfiguration
+                {
+                    success = true,
+                    phone_number_callback_url = phoneUrl,
+                    application_callback_url = appUrl,
+                    http_status = (int)response.StatusCode,
+                };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WhatsApp phone webhook_configuration get exception");
+                return new WhatsAppPhoneWebhookConfiguration
+                {
+                    success = false,
+                    error = "Transient network error contacting Meta.",
+                    is_transient = true,
+                };
+            }
+        }
+
+        /// <summary>
+        /// Sets the phone-number webhook override so real inbound messages hit Appointza
+        /// (not a stale ngrok / local tunnel). POST /{phone-number-id}
+        /// </summary>
+        public async Task<WhatsAppCloudGraphResult> SetPhoneWebhookOverrideAsync(
+            string phoneNumberId,
+            string accessToken,
+            string callbackUrl,
+            string verifyToken,
+            CancellationToken cancellationToken = default)
+        {
+            if (string.IsNullOrWhiteSpace(phoneNumberId) || string.IsNullOrWhiteSpace(accessToken))
+            {
+                return GraphFail("Phone Number ID or access token is missing.", auth: true);
+            }
+
+            if (string.IsNullOrWhiteSpace(callbackUrl) || string.IsNullOrWhiteSpace(verifyToken))
+            {
+                return GraphFail("Webhook callback URL and verify token are required.", permanent: true);
+            }
+
+            var url = $"{BaseUrl}/{ApiVersion}/{phoneNumberId.Trim()}";
+            var payload = new
+            {
+                webhook_configuration = new
+                {
+                    override_callback_uri = callbackUrl.Trim(),
+                    verify_token = verifyToken.Trim(),
+                },
+            };
+            var json = JsonSerializer.Serialize(payload);
+            using var request = new HttpRequestMessage(HttpMethod.Post, url);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Trim());
+            request.Content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            try
+            {
+                using var response = await _httpClient.SendAsync(request, cancellationToken);
+                var body = await response.Content.ReadAsStringAsync(cancellationToken);
+                if (!response.IsSuccessStatusCode)
+                {
+                    var err = ExtractGraphError(body) ?? $"Meta API returned {(int)response.StatusCode}";
+                    _logger.LogWarning(
+                        "WhatsApp phone webhook override failed ({Status}): {Error}",
+                        (int)response.StatusCode,
+                        err);
+                    return GraphFail(err, IsAuthStatus(response.StatusCode), IsTransientStatus(response.StatusCode), (int)response.StatusCode);
+                }
+
+                return new WhatsAppCloudGraphResult { success = true, http_status = (int)response.StatusCode };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "WhatsApp phone webhook override exception");
+                return GraphFail("Transient network error contacting Meta.", transient: true);
+            }
+        }
+
+        private static WhatsAppCloudGraphResult GraphFail(
+            string error,
+            bool auth = false,
+            bool transient = false,
+            int httpStatus = 0,
+            bool permanent = false) =>
+            new()
+            {
+                success = false,
+                error = error,
+                is_auth_error = auth,
+                is_transient = permanent ? false : transient,
+                http_status = httpStatus,
+            };
+
         private static bool IsAuthStatus(System.Net.HttpStatusCode code) =>
             code is System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden;
 

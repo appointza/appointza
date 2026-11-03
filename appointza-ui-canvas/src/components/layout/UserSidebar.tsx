@@ -9,7 +9,10 @@ import {
   Settings,
   ChevronLeft,
   ChevronRight,
+  Building2,
+  ShieldCheck,
 } from "lucide-react";
+import SuperAdminBadge from "@/components/superadmin/SuperAdminBadge";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { useAuth } from "@/contexts/AuthContext";
@@ -72,7 +75,7 @@ const SidebarLink = ({
 const UserSidebar = () => {
   const isMobile = useIsMobile();
   const location = useLocation();
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [imageVersion, setImageVersion] = useState(0);
 
@@ -205,6 +208,23 @@ const UserSidebar = () => {
           <SidebarLink to="/user/my-room-bookings" icon={BedDouble} collapsed={isCollapsed}>
             Rooms
           </SidebarLink>
+          {isSuperAdmin && (
+            <>
+              {!isCollapsed ? (
+                <div className="px-3 pb-1 pt-4">
+                  <SuperAdminBadge />
+                </div>
+              ) : (
+                <div className="my-2 border-t border-[#e8ecf1]" />
+              )}
+              <SidebarLink to="/super-admin" icon={ShieldCheck} collapsed={isCollapsed}>
+                Super Admin console
+              </SidebarLink>
+              <SidebarLink to="/super-admin/organisations" icon={Building2} collapsed={isCollapsed}>
+                All organisations
+              </SidebarLink>
+            </>
+          )}
         </div>
 
         <div className="mt-auto shrink-0 border-t border-[#e6eaf0] p-2">

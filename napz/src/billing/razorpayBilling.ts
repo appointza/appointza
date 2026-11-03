@@ -1,10 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import auth from '@react-native-firebase/auth';
 import { USER_PROFILE_KEY } from '../constants/authStorage';
-import { napzFunctions } from '../services/firebase/functionsClient';
-import { fetchEntitlementFromFirestore } from '../services/firebase/entitlementService';
 import { isPremium } from '../entitlement/PremiumGate';
 import type { NapzEntitlement } from '../entitlement/entitlementTypes';
+import {
+  claimAppointzaFreeTrial,
+  createAppointzaOrder,
+  fetchAppointzaEntitlement,
+  verifyAppointzaPayment,
+} from './appointzaPaymentApi';
+import { getAppointzaAccessToken } from './appointzaSession';
 import {
   CheckoutCancelledError,
   openRazorpayCheckout,
@@ -12,8 +16,6 @@ import {
 import { RAZORPAY_PACKAGES, type RazorpayPackageId } from './razorpayPackages';
 
 export { CheckoutCancelledError };
-
-let lastOrderId: string | null = null;
 
 function digitsOnly(value: string): string {
   return value.replace(/\D/g, '');
@@ -30,29 +32,30 @@ function tenDigitMobile(mobile: string): string | undefined {
 async function loadCheckoutPrefill(): Promise<{
   name?: string;
   email?: string;
-  contact: string;
+  contact?: string;
 }> {
-  const user = auth().currentUser;
   let mobile = '';
-  let name = user?.displayName ?? '';
+  let name = '';
+  let email = '';
   try {
     const raw = await AsyncStorage.getItem(USER_PROFILE_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw) as { mobile?: string; name?: string };
+      const parsed = JSON.parse(raw) as {
+        mobile?: string;
+        name?: string;
+        email?: string;
+      };
       mobile = String(parsed.mobile ?? '');
-      if (!name) name = String(parsed.name ?? '');
+      name = String(parsed.name ?? '');
+      email = String(parsed.email ?? '');
     }
   } catch {
     /* keep empty */
   }
-  const contact = tenDigitMobile(mobile);
-  if (!contact) {
-    throw new Error('Save a 10-digit mobile number on Account, then try payment again.');
-  }
   return {
     name: name.trim() || undefined,
-    email: user?.email ?? undefined,
-    contact,
+    email: email.trim() || undefined,
+    contact: tenDigitMobile(mobile),
   };
 }
 
@@ -66,69 +69,67 @@ function entitlementAdvanced(before: NapzEntitlement, next: NapzEntitlement): bo
 
 export function describeBillingError(error: unknown): string {
   if (error instanceof CheckoutCancelledError) return '';
-  const code = String((error as { code?: string })?.code ?? '');
   const message = String((error as Error)?.message ?? error);
-  if (code.includes('unauthenticated') || /auth/i.test(message)) {
-    return 'Sign in first, then try Premium checkout again.';
+  if (/sign in|unauthorized|session|token/i.test(message)) {
+    return 'Sign in with Google again, then try Premium checkout.';
   }
-  if (code.includes('not-found') || /NOT.?FOUND/i.test(message)) {
-    return 'Napz billing is not on the server yet. Deploy Cloud Functions (createRazorpayOrder) in asia-south1, then try again.';
+  if (/Unknown Napz package/i.test(message)) {
+    return 'That plan is not available yet. Pick another Premium package.';
   }
-  if (/Organization .* not found/i.test(message)) {
-    return 'Appointza booking org is not set up for Napz. Use Napz Razorpay checkout (Cloud Functions), not /api/Payment/CreateOrder with organizationid 1.';
+  if (/free trial already used/i.test(message)) {
+    return 'This account has already used the 10-day free trial.';
+  }
+  if (/Premium is already active/i.test(message)) {
+    return 'Premium is already active on this account.';
   }
   return message.replace(/^\[.*?\]\s*/, '') || 'Could not start Razorpay checkout.';
 }
 
+/** Source of truth for Napz Premium — Appointza `/api/Napz/*` only. */
+export async function fetchBillingEntitlement(): Promise<NapzEntitlement> {
+  return fetchAppointzaEntitlement();
+}
+
+/** @deprecated use fetchBillingEntitlement */
 export async function confirmLatestRazorpayOrder(): Promise<NapzEntitlement> {
-  const confirmOrder = napzFunctions().httpsCallable('confirmRazorpayOrder');
-  const result = await confirmOrder(lastOrderId ? { orderId: lastOrderId } : {});
-  const data = result.data as { entitlement?: NapzEntitlement };
-  if (data.entitlement) return data.entitlement;
-  return fetchEntitlementFromFirestore();
+  return fetchBillingEntitlement();
+}
+
+export async function startFreeTrial(): Promise<NapzEntitlement> {
+  const token = await getAppointzaAccessToken();
+  if (!token) {
+    throw new Error('Sign in with Google again to start the free trial.');
+  }
+  return claimAppointzaFreeTrial();
 }
 
 export async function startRazorpayCheckout(
   packageId: RazorpayPackageId
 ): Promise<NapzEntitlement> {
-  const uid = auth().currentUser?.uid;
-  if (!uid) {
-    throw new Error('Sign in first, then try Premium checkout again.');
+  const token = await getAppointzaAccessToken();
+  if (!token) {
+    throw new Error('Sign in with Google again to unlock Premium checkout.');
   }
 
-  const before = await fetchEntitlementFromFirestore();
+  const before = await fetchAppointzaEntitlement();
   const selected = RAZORPAY_PACKAGES[packageId];
   const prefill = await loadCheckoutPrefill();
-  const createOrder = napzFunctions().httpsCallable('createRazorpayOrder');
-  const result = await createOrder({ packageId, contact: prefill.contact });
-  const data = result.data as {
-    orderId?: string;
-    keyId?: string;
-    amount?: number;
-    currency?: string;
-  };
-  const orderId = String(data.orderId ?? '');
-  const keyId = String(data.keyId ?? '');
-  const amountPaise = Number(data.amount ?? selected.amountPaise);
-  if (!orderId.startsWith('order_') || !keyId) {
-    throw new Error('Could not create a Razorpay order.');
-  }
-  lastOrderId = orderId;
+  const order = await createAppointzaOrder(packageId);
 
-  await openRazorpayCheckout({
-    key: keyId,
-    orderId,
-    amountPaise,
-    currency: String(data.currency ?? 'INR'),
+  const checkout = await openRazorpayCheckout({
+    key: order.key,
+    orderId: order.orderId,
+    amountPaise: order.amountPaise,
+    currency: order.currency,
     description: selected.name,
     prefillEmail: prefill.email,
     prefillName: prefill.name,
     prefillContact: prefill.contact,
   });
 
-  const granted = await confirmLatestRazorpayOrder();
+  const granted = await verifyAppointzaPayment(checkout);
   if (entitlementAdvanced(before, granted) || isPremium(granted)) {
     return granted;
   }
-  return fetchEntitlementFromFirestore();
+  return fetchAppointzaEntitlement();
 }

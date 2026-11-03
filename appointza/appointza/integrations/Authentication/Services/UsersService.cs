@@ -152,6 +152,8 @@ namespace appointza.Authentication.Services
                 RETURNING id;
                 ";
             users.isactive = true;
+            // SECURITY: super admin (isfactory) can never be granted through the API; it is set directly in the database.
+            users.isfactory = false;
             users.isverified = false;
             users.accountactive = false;
             users.version = 1;
@@ -213,7 +215,7 @@ namespace appointza.Authentication.Services
             String query = @"
                 UPDATE Users
                     SET 
-                        name = @name,email = @email,mobile = @mobile,mobilecountrycode = @mobilecountrycode,designation = @designation,otp = @otp,otpexpirationtime = @otpexpirationtime,organisationid = @organisationid,locationid = @locationid,profileimage = @profileimage,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,parentid = @parentid,isfactory = @isfactory,notes = @notes,isverified = @isverified,accountactive = @accountactive,push_token = @push_token,webpushnotification = @webpushnotification,iospushnotification = @iospushnotification,androidpushnotification = @androidpushnotification,
+                        name = @name,email = @email,mobile = @mobile,mobilecountrycode = @mobilecountrycode,designation = @designation,otp = @otp,otpexpirationtime = @otpexpirationtime,organisationid = @organisationid,locationid = @locationid,profileimage = @profileimage,modifiedby = @modifiedby,modifiedon = @modifiedon,attributes = @attributes,issuspended = @issuspended,parentid = @parentid,notes = @notes,isverified = @isverified,accountactive = @accountactive,push_token = @push_token,webpushnotification = @webpushnotification,iospushnotification = @iospushnotification,androidpushnotification = @androidpushnotification,
                         version = version + 1
                 ";
 
@@ -248,7 +250,7 @@ namespace appointza.Authentication.Services
             db.AddParameter(command, "attributes", DbTypes.Types.Json).Value = users.attributes_json;
             db.AddParameter(command, "issuspended", DbTypes.Types.Boolean).Value = users.issuspended;
             db.AddParameter(command, "parentid", DbTypes.Types.Long).Value = users.parentid;
-            db.AddParameter(command, "isfactory", DbTypes.Types.Boolean).Value = users.isfactory;
+            // isfactory (super admin) is intentionally NOT updatable through the API.
             db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrEmpty(users.notes) ? "" : users.notes;
             db.AddParameter(command, "isverified", DbTypes.Types.Boolean).Value = users.isverified;
             db.AddParameter(command, "accountactive", DbTypes.Types.Boolean).Value = users.accountactive;
@@ -375,6 +377,7 @@ namespace appointza.Authentication.Services
             result.organisationname = organisation?.name ?? "";
             result.organisationlocationid = organisationlocation?.id ?? 0;
             result.organisationlocationname = organisationlocation?.name ?? "";
+            result.issuperadmin = user.isfactory;
             result.refreshtoken = usersession.code;
             result.accesstoken = GenerateJwtToken(new UserGenerateJwtTokenReq
             {
@@ -387,7 +390,8 @@ namespace appointza.Authentication.Services
                 organisationid = organisation?.id ?? 0,
                 organisationname = organisation?.name ?? "",
                 organisationlocationid = organisationlocation?.id ?? 0,
-                organisationlocationname = organisationlocation?.name ?? ""
+                organisationlocationname = organisationlocation?.name ?? "",
+                issuperadmin = user.isfactory
             });
 
             return result;
@@ -630,6 +634,7 @@ namespace appointza.Authentication.Services
                 new Claim("organisationtype", req.organisationtype.ToString()),
                 new Claim("organisationlocationid", req.organisationlocationid.ToString()),
                 new Claim("organisationlocationname", req.organisationlocationname ?? string.Empty),
+                new Claim("issuperadmin", req.issuperadmin ? "true" : "false"),
             };
 
             var token = new JwtSecurityToken(

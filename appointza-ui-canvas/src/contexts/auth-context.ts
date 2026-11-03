@@ -13,6 +13,8 @@ export interface AuthUser {
   imageid?: number;
   userpermission?: UsersPermissionData;
   isStaff?: boolean;
+  /** Mirrors users.isfactory. Display hint only; the API enforces it from the database. */
+  isSuperAdmin?: boolean;
 }
 
 export interface AuthContextType {
@@ -21,6 +23,8 @@ export interface AuthContextType {
   authReady: boolean;
   userType: "user" | "organization" | null;
   user: AuthUser | null;
+  /** True for users with users.isfactory = true (login flag, confirmed by api/Auth/SuperAdminStatus). */
+  isSuperAdmin: boolean;
   mobile: string | null;
   canSwitchMode: boolean;
   setUserType: (type: "user" | "organization") => void;

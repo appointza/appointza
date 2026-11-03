@@ -1011,7 +1011,7 @@ const OrganizationServices = () => {
                 {offersServices ? (
                 <TabsTrigger
                   value="services"
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-[#528ff0] data-[state=active]:text-white data-[state=active]:shadow-none"
                 >
                   Services
                 </TabsTrigger>
@@ -1019,7 +1019,7 @@ const OrganizationServices = () => {
                 {offersEvents ? (
                 <TabsTrigger
                   value="events"
-                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+                  className="flex-1 rounded-lg px-4 py-2 text-sm font-semibold text-stone-600 data-[state=active]:bg-[#528ff0] data-[state=active]:text-white data-[state=active]:shadow-none"
                 >
                   Events
                 </TabsTrigger>
@@ -1105,8 +1105,12 @@ const OrganizationServices = () => {
                   !showAddEventForm &&
                   !showEditEventForm &&
                   !showEventBookingPanel ? (
-                  <Button onClick={() => openEventForm()} className={cn(org.btnPrimary, "h-8")}>
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  <Button
+                    type="button"
+                    onClick={() => openEventForm()}
+                    className="h-10 rounded-xl border border-[#528ff0] bg-[#528ff0] px-4 text-sm font-semibold text-white shadow-none hover:bg-[#3d7ae8]"
+                  >
+                    <Plus className="h-4 w-4" />
                     Add Event
                   </Button>
                 ) : null}
@@ -1409,10 +1413,11 @@ const OrganizationServices = () => {
                       </p>
                       <div className="flex flex-wrap items-center justify-center gap-2">
                         <Button
+                          type="button"
                           onClick={() => openEventForm()}
-                          className="rounded-xl bg-blue-600 text-white shadow-none hover:bg-blue-700"
+                          className="h-10 rounded-xl border border-[#528ff0] bg-[#528ff0] px-4 text-sm font-semibold text-white shadow-none hover:bg-[#3d7ae8]"
                         >
-                          <Plus className="mr-2 h-4 w-4" />
+                          <Plus className="h-4 w-4" />
                           Add Event
                         </Button>
                         <RegisterCreateSkipButton

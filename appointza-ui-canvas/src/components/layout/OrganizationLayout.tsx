@@ -17,7 +17,7 @@ import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ShieldX } from "lucide-react";
+import { Loader2, ShieldX } from "lucide-react";
 import { OnboardingSetupScreen } from "@/components/onboarding/OrganizationOnboarding";
 import { isOrganizationOnboardingRoute } from "@/utils/organizationOnboarding.util";
 import {
@@ -37,6 +37,8 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const location = useLocation();
   const isMobile = useIsMobile();
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readOrgSidebarCollapsed);
+  /** While CRM (2nd) nav is open, allow a one-session expand without rewriting user preference. */
+  const [secondaryNavExpandedOverride, setSecondaryNavExpandedOverride] = useState(false);
   const isProfileSettingsRoute = location.pathname.startsWith("/organization/profile");
   const {
     hasCustomDomain,
@@ -92,6 +94,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
       '/organization/crm/tasks': 'editandviewClients',
       '/organization/crm/reports': 'editandviewClients',
       '/organization/crm/catalogue': 'editandviewClients',
+      '/organization/crm/sales-profile': 'editandviewClients',
       '/organization/crm/business-profile': 'editandviewClients',
       '/organization/reference-values': 'editandviewBusinessvalues',
     };
@@ -135,10 +138,28 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
 
   const staffHasAccess = checkRouteAccess(location.pathname);
 
-  const handleSidebarCollapsedChange = useCallback((collapsed: boolean) => {
-    setSidebarCollapsed(collapsed);
-    writeOrgSidebarCollapsed(collapsed);
-  }, []);
+  const isCrmPage = /^\/organization\/crm(\/|$)/.test(location.pathname);
+  /** CRM layout shows a secondary sidebar — collapse the primary to icon-only. */
+  const secondaryNavOpen = isCrmPage && !isMobile;
+  const effectiveSidebarCollapsed = secondaryNavOpen
+    ? !secondaryNavExpandedOverride
+    : sidebarCollapsed;
+
+  const handleSidebarCollapsedChange = useCallback(
+    (collapsed: boolean) => {
+      if (secondaryNavOpen) {
+        setSecondaryNavExpandedOverride(!collapsed);
+        return;
+      }
+      setSidebarCollapsed(collapsed);
+      writeOrgSidebarCollapsed(collapsed);
+    },
+    [secondaryNavOpen],
+  );
+
+  useEffect(() => {
+    if (!secondaryNavOpen) setSecondaryNavExpandedOverride(false);
+  }, [secondaryNavOpen]);
 
   useEffect(() => {
     const syncFromStorage = () => setSidebarCollapsed(readOrgSidebarCollapsed());
@@ -174,11 +195,11 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
     (userType !== 'organization' && !canSwitchMode && !allowPendingBusinessSetup)
   ) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-4">Loading...</h2>
-          <p className="text-gray-600">
-            {!isAuthenticated ? 'Please log in to access this page' : 'Redirecting...'}
+      <div className="flex min-h-screen items-center justify-center bg-[#f5f7f9]">
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />
+          <p className="text-sm text-[#5b6572]">
+            {!isAuthenticated ? "Checking your session…" : "Opening organisation workspace…"}
           </p>
         </div>
       </div>
@@ -254,7 +275,6 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
   const isLeadsPage =
     /^\/organization\/leads\/?$/.test(location.pathname) ||
     /^\/organization\/crm\/leads\/?$/.test(location.pathname);
-  const isCrmPage = /^\/organization\/crm(\/|$)/.test(location.pathname);
   const isProfilePage = /^\/organization\/profile\/?$/.test(location.pathname);
   const isHospitalityPage = /^\/organization\/hospitality\/?$/.test(location.pathname);
   const isFullBleedPage =
@@ -283,7 +303,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
       {!isMobile ? <OrganizationTopBar /> : null}
       {showOnboardingSidebar ? (
         <OnboardingSidebar
-          collapsed={sidebarCollapsed}
+          collapsed={effectiveSidebarCollapsed}
           onCollapsedChange={handleSidebarCollapsedChange}
           backendState={backendState}
           hasServices={hasServices}
@@ -292,7 +312,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
         />
       ) : (
         <OrganizationSidebar
-          collapsed={sidebarCollapsed}
+          collapsed={effectiveSidebarCollapsed}
           onCollapsedChange={handleSidebarCollapsedChange}
         />
       )}
@@ -301,7 +321,7 @@ const OrganizationLayout = ({ children }: OrganizationLayoutProps) => {
           "h-dvh overflow-hidden transition-all duration-300",
           isMobile
             ? "safe-area-top pl-0 pb-20"
-            : sidebarCollapsed
+            : effectiveSidebarCollapsed
               ? `pt-12 ${ORG_SIDEBAR_OFFSET_CLASS.collapsed}`
               : `pt-12 ${ORG_SIDEBAR_OFFSET_CLASS.expanded}`,
         )}

@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   Mail,
   MessageCircle,
+  Package,
   Target,
   Workflow,
 } from "lucide-react";
@@ -31,8 +32,14 @@ const crmLinks = [
   { to: "/organization/crm", label: "CRM Dashboard", icon: LayoutDashboard, end: true },
   {
     to: "/organization/crm/business-profile",
-    label: "Business Profile",
+    label: "Find businesses",
     icon: Building2,
+    end: false,
+  },
+  {
+    to: "/organization/crm/catalogue",
+    label: "Org catalogue",
+    icon: Package,
     end: false,
   },
   { to: "/organization/crm/contacts", label: "Leads & Contacts", icon: Target, end: false },
@@ -57,6 +64,12 @@ const crmLinks = [
 ] as const;
 
 function isCrmLinkActive(pathname: string, to: string, end: boolean): boolean {
+  if (
+    to === "/organization/crm/catalogue" &&
+    (pathname === "/organization/crm/sales-profile" || pathname.startsWith("/organization/crm/sales-profile/"))
+  ) {
+    return true;
+  }
   if (end) return pathname === to || pathname === `${to}/`;
   return pathname === to || pathname.startsWith(`${to}/`);
 }

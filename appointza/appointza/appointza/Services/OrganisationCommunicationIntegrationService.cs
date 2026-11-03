@@ -2,6 +2,7 @@ using appointza.Models;
 using appointza.Utils;
 using System.Data.Common;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace appointza.Services
@@ -12,23 +13,29 @@ namespace appointza.Services
         private readonly IQueryBuilderProvider querybuilderprovider;
         private readonly RequestState requeststate;
         private readonly SecretProtector secretProtector;
+        private readonly WhatsAppCloudApiClient _whatsAppCloudApi;
         private readonly ApplicationEnvironment _settings;
         private readonly IConfiguration _configuration;
+        private readonly ILogger<OrganisationCommunicationIntegrationService> _logger;
 
         public OrganisationCommunicationIntegrationService(
             IDbProvider dbprovider,
             IQueryBuilderProvider querybuilderprovider,
             RequestState requeststate,
             SecretProtector secretProtector,
+            WhatsAppCloudApiClient whatsAppCloudApi,
             IOptions<ApplicationEnvironment> settings,
-            IConfiguration configuration)
+            IConfiguration configuration,
+            ILogger<OrganisationCommunicationIntegrationService> logger)
         {
             this.dbprovider = dbprovider;
             this.querybuilderprovider = querybuilderprovider;
             this.requeststate = requeststate;
             this.secretProtector = secretProtector;
+            _whatsAppCloudApi = whatsAppCloudApi;
             _settings = settings.Value;
             _configuration = configuration;
+            _logger = logger;
         }
 
         public async Task<List<OrganisationIntegrationSafe>> Select(OrganisationIntegrationSelectReq req)
@@ -39,6 +46,7 @@ namespace appointza.Services
                 await db.Connect();
                 var list = await SelectTransaction(db, orgId, req.provider, req.id);
                 AttachWebhookSetup(list);
+                await AttachInboundDeliveryHealthAsync(db, list, repair: false);
                 return list;
             }
         }
@@ -112,7 +120,37 @@ namespace appointza.Services
                     await UpsertSecret(db, integrationId, IntegrationSecretTypes.AccessToken, req.access_token.Trim(), req.access_token_expires_at);
                 }
 
+                // Auto-fix Meta inbound routing: WABA subscribed_apps + phone webhook override.
+                // Stale ngrok/local overrides otherwise receive real chats while Meta Test still works.
+                await EnsureInboundWebhookDeliveryAsync(db, integrationId, repair: true);
+
                 var list = await SelectTransaction(db, orgId, IntegrationProviders.WhatsApp, integrationId);
+                AttachWebhookSetup(list);
+                await AttachInboundDeliveryHealthAsync(db, list, repair: false);
+                return list.First();
+            }
+        }
+
+        /// <summary>
+        /// Re-subscribe WABA + force phone webhook override to Appointza public callback.
+        /// Use when inbound messages stop (often a leftover ngrok override).
+        /// </summary>
+        public async Task<OrganisationIntegrationSafe> SyncInboundWebhook(OrganisationIntegrationDisconnectReq req)
+        {
+            long orgId = ResolveOrganisationId(req.organisation_id);
+            if (orgId <= 0 || req.id <= 0)
+            {
+                throw new Exception("Organisation and integration id are required.");
+            }
+
+            using (IDb db = await dbprovider.GetDb())
+            {
+                await db.Connect();
+                await EnsureOwnsIntegration(db, req.id, orgId, IntegrationProviders.WhatsApp);
+                await EnsureInboundWebhookDeliveryAsync(db, req.id, repair: true);
+                var list = await SelectTransaction(db, orgId, IntegrationProviders.WhatsApp, req.id);
+                AttachWebhookSetup(list);
+                await AttachInboundDeliveryHealthAsync(db, list, repair: false);
                 return list.First();
             }
         }
@@ -698,6 +736,304 @@ namespace appointza.Services
                 "smtp" => "smtp",
                 _ => "gmail",
             };
+        }
+
+        private string GetVerifyToken()
+        {
+            var token = (_settings.whatsapp?.verify_token ?? "").Trim();
+            if (!string.IsNullOrEmpty(token)) return token;
+            return (_configuration["ApplicationSettings:whatsapp:verify_token"] ?? "").Trim();
+        }
+
+        /// <summary>
+        /// Public HTTPS URL Meta must use for real inbound messages.
+        /// Prefer explicit whatsapp.webhook_callback_url; never use localhost/ngrok as the target.
+        /// </summary>
+        public string GetExpectedWebhookCallbackUrl()
+        {
+            var explicitUrl = (_settings.whatsapp?.webhook_callback_url ?? "").Trim().TrimEnd('/');
+            if (string.IsNullOrEmpty(explicitUrl))
+            {
+                explicitUrl = (_configuration["ApplicationSettings:whatsapp:webhook_callback_url"] ?? "")
+                    .Trim()
+                    .TrimEnd('/');
+            }
+            if (!string.IsNullOrEmpty(explicitUrl))
+            {
+                return explicitUrl;
+            }
+
+            var baseUrl = (_settings.baseUrl ?? "").Trim().TrimEnd('/');
+            if (IsPublicHttpsOrigin(baseUrl))
+            {
+                return baseUrl + "/api/webhooks/whatsapp";
+            }
+
+            // Production default for Appointza hosted API when baseUrl is local/dev.
+            return "https://appointza.com/api/webhooks/whatsapp";
+        }
+
+        private static bool IsPublicHttpsOrigin(string origin)
+        {
+            if (string.IsNullOrWhiteSpace(origin) ||
+                !origin.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            try
+            {
+                var host = new Uri(origin).Host.ToLowerInvariant();
+                if (host is "localhost" or "127.0.0.1" or "::1") return false;
+                if (host.EndsWith(".ngrok-free.app", StringComparison.Ordinal) ||
+                    host.EndsWith(".ngrok.io", StringComparison.Ordinal) ||
+                    host.EndsWith(".ngrok.app", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+                return true;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static string NormalizeCallbackUrl(string? url)
+        {
+            var value = (url ?? "").Trim().TrimEnd('/');
+            return value;
+        }
+
+        private static bool CallbackUrlsMatch(string expected, string actual)
+        {
+            var a = NormalizeCallbackUrl(expected);
+            var b = NormalizeCallbackUrl(actual);
+            if (string.IsNullOrEmpty(a) || string.IsNullOrEmpty(b)) return false;
+            return string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool LooksLikeTunnelUrl(string? url)
+        {
+            var value = (url ?? "").ToLowerInvariant();
+            return value.Contains("ngrok", StringComparison.Ordinal) ||
+                   value.Contains("localhost", StringComparison.Ordinal) ||
+                   value.Contains("127.0.0.1", StringComparison.Ordinal);
+        }
+
+        private async Task EnsureInboundWebhookDeliveryAsync(IDb db, long integrationId, bool repair)
+        {
+            var accessToken = await LoadAccessTokenAsync(db, integrationId);
+            if (string.IsNullOrWhiteSpace(accessToken))
+            {
+                _logger.LogWarning(
+                    "WhatsApp inbound sync skipped for integration {IntegrationId}: no access token",
+                    integrationId);
+                return;
+            }
+
+            string wabaId = "";
+            string phoneNumberId = "";
+            string getSql = @"
+                SELECT waba_id, phone_number_id
+                FROM whatsapp_connections
+                WHERE integration_id = @integration_id
+                LIMIT 1;";
+            using (var command = db.GetCommand(getSql))
+            {
+                db.AddParameter(command, "integration_id", DbTypes.Types.Long).Value = integrationId;
+                using var reader = await db.Execute(command);
+                if (await reader.ReadAsync())
+                {
+                    wabaId = reader["waba_id"]?.ToString() ?? "";
+                    phoneNumberId = reader["phone_number_id"]?.ToString() ?? "";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(wabaId) || string.IsNullOrWhiteSpace(phoneNumberId))
+            {
+                return;
+            }
+
+            var expected = GetExpectedWebhookCallbackUrl();
+            var verifyToken = GetVerifyToken();
+            if (string.IsNullOrWhiteSpace(verifyToken))
+            {
+                _logger.LogWarning(
+                    "WhatsApp inbound sync: verify_token missing — cannot set phone webhook override");
+            }
+
+            var subscribe = await _whatsAppCloudApi.SubscribeWabaAppsAsync(wabaId, accessToken);
+            if (!subscribe.success)
+            {
+                _logger.LogWarning(
+                    "WhatsApp subscribed_apps failed for WABA {WabaId}: {Error}",
+                    wabaId,
+                    subscribe.error);
+            }
+
+            var current = await _whatsAppCloudApi.GetPhoneWebhookConfigurationAsync(phoneNumberId, accessToken);
+            var phoneUrl = current.success ? current.phone_number_callback_url : "";
+            var needsOverride =
+                !current.success ||
+                !CallbackUrlsMatch(expected, phoneUrl) ||
+                LooksLikeTunnelUrl(phoneUrl);
+
+            if (repair && needsOverride && !string.IsNullOrWhiteSpace(verifyToken))
+            {
+                var set = await _whatsAppCloudApi.SetPhoneWebhookOverrideAsync(
+                    phoneNumberId,
+                    accessToken,
+                    expected,
+                    verifyToken);
+                if (!set.success)
+                {
+                    _logger.LogWarning(
+                        "WhatsApp phone webhook override failed for {PhoneNumberId}: {Error}",
+                        phoneNumberId,
+                        set.error);
+                    await UpdateWhatsAppWebhookStatusAsync(db, integrationId, "error");
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "WhatsApp phone webhook override set to {Callback} for phone_number_id {PhoneNumberId}",
+                    expected,
+                    phoneNumberId);
+            }
+
+            if (subscribe.success || !needsOverride)
+            {
+                await UpdateWhatsAppWebhookStatusAsync(db, integrationId, "subscribed");
+            }
+        }
+
+        private async Task AttachInboundDeliveryHealthAsync(
+            IDb db,
+            List<OrganisationIntegrationSafe> list,
+            bool repair)
+        {
+            var expected = GetExpectedWebhookCallbackUrl();
+            foreach (var item in list)
+            {
+                if (!string.Equals(item.provider, IntegrationProviders.WhatsApp, StringComparison.OrdinalIgnoreCase) ||
+                    item.whatsapp == null)
+                {
+                    continue;
+                }
+
+                item.whatsapp.inbound_webhook_url_expected = expected;
+
+                if (!item.has_access_token ||
+                    string.IsNullOrWhiteSpace(item.whatsapp.phone_number_id))
+                {
+                    item.whatsapp.inbound_delivery_ok = false;
+                    item.whatsapp.inbound_delivery_message =
+                        "Save an access token and Phone Number ID to verify inbound delivery.";
+                    continue;
+                }
+
+                if (repair)
+                {
+                    await EnsureInboundWebhookDeliveryAsync(db, item.id, repair: true);
+                }
+
+                var token = await LoadAccessTokenAsync(db, item.id);
+                if (string.IsNullOrWhiteSpace(token))
+                {
+                    item.whatsapp.inbound_delivery_ok = false;
+                    item.whatsapp.inbound_delivery_message = "Access token could not be decrypted.";
+                    continue;
+                }
+
+                var cfg = await _whatsAppCloudApi.GetPhoneWebhookConfigurationAsync(
+                    item.whatsapp.phone_number_id,
+                    token);
+                if (!cfg.success)
+                {
+                    item.whatsapp.inbound_delivery_ok = false;
+                    item.whatsapp.inbound_delivery_message =
+                        string.IsNullOrWhiteSpace(cfg.error)
+                            ? "Could not read Meta webhook configuration."
+                            : cfg.error;
+                    continue;
+                }
+
+                item.whatsapp.inbound_webhook_url_phone = cfg.phone_number_callback_url ?? "";
+                item.whatsapp.inbound_webhook_url_application = cfg.application_callback_url ?? "";
+
+                var phoneOk = CallbackUrlsMatch(expected, item.whatsapp.inbound_webhook_url_phone);
+                var tunnel = LooksLikeTunnelUrl(item.whatsapp.inbound_webhook_url_phone);
+                item.whatsapp.inbound_delivery_ok = phoneOk && !tunnel;
+                if (item.whatsapp.inbound_delivery_ok)
+                {
+                    item.whatsapp.inbound_delivery_message =
+                        "Inbound phone webhook points at Appointza. Real WhatsApp messages should reach the CRM.";
+                }
+                else if (tunnel)
+                {
+                    item.whatsapp.inbound_delivery_message =
+                        "Phone webhook still points at a tunnel/local URL (e.g. ngrok). Real inbound messages will miss Appointza. Click Repair inbound delivery.";
+                }
+                else if (string.IsNullOrWhiteSpace(item.whatsapp.inbound_webhook_url_phone))
+                {
+                    item.whatsapp.inbound_delivery_message =
+                        "No phone-number webhook override set. Click Repair inbound delivery to bind Meta to Appointza.";
+                }
+                else
+                {
+                    item.whatsapp.inbound_delivery_message =
+                        $"Phone webhook is {item.whatsapp.inbound_webhook_url_phone} but Appointza expects {expected}. Click Repair inbound delivery.";
+                }
+            }
+        }
+
+        private async Task<string> LoadAccessTokenAsync(IDb db, long integrationId)
+        {
+            string encrypted = "";
+            string sql = @"
+                SELECT encrypted_value
+                FROM integration_secrets
+                WHERE integration_id = @integration_id AND secret_type = @secret_type
+                LIMIT 1;";
+            using (var command = db.GetCommand(sql))
+            {
+                db.AddParameter(command, "integration_id", DbTypes.Types.Long).Value = integrationId;
+                db.AddParameter(command, "secret_type", DbTypes.Types.String).Value = IntegrationSecretTypes.AccessToken;
+                using var reader = await db.Execute(command);
+                if (await reader.ReadAsync())
+                {
+                    encrypted = reader["encrypted_value"]?.ToString() ?? "";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(encrypted))
+            {
+                return "";
+            }
+
+            try
+            {
+                return secretProtector.Decrypt(encrypted);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to decrypt WhatsApp access token for integration {IntegrationId}", integrationId);
+                return "";
+            }
+        }
+
+        private async Task UpdateWhatsAppWebhookStatusAsync(IDb db, long integrationId, string status)
+        {
+            string sql = @"
+                UPDATE whatsapp_connections
+                SET webhook_status = @webhook_status, updated_at = @updated_at
+                WHERE integration_id = @integration_id;";
+            using var command = db.GetCommand(sql);
+            db.AddParameter(command, "webhook_status", DbTypes.Types.String).Value = status;
+            db.AddParameter(command, "updated_at", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
+            db.AddParameter(command, "integration_id", DbTypes.Types.Long).Value = integrationId;
+            await db.ExecuteNonQuery(command);
         }
     }
 }

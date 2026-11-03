@@ -20,6 +20,13 @@ import type {
   EmailProvider,
   OrganisationIntegrationSafe,
 } from "@/models/organisationCommunicationIntegration.model";
+import {
+  applyProviderSmtpDefaults,
+  defaultAuthModeForProvider,
+  providerSupportsAppPassword,
+  smtpPresetForProvider,
+  type EmailAuthMode,
+} from "@/utils/emailIntegration.util";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { org } from "@/lib/orgTheme";
 import { cn } from "@/lib/utils";
@@ -42,6 +49,16 @@ function statusLabel(status?: string): string {
   }
 }
 
+function inferAuthMode(
+  provider: EmailProvider | string,
+  item: OrganisationIntegrationSafe | null,
+): EmailAuthMode {
+  if (provider === "smtp") return "smtp";
+  if (item?.has_access_token || item?.has_refresh_token) return "oauth";
+  if (providerSupportsAppPassword(provider)) return "app_password";
+  return defaultAuthModeForProvider(provider);
+}
+
 const EmailIntegrationSettings = ({ embedded = false }: Props) => {
   const { user } = useAuth();
   const { toast } = useToast();
@@ -51,6 +68,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [integration, setIntegration] = useState<OrganisationIntegrationSafe | null>(null);
+  const [authMode, setAuthMode] = useState<EmailAuthMode>("app_password");
   const [form, setForm] = useState({
     connection_name: "",
     email_provider: "gmail" as EmailProvider,
@@ -58,7 +76,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
     sender_name: "",
     reply_to: "",
     oauth_connection_id: "",
-    smtp_host: "",
+    smtp_host: "smtp.gmail.com",
     smtp_port: 587,
     smtp_tls_mode: "starttls",
     smtp_username: "",
@@ -69,7 +87,27 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
     smtp_password: "",
   });
 
-  const showSmtp = form.email_provider === "smtp";
+  const preset = smtpPresetForProvider(form.email_provider);
+  const showAppPassword =
+    authMode === "app_password" && providerSupportsAppPassword(form.email_provider);
+  const showOauth = authMode === "oauth" && form.email_provider !== "smtp";
+  const showCustomSmtp = authMode === "smtp" || form.email_provider === "smtp";
+
+  const applyProvider = (provider: EmailProvider) => {
+    setForm((f) => {
+      const smtp = applyProviderSmtpDefaults(provider, {
+        ...f,
+        email_address: f.email_address,
+      });
+      return {
+        ...f,
+        email_provider: provider,
+        ...smtp,
+        smtp_username: smtp.smtp_username || f.email_address,
+      };
+    });
+    setAuthMode(defaultAuthModeForProvider(provider));
+  };
 
   const load = useCallback(async () => {
     if (organisationId <= 0) {
@@ -86,23 +124,38 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
       const item = items.find((i) => i.is_active !== false) ?? items[0] ?? null;
       setIntegration(item);
       const e = item?.email;
-      setForm({
-        connection_name: item?.connection_name || "",
-        email_provider: (e?.email_provider as EmailProvider) || "gmail",
-        email_address: e?.email_address || "",
-        sender_name: e?.sender_name || "",
-        reply_to: e?.reply_to || "",
-        oauth_connection_id: e?.oauth_connection_id || "",
+      const provider = ((e?.email_provider as EmailProvider) || "gmail") as EmailProvider;
+      const smtp = applyProviderSmtpDefaults(provider, {
         smtp_host: e?.smtp_host || "",
         smtp_port: e?.smtp_port || 587,
         smtp_tls_mode: e?.smtp_tls_mode || "starttls",
         smtp_username: e?.smtp_username || "",
+        email_address: e?.email_address || "",
+      });
+      // Keep stored host when already configured (custom overrides).
+      if ((e?.smtp_host || "").trim()) {
+        smtp.smtp_host = e!.smtp_host;
+        smtp.smtp_port = e?.smtp_port || smtp.smtp_port;
+        smtp.smtp_tls_mode = e?.smtp_tls_mode || smtp.smtp_tls_mode;
+      }
+      setForm({
+        connection_name: item?.connection_name || "",
+        email_provider: provider,
+        email_address: e?.email_address || "",
+        sender_name: e?.sender_name || "",
+        reply_to: e?.reply_to || "",
+        oauth_connection_id: e?.oauth_connection_id || "",
+        smtp_host: smtp.smtp_host,
+        smtp_port: smtp.smtp_port,
+        smtp_tls_mode: smtp.smtp_tls_mode,
+        smtp_username: smtp.smtp_username || e?.email_address || "",
         notify_booking: e?.notify_booking ?? true,
         notify_event: e?.notify_event ?? true,
         access_token: "",
         refresh_token: "",
         smtp_password: "",
       });
+      setAuthMode(inferAuthMode(provider, item));
     } catch (err) {
       toast({
         title: "Could not load email settings",
@@ -123,6 +176,61 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
       toast({ title: "Email address required", variant: "destructive" });
       return;
     }
+
+    const useSmtpSecret = showAppPassword || showCustomSmtp;
+    if (
+      useSmtpSecret &&
+      !form.smtp_password.trim() &&
+      !integration?.has_smtp_password
+    ) {
+      toast({
+        title: showAppPassword ? "App password required" : "SMTP password required",
+        description: showAppPassword
+          ? "Paste the app password from your email provider."
+          : "Enter the SMTP password for this mailbox.",
+        variant: "destructive",
+      });
+      return;
+    }
+    if (
+      showOauth &&
+      !form.access_token.trim() &&
+      !integration?.has_access_token
+    ) {
+      toast({
+        title: "Access token required",
+        description: "Paste an OAuth access token, or switch to App password.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const smtp =
+      showOauth
+        ? {
+            smtp_host: "",
+            smtp_port: 587,
+            smtp_tls_mode: "starttls",
+            smtp_username: "",
+          }
+        : applyProviderSmtpDefaults(form.email_provider, {
+            smtp_host: form.smtp_host,
+            smtp_port: form.smtp_port,
+            smtp_tls_mode: form.smtp_tls_mode,
+            smtp_username: form.smtp_username || form.email_address,
+            email_address: form.email_address,
+          });
+
+    // Custom SMTP keeps whatever the user typed.
+    if (showCustomSmtp) {
+      smtp.smtp_host = form.smtp_host.trim();
+      smtp.smtp_port = form.smtp_port;
+      smtp.smtp_tls_mode = form.smtp_tls_mode;
+      smtp.smtp_username = (form.smtp_username || form.email_address).trim();
+    } else if (showAppPassword) {
+      smtp.smtp_username = (form.smtp_username || form.email_address).trim();
+    }
+
     setSaving(true);
     try {
       const saved = await service.upsertEmail({
@@ -134,16 +242,16 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
         email_address: form.email_address.trim(),
         sender_name: form.sender_name.trim(),
         reply_to: form.reply_to.trim(),
-        oauth_connection_id: form.oauth_connection_id.trim(),
-        smtp_host: form.smtp_host.trim(),
-        smtp_port: form.smtp_port,
-        smtp_tls_mode: form.smtp_tls_mode,
-        smtp_username: form.smtp_username.trim(),
+        oauth_connection_id: showOauth ? form.oauth_connection_id.trim() : "",
+        smtp_host: smtp.smtp_host,
+        smtp_port: smtp.smtp_port,
+        smtp_tls_mode: smtp.smtp_tls_mode,
+        smtp_username: smtp.smtp_username,
         notify_booking: form.notify_booking,
         notify_event: form.notify_event,
-        access_token: form.access_token.trim() || undefined,
-        refresh_token: form.refresh_token.trim() || undefined,
-        smtp_password: form.smtp_password.trim() || undefined,
+        access_token: showOauth ? form.access_token.trim() || undefined : undefined,
+        refresh_token: showOauth ? form.refresh_token.trim() || undefined : undefined,
+        smtp_password: useSmtpSecret ? form.smtp_password.trim() || undefined : undefined,
       });
       setIntegration(saved);
       setForm((f) => ({ ...f, access_token: "", refresh_token: "", smtp_password: "" }));
@@ -183,7 +291,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
       <SettingsEmbeddedHeader
         icon={Mail}
         title="Email Account"
-        description="Connect Gmail, Google Workspace, Microsoft 365, or SMTP. Tokens and passwords are encrypted on the server and never returned to the browser."
+        description="Connect Gmail, Google Workspace, Microsoft 365, or any SMTP server with an app password or OAuth. Secrets are encrypted and never returned to the browser."
       />
       <div className={cn(settingsEmbedded.sectionBody, "flex flex-1 flex-col pb-8")}>
         {loading ? (
@@ -205,9 +313,14 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
               >
                 {statusLabel(integration?.status)}
               </span>
-              {integration?.email?.last_sync_at ? (
-                <span className="text-xs text-stone-400">
-                  Last sync {new Date(integration.email.last_sync_at).toLocaleString()}
+              {integration?.has_smtp_password ? (
+                <span className="rounded-md bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
+                  App password saved
+                </span>
+              ) : null}
+              {integration?.has_access_token ? (
+                <span className="rounded-md bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
+                  OAuth token saved
                 </span>
               ) : null}
             </div>
@@ -217,9 +330,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                 <Label>Provider</Label>
                 <Select
                   value={form.email_provider}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, email_provider: v as EmailProvider }))
-                  }
+                  onValueChange={(v) => applyProvider(v as EmailProvider)}
                 >
                   <SelectTrigger className={cn(org.input, "mt-1.5")}>
                     <SelectValue />
@@ -228,7 +339,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                     <SelectItem value="gmail">Gmail</SelectItem>
                     <SelectItem value="google_workspace">Google Workspace</SelectItem>
                     <SelectItem value="microsoft365">Microsoft 365</SelectItem>
-                    <SelectItem value="smtp">SMTP</SelectItem>
+                    <SelectItem value="smtp">Custom SMTP</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -249,7 +360,16 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                   className={cn(org.input, "mt-1.5")}
                   placeholder="bookings@business.com"
                   value={form.email_address}
-                  onChange={(e) => setForm((f) => ({ ...f, email_address: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      email_address: e.target.value,
+                      smtp_username:
+                        !f.smtp_username || f.smtp_username === f.email_address
+                          ? e.target.value
+                          : f.smtp_username,
+                    }))
+                  }
                 />
               </div>
               <div className="min-w-0">
@@ -273,7 +393,66 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                 />
               </div>
 
-              {!showSmtp ? (
+              {providerSupportsAppPassword(form.email_provider) ? (
+                <div className="min-w-0 md:col-span-2">
+                  <Label>Sign-in method</Label>
+                  <Select
+                    value={authMode === "smtp" ? "app_password" : authMode}
+                    onValueChange={(v) => setAuthMode(v as EmailAuthMode)}
+                  >
+                    <SelectTrigger className={cn(org.input, "mt-1.5")}>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="app_password">App password (recommended)</SelectItem>
+                      <SelectItem value="oauth">OAuth tokens</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="mt-1.5 text-[12px] text-stone-500">
+                    App password uses SMTP ({preset.host}:{preset.port}). No Google/Microsoft
+                    developer console setup required.
+                  </p>
+                </div>
+              ) : null}
+
+              {showAppPassword ? (
+                <>
+                  <div className="min-w-0">
+                    <Label htmlFor="em-user">SMTP username</Label>
+                    <Input
+                      id="em-user"
+                      className={cn(org.input, "mt-1.5")}
+                      placeholder={form.email_address || "same as email"}
+                      value={form.smtp_username}
+                      onChange={(e) => setForm((f) => ({ ...f, smtp_username: e.target.value }))}
+                    />
+                  </div>
+                  <div className="min-w-0">
+                    <Label htmlFor="em-app-pass">
+                      {preset.passwordLabel}
+                      {integration?.has_smtp_password ? " (leave blank to keep existing)" : ""}
+                    </Label>
+                    <Input
+                      id="em-app-pass"
+                      type="password"
+                      autoComplete="new-password"
+                      className={cn(org.input, "mt-1.5")}
+                      placeholder={
+                        integration?.has_smtp_password ? "•••••••• (stored encrypted)" : ""
+                      }
+                      value={form.smtp_password}
+                      onChange={(e) => setForm((f) => ({ ...f, smtp_password: e.target.value }))}
+                    />
+                    <p className="mt-1.5 text-[12px] text-stone-500">{preset.passwordHint}</p>
+                  </div>
+                  <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-[12px] text-stone-600 md:col-span-2">
+                    Server: <span className="font-mono">{preset.host}</span> · Port{" "}
+                    <span className="font-mono">{preset.port}</span> · {preset.tls_mode.toUpperCase()}
+                  </div>
+                </>
+              ) : null}
+
+              {showOauth ? (
                 <>
                   <div className="min-w-0 md:col-span-2">
                     <Label htmlFor="em-oauth">OAuth connection ID</Label>
@@ -321,13 +500,16 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                     />
                   </div>
                 </>
-              ) : (
+              ) : null}
+
+              {showCustomSmtp ? (
                 <>
                   <div className="min-w-0 md:col-span-2">
                     <Label htmlFor="em-host">SMTP host</Label>
                     <Input
                       id="em-host"
                       className={cn(org.input, "mt-1.5")}
+                      placeholder="mail.example.com"
                       value={form.smtp_host}
                       onChange={(e) => setForm((f) => ({ ...f, smtp_host: e.target.value }))}
                     />
@@ -364,9 +546,9 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                     </Select>
                   </div>
                   <div className="min-w-0">
-                    <Label htmlFor="em-user">SMTP username</Label>
+                    <Label htmlFor="em-user-smtp">SMTP username</Label>
                     <Input
-                      id="em-user"
+                      id="em-user-smtp"
                       className={cn(org.input, "mt-1.5")}
                       value={form.smtp_username}
                       onChange={(e) => setForm((f) => ({ ...f, smtp_username: e.target.value }))}
@@ -390,7 +572,7 @@ const EmailIntegrationSettings = ({ embedded = false }: Props) => {
                     />
                   </div>
                 </>
-              )}
+              ) : null}
 
               <div className="space-y-3 rounded-xl border border-stone-200 p-4 md:col-span-2">
                 <p className="text-sm font-medium text-appointza-navy">Notification preferences</p>

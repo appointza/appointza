@@ -24,7 +24,7 @@ import { TrackingServiceAPI } from '../../services/native/TrackingServiceModule'
 import { useLocationPermission } from '../../location/LocationPermissionProvider';
 import { useLocationStartupGate } from '../../location/LocationLaunchGate';
 import { fetchCurrentPosition, fetchCurrentPositionDetailed } from '../../location/fetchCurrentPosition';
-import { syncPlaceAlertToFirebase } from '../../services/firebase/userLocationSync';
+import { appointzaSetActiveDestination as syncPlaceAlertToFirebase } from '../../billing/appointzaCloud';
 import { openDeviceLocationSettings } from '../../location/deviceLocationSettings';
 import {
   canStartNewTrip,

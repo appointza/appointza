@@ -21,7 +21,10 @@ import { GOOGLE_WEB_CLIENT_ID } from '../../constants/googleSignIn';
 import { AUTH_ONBOARDING_COMPLETE_KEY, USER_PROFILE_KEY } from '../../constants/authStorage';
 import type { RootStackParamList } from '../../types/navigation';
 import { useAuth } from '../../context/AuthContext';
-import { syncGoogleProfileToFirebase, type UserProfile } from '../../services/firebase/userProfileSync';
+import { linkNapzAccountToAppointza } from '../../billing/appointzaAuth';
+import { appointzaUpsertProfile } from '../../billing/appointzaCloud';
+import auth from '@react-native-firebase/auth';
+import type { UserProfile } from '../../services/firebase/userProfileSync';
 
 type Nav = NativeStackNavigationProp<RootStackParamList, 'GoogleAuth'>;
 
@@ -56,6 +59,12 @@ export default function GoogleAuthScreen() {
       }
 
       const userData = result.data.user;
+      const tokens = await GoogleSignin.getTokens();
+      const idToken = tokens.idToken;
+      if (!idToken) {
+        throw new Error('Google did not return an ID token.');
+      }
+
       const profile: UserProfile = {
         name: userData.name || 'Google User',
         email: userData.email,
@@ -65,14 +74,54 @@ export default function GoogleAuthScreen() {
         provider: 'google',
       };
 
-      let sessionProfile = profile;
+      // Appointza: create/link Napz user + product org (required for Premium billing).
       try {
-        sessionProfile = await syncGoogleProfileToFirebase(profile);
+        await linkNapzAccountToAppointza({
+          idToken,
+          email: userData.email,
+          name: userData.name || undefined,
+          picture: userData.photo,
+        });
       } catch (e) {
-        console.warn('Cloud sync after sign-in (non-blocking):', e);
+        console.warn('Appointza Napz link failed:', e);
+        Alert.alert(
+          'Could not finish sign-in',
+          String((e as Error)?.message ?? e) ||
+            'Appointza account setup failed. Check your connection and try again.'
+        );
+        return;
       }
 
-      await completeSession(sessionProfile);
+      // Firebase Auth only (kept). Profile / billing live on Appointza.
+      try {
+        await auth().signInWithCredential(auth.GoogleAuthProvider.credential(idToken));
+      } catch (e) {
+        console.warn('Firebase Auth sign-in (non-blocking):', e);
+      }
+
+      try {
+        await appointzaUpsertProfile({
+          ...profile,
+          firebaseUid: auth().currentUser?.uid ?? null,
+        });
+      } catch (e) {
+        console.warn('Appointza profile sync (non-blocking):', e);
+      }
+
+      // One-time: copy all Firestore Napz data (places, trips, plan) into Appointza DB.
+      try {
+        const { migrateFirebaseDataToAppointza } = await import(
+          '../../billing/appointzaFirebaseMigrate'
+        );
+        const migrated = await migrateFirebaseDataToAppointza();
+        if (migrated.ok && migrated.message !== 'Already migrated.') {
+          console.log('Firebase → Appointza:', migrated.message);
+        }
+      } catch (e) {
+        console.warn('Firebase data migration (non-blocking):', e);
+      }
+
+      await completeSession(profile);
       await refreshAuthSession();
       goToMain();
     } catch (e: unknown) {

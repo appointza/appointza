@@ -493,7 +493,7 @@ namespace appointza.Services
             DbCommand command = db.GetCommand(query);
             db.AddParameter(command, "id", DbTypes.Types.Long).Value = organisationId;
             db.AddParameter(command, "issuspended", DbTypes.Types.Boolean).Value = !isVerified; // Inverted because issuspended = false means verified
-            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext.userid;
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
             db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
             
             if (await db.ExecuteNonQuery(command) > 0)
@@ -993,8 +993,25 @@ namespace appointza.Services
 
         public async Task<bool> SuspendUserTransaction(IDb db, AdminSuspendUserReq req)
         {
-            // Implementation for suspending user
-            return true;
+            if (req == null || req.UserId <= 0) return false;
+            // A super admin must not lock themselves out.
+            if (requeststate.usercontext != null && requeststate.usercontext.userid == req.UserId) return false;
+            using var command = db.GetCommand(@"
+                UPDATE Users
+                SET issuspended = TRUE,
+                    notes = CASE
+                        WHEN COALESCE(@reason, '') = '' THEN notes
+                        ELSE TRIM(BOTH FROM COALESCE(notes, '') || E'\n' || @reason)
+                    END,
+                    modifiedon = @modifiedon,
+                    modifiedby = @modifiedby,
+                    version = COALESCE(version, 0) + 1
+                WHERE id = @id;");
+            db.AddParameter(command, "id", DbTypes.Types.Long).Value = req.UserId;
+            db.AddParameter(command, "reason", DbTypes.Types.String).Value = req.Reason ?? "";
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
+            db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
+            return await db.ExecuteNonQuery(command) > 0;
         }
 
         public async Task<bool> ActivateUser(AdminActivateUserReq req)
@@ -1010,8 +1027,18 @@ namespace appointza.Services
 
         public async Task<bool> ActivateUserTransaction(IDb db, AdminActivateUserReq req)
         {
-            // Implementation for activating user
-            return true;
+            if (req == null || req.UserId <= 0) return false;
+            using var command = db.GetCommand(@"
+                UPDATE Users
+                SET issuspended = FALSE,
+                    modifiedon = @modifiedon,
+                    modifiedby = @modifiedby,
+                    version = COALESCE(version, 0) + 1
+                WHERE id = @id;");
+            db.AddParameter(command, "id", DbTypes.Types.Long).Value = req.UserId;
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
+            db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
+            return await db.ExecuteNonQuery(command) > 0;
         }
 
         public async Task<bool> SuspendOrganisation(AdminSuspendOrganisationReq req)
@@ -1104,7 +1131,7 @@ namespace appointza.Services
             db.AddParameter(command, "id", DbTypes.Types.Long).Value = locationId;
             db.AddParameter(command, "isverified", DbTypes.Types.Boolean).Value = isVerified;
             db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
-            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext.id;
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
             
             int rowsAffected = await db.ExecuteNonQuery(command);
             result = rowsAffected > 0;
@@ -1142,7 +1169,7 @@ namespace appointza.Services
             DbCommand command = db.GetCommand(query);
             db.AddParameter(command, "id", DbTypes.Types.Long).Value = locationId;
             db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
-            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext.id;
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
             
             int rowsAffected = await db.ExecuteNonQuery(command);
             result = rowsAffected > 0;
@@ -1180,7 +1207,7 @@ namespace appointza.Services
             DbCommand command = db.GetCommand(query);
             db.AddParameter(command, "id", DbTypes.Types.Long).Value = locationId;
             db.AddParameter(command, "modifiedon", DbTypes.Types.DateTime).Value = DateTime.UtcNow;
-            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext.id;
+            db.AddParameter(command, "modifiedby", DbTypes.Types.Long).Value = requeststate.usercontext?.userid ?? 0;
             
             int rowsAffected = await db.ExecuteNonQuery(command);
             result = rowsAffected > 0;

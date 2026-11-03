@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, Loader2, MessageCircle, Save, Unplug } from "lucide-react";
+import { Check, Copy, Loader2, MessageCircle, RefreshCw, Save, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -54,6 +54,7 @@ const WhatsAppIntegrationSettings = ({ embedded = false }: Props) => {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [repairing, setRepairing] = useState(false);
   const [copiedWebhook, setCopiedWebhook] = useState(false);
   const [copiedVerifyToken, setCopiedVerifyToken] = useState(false);
   const [webhookSetup, setWebhookSetup] = useState<WhatsAppWebhookSetupDto | null>(null);
@@ -231,6 +232,33 @@ const WhatsAppIntegrationSettings = ({ embedded = false }: Props) => {
     }
   };
 
+  const repairInbound = async () => {
+    if (!integration?.id) return;
+    setRepairing(true);
+    try {
+      const repaired = await service.syncInboundWebhook({
+        id: integration.id,
+        organisation_id: organisationId,
+      });
+      setIntegration(repaired);
+      const ok = repaired.whatsapp?.inbound_delivery_ok === true;
+      toast({
+        title: ok ? "Inbound delivery repaired" : "Inbound repair finished with warnings",
+        description: repaired.whatsapp?.inbound_delivery_message || undefined,
+        variant: ok ? "default" : "destructive",
+      });
+      await load();
+    } catch (err) {
+      toast({
+        title: "Repair failed",
+        description: err instanceof Error ? err.message : "Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setRepairing(false);
+    }
+  };
+
   const body = (
     <div className="flex min-h-full flex-col">
       <SettingsEmbeddedHeader
@@ -339,6 +367,49 @@ const WhatsAppIntegrationSettings = ({ embedded = false }: Props) => {
                   </p>
                 )}
               </div>
+
+              {integration?.whatsapp ? (
+                <div className="mt-4 border-t border-stone-200 pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="text-sm font-medium text-appointza-navy">Inbound delivery</p>
+                    <span
+                      className={cn(
+                        "rounded-md px-2 py-0.5 text-xs font-medium",
+                        integration.whatsapp.inbound_delivery_ok
+                          ? "bg-emerald-50 text-emerald-700"
+                          : "bg-amber-50 text-amber-800",
+                      )}
+                    >
+                      {integration.whatsapp.inbound_delivery_ok ? "OK" : "Needs attention"}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-stone-500">
+                    {integration.whatsapp.inbound_delivery_message ||
+                      "Save the connection to verify Meta phone webhook routing."}
+                  </p>
+                  {integration.whatsapp.inbound_webhook_url_phone ? (
+                    <p className="mt-2 break-all font-mono text-[11px] text-stone-500">
+                      Phone override: {integration.whatsapp.inbound_webhook_url_phone}
+                    </p>
+                  ) : null}
+                  {integration.id && integration.has_access_token ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="mt-3 h-10"
+                      disabled={repairing || saving}
+                      onClick={() => void repairInbound()}
+                    >
+                      {repairing ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                      )}
+                      Repair inbound delivery
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

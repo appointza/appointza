@@ -7,11 +7,13 @@ import React, {
   useState,
   type ReactNode,
 } from 'react';
-import auth from '@react-native-firebase/auth';
 import {
-  confirmLatestRazorpayOrder,
+  fetchBillingEntitlement,
+  startFreeTrial,
   startRazorpayCheckout,
 } from '../billing/razorpayBilling';
+import { getAppointzaAccessToken } from '../billing/appointzaSession';
+import { tierFromEntitlement } from '../billing/appointzaEntitlement';
 import type { RazorpayPackageId } from '../billing/razorpayPackages';
 import {
   FREE_ENTITLEMENT,
@@ -25,11 +27,6 @@ import {
   writeCachedEntitlement,
 } from '../entitlement/entitlementStorage';
 import { isPremium } from '../entitlement/PremiumGate';
-import {
-  fetchEntitlementFromFirestore,
-  startFreeTrialOnServer,
-  tierFromEntitlement,
-} from '../services/firebase/entitlementService';
 import {
   DEFAULT_SUBSCRIPTION_TIER,
   type NapzSubscriptionTier,
@@ -100,12 +97,16 @@ export function SubscriptionTierProvider({ children }: { children: ReactNode }) 
   }, []);
 
   const refreshSubscriptionTier = useCallback(async () => {
+    if (!(await getAppointzaAccessToken())) {
+      await clearCachedEntitlement();
+      return syncFromEntitlement(FREE_ENTITLEMENT);
+    }
     try {
-      const confirmed = await confirmLatestRazorpayOrder();
-      return syncFromEntitlement(confirmed);
+      const fromAppointza = await fetchBillingEntitlement();
+      return syncFromEntitlement(fromAppointza);
     } catch {
-      const fromServer = await fetchEntitlementFromFirestore();
-      return syncFromEntitlement(fromServer);
+      const local = await readCachedEntitlement();
+      return syncFromEntitlement(local);
     }
   }, [syncFromEntitlement]);
 
@@ -119,17 +120,23 @@ export function SubscriptionTierProvider({ children }: { children: ReactNode }) 
 
   useEffect(() => {
     let mounted = true;
-    const unsubscribeAuth = auth().onAuthStateChanged(async (user) => {
-      if (!mounted) return;
-      if (!user) {
-        await clearCachedEntitlement();
-        setEntitlement(FREE_ENTITLEMENT);
-        setSubscriptionTierState(DEFAULT_SUBSCRIPTION_TIER);
-        void setSubscriptionAnalyticsProperty('free', null);
-        setLoading(false);
-        return;
-      }
+    (async () => {
       try {
+        if (!(await getAppointzaAccessToken())) {
+          await clearCachedEntitlement();
+          setEntitlement(FREE_ENTITLEMENT);
+          setSubscriptionTierState(DEFAULT_SUBSCRIPTION_TIER);
+          void setSubscriptionAnalyticsProperty('free', null);
+          return;
+        }
+        try {
+          const { migrateFirebaseDataToAppointza } = await import(
+            '../billing/appointzaFirebaseMigrate'
+          );
+          await migrateFirebaseDataToAppointza();
+        } catch {
+          /* migration is best-effort */
+        }
         await ensureSubscriptionCurrent();
       } catch {
         const local = await readCachedEntitlement();
@@ -137,11 +144,9 @@ export function SubscriptionTierProvider({ children }: { children: ReactNode }) 
       } finally {
         if (mounted) setLoading(false);
       }
-    });
-
+    })();
     return () => {
       mounted = false;
-      unsubscribeAuth();
     };
   }, [ensureSubscriptionCurrent, syncFromEntitlement]);
 
@@ -162,7 +167,7 @@ export function SubscriptionTierProvider({ children }: { children: ReactNode }) 
   );
 
   const claimFreeTrial = useCallback(async () => {
-    const next = await startFreeTrialOnServer();
+    const next = await startFreeTrial();
     await syncFromEntitlement(next);
     if (!isPremium(next)) {
       throw new Error('This account has already used the 10-day free trial.');

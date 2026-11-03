@@ -266,8 +266,9 @@ export function completeAuthNavigation(
   navigate: NavigateFunction,
   userType: "user" | "organization",
   from?: string,
+  options?: { isSuperAdmin?: boolean },
 ): void {
-  const rawTarget = resolvePostLoginPath(userType, from);
+  const rawTarget = resolvePostLoginPath(userType, from, options);
   const relative = toRelativeAppPath(rawTarget);
   const target = isMainAppBookingPath(relative)
     ? toMainAppBookingUrl(relative)

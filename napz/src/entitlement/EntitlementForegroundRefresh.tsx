@@ -1,16 +1,19 @@
 import { useEffect } from 'react';
 import { AppState } from 'react-native';
-import auth from '@react-native-firebase/auth';
+import { getAppointzaAccessToken } from '../billing/appointzaSession';
 import { useSubscriptionTier } from '../context/SubscriptionTierContext';
 
-/** Verify with the server only when the local plan end date has passed. */
+/** Verify with Appointza when the local plan end date has passed. */
 export function EntitlementForegroundRefresh() {
   const { ensureSubscriptionCurrent } = useSubscriptionTier();
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state !== 'active' || !auth().currentUser) return;
-      void ensureSubscriptionCurrent().catch(() => {});
+      if (state !== 'active') return;
+      void (async () => {
+        if (!(await getAppointzaAccessToken())) return;
+        await ensureSubscriptionCurrent().catch(() => {});
+      })();
     });
     return () => sub.remove();
   }, [ensureSubscriptionCurrent]);

@@ -52,6 +52,12 @@ namespace appointza.Utils
         /// <summary>Webhook verify token for Meta GET challenge (server only).</summary>
         public string verify_token { get; set; }
         /// <summary>
+        /// Public HTTPS callback Meta should POST real inbound messages to
+        /// (also used as the phone-number webhook override). Example:
+        /// https://appointza.com/api/webhooks/whatsapp
+        /// </summary>
+        public string webhook_callback_url { get; set; }
+        /// <summary>
         /// Config kill-switch. When false, no outbound Meta sends (inbox/campaign/automation).
         /// DB table whatsapp_outbound_control can also pause outbound at runtime.
         /// </summary>

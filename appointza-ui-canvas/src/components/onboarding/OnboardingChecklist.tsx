@@ -7,9 +7,17 @@ import { OrganisationOnboardingService } from "@/services/organisationOnboarding
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { useOnboardingStatus } from "@/hooks/useOnboardingStatus";
-import { BUSINESS_OFFERING_LABELS } from "@/components/onboarding/BusinessOfferingsCards";
+import { useOrganisation } from "@/hooks/useOrganisation";
+import {
+  BUSINESS_OFFERING_LABELS,
+  filterVisibleOfferings,
+} from "@/components/onboarding/BusinessOfferingsCards";
 import { businessOnboardingRouteForStep } from "@/utils/businessOnboarding.util";
 import { onboardingOfferingCreateRoute } from "@/utils/organizationOnboarding.util";
+import {
+  onboardingOfferingInCatalog,
+  parseCatalogOfferings,
+} from "@/utils/organisationCatalogOfferings.util";
 
 /**
  * Dashboard setup checklist. Shown while onboarding is incomplete, or when the backend still
@@ -27,6 +35,11 @@ export function OnboardingChecklist({ className }: { className?: string }) {
     hasWebsite,
     hasTiming,
   } = useOnboardingStatus();
+  const { data: organisation } = useOrganisation({
+    organisationId: organizationId,
+    enabled: organizationId > 0,
+  });
+  const catalogOfferings = parseCatalogOfferings(organisation?.attributes_json);
 
   // The status hook skips the backend call when onboarding is cached complete; still check
   // here so the dashboard can surface offerings that were never configured.
@@ -39,9 +52,18 @@ export function OnboardingChecklist({ className }: { className?: string }) {
   });
   const backendState = hookBackendState ?? fetchedState ?? null;
 
-  const pendingOfferings = (backendState?.selected_offerings ?? []).filter(
+  // Prefer catalog_offerings (what the org currently offers). Fall back to
+  // onboarding selected_offerings when catalog attrs are empty.
+  const selectedVisible = filterVisibleOfferings(backendState?.selected_offerings);
+  const relevantOfferings =
+    catalogOfferings.length > 0
+      ? selectedVisible.filter((offering) =>
+          onboardingOfferingInCatalog(offering, catalogOfferings),
+        )
+      : selectedVisible;
+
+  const pendingOfferings = relevantOfferings.filter(
     (offering) =>
-      offering !== "other" &&
       !backendState?.configured_offerings.includes(offering) &&
       !backendState?.skipped_offerings.includes(offering),
   );

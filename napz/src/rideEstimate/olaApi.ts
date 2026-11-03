@@ -1,18 +1,24 @@
-import { napzFunctions } from '../services/firebase/functionsClient';
-import type { RidePlace } from './types';
+import { appointzaRequest, unwrapAppointzaItem } from '../billing/appointzaHttp';
 import type { OlaProductOffer } from './olaCatalog';
 
+export type { OlaProductOffer };
+
+/** Ola catalog via Appointza (returns configured:false until Ola secrets are set). */
 export async function fetchOlaRideCatalog(
-  pickup: RidePlace,
-  destination: RidePlace
+  pickup: { lat: number; lng: number },
+  destination: { lat: number; lng: number }
 ): Promise<{ configured: boolean; products: OlaProductOffer[] }> {
-  const result = await napzFunctions().httpsCallable('olaRideCatalog')({
-    pickup: { lat: pickup.lat, lng: pickup.lng },
-    destination: { lat: destination.lat, lng: destination.lng },
-  });
-  const data = (result.data ?? {}) as { configured?: boolean; products?: OlaProductOffer[] };
-  return {
-    configured: data.configured === true,
-    products: Array.isArray(data.products) ? data.products : [],
-  };
+  try {
+    const payload = await appointzaRequest(
+      `/api/Napz/RideCatalog?provider=ola&pickupLat=${pickup.lat}&pickupLng=${pickup.lng}&destLat=${destination.lat}&destLng=${destination.lng}`,
+      { body: {} }
+    );
+    const item = unwrapAppointzaItem(payload);
+    return {
+      configured: item.configured === true,
+      products: Array.isArray(item.products) ? (item.products as OlaProductOffer[]) : [],
+    };
+  } catch {
+    return { configured: false, products: [] };
+  }
 }

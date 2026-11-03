@@ -1,9 +1,7 @@
 /**
- * Client-side access control — reads NapzEntitlement from Firestore (via SubscriptionTierContext).
+ * Client-side access control — reads NapzEntitlement from Appointza (via SubscriptionTierContext).
  *
- * Flow: Razorpay payment → Cloud Functions webhook → Firestore users/{uid}.premium* → PremiumGate → UI limits
- *
- * PremiumGate and freeTierLimits are app logic only; they are NOT stored in Firestore.
+ * Flow: Razorpay → /api/Napz/VerifyPayment → napz_entitlements → PremiumGate → UI limits
  */
 import type { NapzEntitlement } from './entitlementTypes';
 import { FREE_TIER_LIMITS } from './freeTierLimits';

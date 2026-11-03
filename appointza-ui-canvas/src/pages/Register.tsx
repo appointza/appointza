@@ -125,7 +125,7 @@ const Register = () => {
         clearPendingBusinessOnboarding();
       }
 
-      toast({
+        toast({
         title: "Account created",
         description: "Please sign in to continue.",
       });
@@ -143,10 +143,10 @@ const Register = () => {
       const data = error?.response?.data;
       const message =
         data?.error || data?.message || error?.message || "Registration failed. Please try again.";
-      toast({
+        toast({
         title: "Registration Failed",
         description: message,
-        variant: "destructive",
+          variant: "destructive",
         duration: 5000,
       });
     } finally {
@@ -184,7 +184,7 @@ const Register = () => {
       clearPendingBusinessOnboarding();
     }
 
-    toast({
+      toast({
       title: "Account ready",
       description: "Please sign in to continue.",
     });
@@ -202,12 +202,12 @@ const Register = () => {
 
   const handleGoogleSuccess = async (credentialResponse: CredentialResponse) => {
     if (!credentialResponse.credential) {
-      toast({
+        toast({
         title: "Google Sign-Up Failed",
         description: "No credential received. Please try again.",
-        variant: "destructive",
-      });
-      return;
+          variant: "destructive",
+        });
+        return;
     }
 
     setGoogleLoading(true);
@@ -237,8 +237,8 @@ const Register = () => {
       try {
         // Existing account → sign in and route to the right screen.
         // Business tab also attaches a draft org when the user has none yet.
-        const userContext = await authService.googleLogin(
-          credentialResponse.credential,
+      const userContext = await authService.googleLogin(
+        credentialResponse.credential,
           googleEmail,
           name || googleEmail.split("@")[0],
           userInfo.picture,
@@ -305,11 +305,11 @@ const Register = () => {
         <div className="pointer-events-none absolute -left-24 top-1/4 h-72 w-72 rounded-full bg-[#528ff0]/10 blur-3xl" />
         <div className="pointer-events-none absolute -right-16 bottom-1/3 h-64 w-64 rounded-full bg-[#93c5fd]/30 blur-3xl" />
         <Link to="/" className="relative z-10 flex items-center gap-2.5">
-          <img
-            src="/lovable-uploads/6205c671-a6b9-4927-8268-bd1fa436cd0b.png"
-            alt="Appointza"
-            className="h-9 w-9 object-contain"
-          />
+              <img
+                src="/lovable-uploads/6205c671-a6b9-4927-8268-bd1fa436cd0b.png"
+                alt="Appointza"
+                className="h-9 w-9 object-contain"
+              />
           <span className="text-[17px] font-semibold tracking-tight text-[#1a1a1a]">Appointza</span>
         </Link>
         <div className="relative z-10 max-w-md space-y-5 pb-4">
@@ -326,8 +326,8 @@ const Register = () => {
               </li>
             ))}
           </ul>
-        </div>
-      </div>
+            </div>
+          </div>
 
       <div className="relative order-2 flex h-dvh flex-col overflow-y-auto bg-white">
         {mode === "organization" && (
@@ -377,7 +377,7 @@ const Register = () => {
                 Business
               </TabsTrigger>
             </TabsList>
-
+          
             <TabsContent value="user" className="mt-6 space-y-4 focus-visible:outline-none">
               <GoogleSignInButton
                 onSuccess={handleGoogleSuccess}
@@ -389,39 +389,39 @@ const Register = () => {
               <div className="relative py-1">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t border-[#e6eaf0]" />
-                </div>
+                      </div>
                 <div className="relative flex justify-center text-[11px] font-semibold uppercase tracking-wide">
                   <span className="bg-white px-3 text-[#98a2b3]">Or continue with email</span>
+                  </div>
                 </div>
-              </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="user-name" className="text-[12px] font-medium text-[#6b7280]">
                   Full name *
                 </Label>
-                <Input
+                    <Input
                   id="user-name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Your full name"
-                  autoComplete="name"
+                      autoComplete="name"
                   className={cn(fieldClass, errors.name && "border-red-300")}
-                />
+                    />
                 {errors.name && <p className="text-[12px] text-red-600">{errors.name}</p>}
-              </div>
+                  </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="user-mobile" className="text-[12px] font-medium text-[#6b7280]">
                   Mobile number *
                 </Label>
-                <Input
+                    <Input
                   id="user-mobile"
                   type="tel"
-                  inputMode="tel"
+                      inputMode="tel"
                   value={mobile}
                   onChange={(e) => setMobile(e.target.value.replace(/\D/g, "").slice(0, 10))}
                   placeholder="10-digit mobile number"
-                  autoComplete="tel"
+                      autoComplete="tel"
                   className={cn(fieldClass, errors.mobile && "border-red-300")}
                 />
                 {errors.mobile ? (
@@ -429,41 +429,41 @@ const Register = () => {
                 ) : (
                   <p className="text-[12px] text-[#98a2b3]">We&apos;ll send an OTP to verify your account.</p>
                 )}
-              </div>
+                </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="user-email" className="text-[12px] font-medium text-[#6b7280]">
                   Email (optional)
                 </Label>
-                <Input
+                  <Input
                   id="user-email"
-                  type="email"
+                    type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@email.com"
-                  autoComplete="email"
+                    autoComplete="email"
                   className={cn(fieldClass, errors.email && "border-red-300")}
-                />
+                  />
                 {errors.email && <p className="text-[12px] text-red-600">{errors.email}</p>}
-              </div>
+                </div>
 
-              <Button
+                  <Button
                 type="button"
                 disabled={loading}
                 onClick={() => void registerAccount()}
                 className={continueBtnClass}
               >
                 {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Creating account…
-                  </>
-                ) : (
+                      </>
+                    ) : (
                   "Create account"
-                )}
-              </Button>
-            </TabsContent>
-
+                    )}
+                  </Button>
+          </TabsContent>
+          
             <TabsContent value="organization" className="mt-6 space-y-4 focus-visible:outline-none">
               <GoogleSignInButton
                 onSuccess={handleGoogleSuccess}
@@ -475,17 +475,17 @@ const Register = () => {
               <div className="relative py-1">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t border-[#e6eaf0]" />
-                </div>
+                  </div>
                 <div className="relative flex justify-center text-[11px] font-semibold uppercase tracking-wide">
                   <span className="bg-white px-3 text-[#98a2b3]">Or continue with email</span>
+                  </div>
                 </div>
-              </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="biz-name" className="text-[12px] font-medium text-[#6b7280]">
                   Full name *
                 </Label>
-                <Input
+                      <Input
                   id="biz-name"
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
@@ -495,13 +495,13 @@ const Register = () => {
                   className={cn(fieldClass, googleVerified && "bg-[#f5f9ff]", errors.name && "border-red-300")}
                 />
                 {errors.name && <p className="text-[12px] text-red-600">{errors.name}</p>}
-              </div>
+                    </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="biz-email" className="text-[12px] font-medium text-[#6b7280]">
                   Email address *
                 </Label>
-                <Input
+                      <Input
                   id="biz-email"
                   type="email"
                   value={email}
@@ -512,13 +512,13 @@ const Register = () => {
                   className={cn(fieldClass, googleVerified && "bg-[#f5f9ff]", errors.email && "border-red-300")}
                 />
                 {errors.email && <p className="text-[12px] text-red-600">{errors.email}</p>}
-              </div>
+                    </div>
 
               <div className="space-y-1.5">
                 <Label htmlFor="biz-mobile" className="text-[12px] font-medium text-[#6b7280]">
                   Mobile number *
                 </Label>
-                <Input
+                      <Input
                   id="biz-mobile"
                   type="tel"
                   inputMode="tel"
@@ -533,27 +533,27 @@ const Register = () => {
                 ) : (
                   <p className="text-[12px] text-[#98a2b3]">
                     We&apos;ll use this number for account verification and important updates.
-                  </p>
-                )}
-              </div>
+                        </p>
+                      )}
+                </div>
 
-              <Button
-                type="button"
+                    <Button
+                      type="button"
                 disabled={loading || googleLoading}
                 onClick={() => void registerAccount()}
                 className={continueBtnClass}
               >
                 {loading ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Creating account…
-                  </>
-                ) : (
+                      </>
+                    ) : (
                   "Continue"
-                )}
-              </Button>
-            </TabsContent>
-          </Tabs>
+                    )}
+                  </Button>
+          </TabsContent>
+        </Tabs>
 
           <p className="mt-2 text-center text-[12px] leading-relaxed text-[#667085]">
             By continuing, you agree to Appointza&apos;s{" "}
@@ -563,7 +563,7 @@ const Register = () => {
             and{" "}
             <Link to="/privacy" className="font-medium text-[#528ff0] hover:underline">
               Privacy Policy
-            </Link>
+          </Link>
             .
           </p>
 
@@ -571,10 +571,10 @@ const Register = () => {
             Already have an account?{" "}
             <Link to="/login" className="font-semibold text-[#528ff0] hover:underline">
               Sign In
-            </Link>
+        </Link>
           </p>
+          </div>
         </div>
-      </div>
     </div>
   );
 };

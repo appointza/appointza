@@ -102,6 +102,7 @@ namespace appointza.Authentication.Models
         public long organisationtype { get; set; }
         public long organisationlocationid { get; set; }
         public string organisationlocationname { get; set; }
+        public bool issuperadmin { get; set; }
     }
 
     public class GoogleLoginRequest
@@ -115,6 +116,11 @@ namespace appointza.Authentication.Models
         /// create a draft Organisation and link it so they stay in org onboarding.
         /// </summary>
         public bool is_business_registration { get; set; }
+        /// <summary>
+        /// Product client, e.g. "napz". When set to a known product code, Auth may create the user
+        /// and attach them to that product organisation (no booking onboarding).
+        /// </summary>
+        public string? client { get; set; }
     }
 }
 

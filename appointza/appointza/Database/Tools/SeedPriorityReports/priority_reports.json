@@ -1,0 +1,1232 @@
+[
+  {
+    "catalog_key": "cust_complete",
+    "name": "Complete Customer Report",
+    "category": "Customers",
+    "description": "All customers who have booked appointments or registered for events, with contact details and first/last activity.",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  COALESCE(u.email, \u0027\u0027) AS email,\r\n  u.createdon AS registration_date,\r\n  COUNT(DISTINCT a.id) AS appointment_count,\r\n  COUNT(DISTINCT eb.id) AS event_registration_count,\r\n  GREATEST(MAX(a.appoinmentdate::timestamp), MAX(eb.created_at)) AS last_activity\r\nFROM users u\r\nLEFT JOIN appoinment a\r\n  ON a.userid = u.id AND a.organisationid = @OrgId AND COALESCE(a.isactive, TRUE) = TRUE\r\nLEFT JOIN event_bookings eb\r\n  ON eb.user_id = u.id AND COALESCE(eb.isactive, TRUE) = TRUE\r\nLEFT JOIN events e\r\n  ON e.id = eb.event_id AND e.organisation_id = @OrgId AND COALESCE(e.isactive, TRUE) = TRUE\r\nWHERE (a.id IS NOT NULL OR e.id IS NOT NULL)\r\n  AND (@Search IS NULL OR @Search = \u0027\u0027 OR u.name ILIKE \u0027%\u0027 || @Search || \u0027%\u0027 OR u.mobile ILIKE \u0027%\u0027 || @Search || \u0027%\u0027)\r\nGROUP BY u.id, u.name, u.mobile, u.email, u.createdon\r\nORDER BY last_activity DESC NULLS LAST, u.name",
+    "parameters": [
+      {
+        "parameter_name": "Search",
+        "display_name": "Search name / phone",
+        "data_type": "string",
+        "input_type": "text",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      },
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "email",
+        "display_name": "Email",
+        "format_type": "text"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registration date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "appointment_count",
+        "display_name": "Bookings",
+        "format_type": "number"
+      },
+      {
+        "column_key": "event_registration_count",
+        "display_name": "Event regs",
+        "format_type": "number"
+      },
+      {
+        "column_key": "last_activity",
+        "display_name": "Last activity",
+        "format_type": "date"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "cust_complete_activity",
+    "name": "Customer Complete Activity",
+    "category": "Cross-Module Analytics",
+    "description": "Customer-level activity across bookings, events, attendance and payments.",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  u.createdon AS registration_date,\r\n  COUNT(DISTINCT a.id) AS total_bookings,\r\n  COUNT(DISTINCT a.id) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) = \u0027COMPLETED\u0027) AS completed_bookings,\r\n  COUNT(DISTINCT a.id) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) IN (\u0027CANCELLED\u0027,\u0027CANCELED\u0027)) AS cancelled_bookings,\r\n  COUNT(DISTINCT eb.id) AS events_registered,\r\n  COUNT(DISTINCT eb.id) FILTER (WHERE LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027) AS events_attended,\r\n  COUNT(DISTINCT eb.id) FILTER (\r\n    WHERE LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027\r\n      AND LOWER(COALESCE(e.status,\u0027\u0027)) = \u0027completed\u0027\r\n  ) AS events_completed,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) AS total_payments,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 3), 0) AS total_refunds,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0)\r\n    - COALESCE(SUM(p.amount) FILTER (WHERE p.status = 3), 0) AS total_spending,\r\n  GREATEST(MAX(a.appoinmentdate::timestamp), MAX(eb.created_at), MAX(p.createdon)) AS last_activity\r\nFROM users u\r\nLEFT JOIN appoinment a\r\n  ON a.userid = u.id AND a.organisationid = @OrgId AND COALESCE(a.isactive, TRUE) = TRUE\r\nLEFT JOIN payment p ON p.appoinmentid = a.id AND COALESCE(p.isactive, TRUE) = TRUE\r\nLEFT JOIN event_bookings eb\r\n  ON eb.user_id = u.id AND COALESCE(eb.isactive, TRUE) = TRUE\r\nLEFT JOIN events e\r\n  ON e.id = eb.event_id AND e.organisation_id = @OrgId AND COALESCE(e.isactive, TRUE) = TRUE\r\nWHERE (a.id IS NOT NULL OR e.id IS NOT NULL)\r\n  AND (@CustomerId IS NULL OR u.id = @CustomerId)\r\n  AND (@Search IS NULL OR @Search = \u0027\u0027 OR u.name ILIKE \u0027%\u0027 || @Search || \u0027%\u0027 OR u.mobile ILIKE \u0027%\u0027 || @Search || \u0027%\u0027)\r\nGROUP BY u.id, u.name, u.mobile, u.createdon\r\nORDER BY total_spending DESC, last_activity DESC NULLS LAST",
+    "parameters": [
+      {
+        "parameter_name": "CustomerId",
+        "display_name": "Customer ID",
+        "data_type": "number",
+        "input_type": "number",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "Search",
+        "display_name": "Search",
+        "data_type": "string",
+        "input_type": "text",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      },
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registered",
+        "format_type": "date"
+      },
+      {
+        "column_key": "total_bookings",
+        "display_name": "Bookings",
+        "format_type": "number"
+      },
+      {
+        "column_key": "completed_bookings",
+        "display_name": "Completed",
+        "format_type": "number"
+      },
+      {
+        "column_key": "cancelled_bookings",
+        "display_name": "Cancelled",
+        "format_type": "number"
+      },
+      {
+        "column_key": "events_registered",
+        "display_name": "Events registered",
+        "format_type": "number"
+      },
+      {
+        "column_key": "events_attended",
+        "display_name": "Events attended",
+        "format_type": "number"
+      },
+      {
+        "column_key": "events_completed",
+        "display_name": "Events completed",
+        "format_type": "number"
+      },
+      {
+        "column_key": "total_payments",
+        "display_name": "Payments",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "total_refunds",
+        "display_name": "Refunds",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "total_spending",
+        "display_name": "Net spending",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "last_activity",
+        "display_name": "Last activity",
+        "format_type": "date"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "customer_name",
+      "y_column": "total_spending",
+      "title": "Top spenders"
+    }
+  },
+  {
+    "catalog_key": "evt_last_month_participants",
+    "name": "Last Month Event Participants",
+    "category": "Events \u0026 Participants",
+    "description": "Participants registered for events whose event date fell in the previous calendar month (override with date filters).",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS participant,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  e.id AS event_id,\r\n  e.event_name,\r\n  e.event_type,\r\n  COALESCE(e.event_date, e.from_date) AS event_date,\r\n  eb.created_at AS registration_date,\r\n  COALESCE(eb.payment_status, \u0027pending\u0027) AS payment_status,\r\n  COALESCE(eb.check_in_status, \u0027not_checked_in\u0027) AS attendance_status,\r\n  CASE\r\n    WHEN LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027 AND LOWER(COALESCE(e.status,\u0027\u0027)) = \u0027completed\u0027 THEN \u0027Completed\u0027\r\n    WHEN LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027 THEN \u0027Attended\u0027\r\n    ELSE \u0027Not completed\u0027\r\n  END AS completion_status,\r\n  COALESCE(eb.total_amount, 0) AS amount,\r\n  COALESCE(eb.confirmation_status, \u0027pending\u0027) AS confirmation_status\r\nFROM event_bookings eb\r\nINNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\nLEFT JOIN users u ON u.id = eb.user_id\r\nWHERE e.organisation_id = @OrgId\r\n  AND COALESCE(eb.isactive, TRUE) = TRUE\r\n  AND COALESCE(e.event_date, e.from_date) \u003E= COALESCE(@EventStartDate::date, (date_trunc(\u0027month\u0027, CURRENT_DATE) - INTERVAL \u00271 month\u0027)::date)\r\n  AND COALESCE(e.event_date, e.from_date) \u003C COALESCE(@EventEndDate::date, date_trunc(\u0027month\u0027, CURRENT_DATE)::date)\r\n  AND (@EventId IS NULL OR e.id = @EventId)\r\n  AND (@PaymentStatus IS NULL OR @PaymentStatus = \u0027\u0027 OR LOWER(eb.payment_status) = LOWER(@PaymentStatus))\r\n  AND (@AttendanceStatus IS NULL OR @AttendanceStatus = \u0027\u0027 OR LOWER(eb.check_in_status) = LOWER(@AttendanceStatus))\r\nORDER BY event_date, e.event_name, participant",
+    "parameters": [
+      {
+        "parameter_name": "EventStartDate",
+        "display_name": "Event start",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventEndDate",
+        "display_name": "Event end",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventId",
+        "display_name": "Event",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "events"
+      },
+      {
+        "parameter_name": "PaymentStatus",
+        "display_name": "Payment status",
+        "data_type": "string",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "static",
+        "options_config": "[{\u0022label\u0022:\u0022Pending\u0022,\u0022value\u0022:\u0022pending\u0022},{\u0022label\u0022:\u0022Paid\u0022,\u0022value\u0022:\u0022paid\u0022},{\u0022label\u0022:\u0022Failed\u0022,\u0022value\u0022:\u0022failed\u0022},{\u0022label\u0022:\u0022Refunded\u0022,\u0022value\u0022:\u0022refunded\u0022}]"
+      },
+      {
+        "parameter_name": "AttendanceStatus",
+        "display_name": "Attendance",
+        "data_type": "string",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "static",
+        "options_config": "[{\u0022label\u0022:\u0022Not checked in\u0022,\u0022value\u0022:\u0022not_checked_in\u0022},{\u0022label\u0022:\u0022Checked in\u0022,\u0022value\u0022:\u0022checked_in\u0022},{\u0022label\u0022:\u0022Cancelled\u0022,\u0022value\u0022:\u0022cancelled\u0022}]"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "participant",
+        "display_name": "Participant",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_name",
+        "display_name": "Event",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_date",
+        "display_name": "Event date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registered",
+        "format_type": "date"
+      },
+      {
+        "column_key": "payment_status",
+        "display_name": "Payment",
+        "format_type": "text"
+      },
+      {
+        "column_key": "attendance_status",
+        "display_name": "Attendance",
+        "format_type": "text"
+      },
+      {
+        "column_key": "completion_status",
+        "display_name": "Completion",
+        "format_type": "text"
+      },
+      {
+        "column_key": "amount",
+        "display_name": "Amount",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "evt_completed_participants",
+    "name": "Completed Event Participants",
+    "category": "Events \u0026 Participants",
+    "description": "Participants who checked in for events marked completed.",
+    "sql_query": "SELECT\r\n  COALESCE(u.name, \u0027\u0027) AS participant,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  e.event_name,\r\n  COALESCE(e.event_date, e.from_date) AS event_date,\r\n  eb.created_at AS registration_date,\r\n  eb.payment_status,\r\n  eb.check_in_status AS attendance_status,\r\n  e.status AS event_status,\r\n  u.id AS customer_id\r\nFROM event_bookings eb\r\nINNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\nLEFT JOIN users u ON u.id = eb.user_id\r\nWHERE e.organisation_id = @OrgId\r\n  AND COALESCE(eb.isactive, TRUE) = TRUE\r\n  AND LOWER(COALESCE(e.status,\u0027\u0027)) = \u0027completed\u0027\r\n  AND LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027\r\n  AND (@EventStartDate IS NULL OR COALESCE(e.event_date, e.from_date) \u003E= @EventStartDate::date)\r\n  AND (@EventEndDate IS NULL OR COALESCE(e.event_date, e.from_date) \u003C= @EventEndDate::date)\r\n  AND (@EventId IS NULL OR e.id = @EventId)\r\nORDER BY event_date DESC, participant",
+    "parameters": [
+      {
+        "parameter_name": "EventStartDate",
+        "display_name": "Event start",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventEndDate",
+        "display_name": "Event end",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventId",
+        "display_name": "Event",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "events"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "participant",
+        "display_name": "Participant",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_name",
+        "display_name": "Event",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_date",
+        "display_name": "Event date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registered",
+        "format_type": "date"
+      },
+      {
+        "column_key": "payment_status",
+        "display_name": "Payment",
+        "format_type": "text"
+      },
+      {
+        "column_key": "attendance_status",
+        "display_name": "Attendance",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "evt_registered_not_attended",
+    "name": "Registered But Not Attended",
+    "category": "Events \u0026 Participants",
+    "description": "Registrations that were not checked in (no-shows / absent).",
+    "sql_query": "SELECT\r\n  COALESCE(u.name, \u0027\u0027) AS participant,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  e.event_name,\r\n  COALESCE(e.event_date, e.from_date) AS event_date,\r\n  eb.created_at AS registration_date,\r\n  eb.payment_status,\r\n  eb.check_in_status AS attendance_status,\r\n  eb.confirmation_status,\r\n  u.id AS customer_id,\r\n  e.id AS event_id\r\nFROM event_bookings eb\r\nINNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\nLEFT JOIN users u ON u.id = eb.user_id\r\nWHERE e.organisation_id = @OrgId\r\n  AND COALESCE(eb.isactive, TRUE) = TRUE\r\n  AND LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) \u003C\u003E \u0027checked_in\u0027\r\n  AND LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) \u003C\u003E \u0027cancelled\u0027\r\n  AND LOWER(COALESCE(eb.confirmation_status,\u0027\u0027)) \u003C\u003E \u0027rejected\u0027\r\n  AND (@EventStartDate IS NULL OR COALESCE(e.event_date, e.from_date) \u003E= @EventStartDate::date)\r\n  AND (@EventEndDate IS NULL OR COALESCE(e.event_date, e.from_date) \u003C= @EventEndDate::date)\r\n  AND (@EventId IS NULL OR e.id = @EventId)\r\nORDER BY event_date DESC, participant",
+    "parameters": [
+      {
+        "parameter_name": "EventStartDate",
+        "display_name": "Event start",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventEndDate",
+        "display_name": "Event end",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EventId",
+        "display_name": "Event",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "events"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "participant",
+        "display_name": "Participant",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_name",
+        "display_name": "Event",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_date",
+        "display_name": "Event date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registered",
+        "format_type": "date"
+      },
+      {
+        "column_key": "payment_status",
+        "display_name": "Payment",
+        "format_type": "text"
+      },
+      {
+        "column_key": "attendance_status",
+        "display_name": "Attendance",
+        "format_type": "text"
+      },
+      {
+        "column_key": "confirmation_status",
+        "display_name": "Confirmation",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "cust_event_history",
+    "name": "Customer Event History",
+    "category": "Events \u0026 Participants",
+    "description": "All event registrations and attendance for each customer.",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  e.event_name,\r\n  e.event_type,\r\n  COALESCE(e.event_date, e.from_date) AS event_date,\r\n  eb.created_at AS registration_date,\r\n  eb.payment_status,\r\n  eb.check_in_status AS attendance_status,\r\n  e.status AS event_status,\r\n  COALESCE(eb.total_amount, 0) AS amount\r\nFROM event_bookings eb\r\nINNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\nLEFT JOIN users u ON u.id = eb.user_id\r\nWHERE e.organisation_id = @OrgId\r\n  AND COALESCE(eb.isactive, TRUE) = TRUE\r\n  AND (@CustomerId IS NULL OR u.id = @CustomerId)\r\n  AND (@Search IS NULL OR @Search = \u0027\u0027 OR u.name ILIKE \u0027%\u0027 || @Search || \u0027%\u0027 OR u.mobile ILIKE \u0027%\u0027 || @Search || \u0027%\u0027)\r\nORDER BY customer_name, event_date DESC",
+    "parameters": [
+      {
+        "parameter_name": "CustomerId",
+        "display_name": "Customer ID",
+        "data_type": "number",
+        "input_type": "number",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "Search",
+        "display_name": "Search",
+        "data_type": "string",
+        "input_type": "text",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_name",
+        "display_name": "Event",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_date",
+        "display_name": "Event date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "registration_date",
+        "display_name": "Registered",
+        "format_type": "date"
+      },
+      {
+        "column_key": "payment_status",
+        "display_name": "Payment",
+        "format_type": "text"
+      },
+      {
+        "column_key": "attendance_status",
+        "display_name": "Attendance",
+        "format_type": "text"
+      },
+      {
+        "column_key": "event_status",
+        "display_name": "Event status",
+        "format_type": "text"
+      },
+      {
+        "column_key": "amount",
+        "display_name": "Amount",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "evt_repeat_participants",
+    "name": "Repeat Event Participants",
+    "category": "Events \u0026 Participants",
+    "description": "Customers who registered for more than one event.",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  COUNT(DISTINCT eb.event_id) AS events_count,\r\n  COUNT(DISTINCT eb.id) FILTER (WHERE LOWER(COALESCE(eb.check_in_status,\u0027\u0027)) = \u0027checked_in\u0027) AS attended_count,\r\n  MIN(COALESCE(e.event_date, e.from_date)) AS first_event_date,\r\n  MAX(COALESCE(e.event_date, e.from_date)) AS last_event_date\r\nFROM event_bookings eb\r\nINNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\nINNER JOIN users u ON u.id = eb.user_id\r\nWHERE e.organisation_id = @OrgId\r\n  AND COALESCE(eb.isactive, TRUE) = TRUE\r\nGROUP BY u.id, u.name, u.mobile\r\nHAVING COUNT(DISTINCT eb.event_id) \u003E= COALESCE(@MinEvents, 2)\r\nORDER BY events_count DESC, customer_name",
+    "parameters": [
+      {
+        "parameter_name": "MinEvents",
+        "display_name": "Minimum events",
+        "data_type": "number",
+        "input_type": "number",
+        "is_required": false,
+        "default_value": "2",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "events_count",
+        "display_name": "Events",
+        "format_type": "number"
+      },
+      {
+        "column_key": "attended_count",
+        "display_name": "Attended",
+        "format_type": "number"
+      },
+      {
+        "column_key": "first_event_date",
+        "display_name": "First event",
+        "format_type": "date"
+      },
+      {
+        "column_key": "last_event_date",
+        "display_name": "Last event",
+        "format_type": "date"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "customer_name",
+      "y_column": "events_count",
+      "title": "Repeat participants"
+    }
+  },
+  {
+    "catalog_key": "book_complete_history",
+    "name": "Complete Booking History",
+    "category": "Bookings \u0026 Appointments",
+    "description": "Record-level appointment bookings with customer, staff, branch and status.",
+    "sql_query": "SELECT\r\n  a.id AS booking_id,\r\n  a.appoinmentdate AS booking_date,\r\n  a.fromtime AS start_time,\r\n  a.totime AS end_time,\r\n  COALESCE(a.statuscode, \u0027\u0027) AS status_code,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  COALESCE(a.staffname, \u0027\u0027) AS staff_name,\r\n  COALESCE(ol.name, \u0027\u0027) AS branch_name,\r\n  COALESCE(a.ispaid, FALSE) AS is_paid,\r\n  u.id AS customer_id,\r\n  a.staffid AS staff_id,\r\n  a.organisationlocationid AS branch_id\r\nFROM appoinment a\r\nLEFT JOIN users u ON u.id = a.userid\r\nLEFT JOIN organisationlocation ol ON ol.id = a.organisationlocationid\r\nWHERE a.organisationid = @OrgId\r\n  AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND (@StartDate IS NULL OR a.appoinmentdate \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR a.appoinmentdate \u003C= @EndDate::date)\r\n  AND (@StatusCode IS NULL OR @StatusCode = \u0027\u0027 OR UPPER(a.statuscode) = UPPER(@StatusCode))\r\n  AND (@BranchId IS NULL OR a.organisationlocationid = @BranchId)\r\n  AND (@StaffId IS NULL OR a.staffid = @StaffId)\r\n  AND (@Search IS NULL OR @Search = \u0027\u0027 OR u.name ILIKE \u0027%\u0027 || @Search || \u0027%\u0027 OR u.mobile ILIKE \u0027%\u0027 || @Search || \u0027%\u0027)\r\nORDER BY a.appoinmentdate DESC, a.fromtime DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "StatusCode",
+        "display_name": "Status",
+        "data_type": "string",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "static",
+        "options_config": "[{\u0022label\u0022:\u0022Pending\u0022,\u0022value\u0022:\u0022PENDING\u0022},{\u0022label\u0022:\u0022Confirmed\u0022,\u0022value\u0022:\u0022CONFIRMED\u0022},{\u0022label\u0022:\u0022Completed\u0022,\u0022value\u0022:\u0022COMPLETED\u0022},{\u0022label\u0022:\u0022Cancelled\u0022,\u0022value\u0022:\u0022CANCELLED\u0022},{\u0022label\u0022:\u0022No-show\u0022,\u0022value\u0022:\u0022NOSHOW\u0022}]"
+      },
+      {
+        "parameter_name": "BranchId",
+        "display_name": "Branch",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "branches"
+      },
+      {
+        "parameter_name": "StaffId",
+        "display_name": "Staff",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "staff"
+      },
+      {
+        "parameter_name": "Search",
+        "display_name": "Customer search",
+        "data_type": "string",
+        "input_type": "text",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "booking_id",
+        "display_name": "Booking ID",
+        "format_type": "number"
+      },
+      {
+        "column_key": "booking_date",
+        "display_name": "Date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "start_time",
+        "display_name": "From",
+        "format_type": "text"
+      },
+      {
+        "column_key": "end_time",
+        "display_name": "To",
+        "format_type": "text"
+      },
+      {
+        "column_key": "status_code",
+        "display_name": "Status",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "staff_name",
+        "display_name": "Staff",
+        "format_type": "text"
+      },
+      {
+        "column_key": "branch_name",
+        "display_name": "Branch",
+        "format_type": "text"
+      },
+      {
+        "column_key": "is_paid",
+        "display_name": "Paid",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "book_completed",
+    "name": "Completed Appointments",
+    "category": "Bookings \u0026 Appointments",
+    "description": "Appointments with COMPLETED status.",
+    "sql_query": "SELECT\r\n  a.id AS booking_id,\r\n  a.appoinmentdate AS booking_date,\r\n  a.fromtime AS start_time,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  COALESCE(a.staffname, \u0027\u0027) AS staff_name,\r\n  COALESCE(ol.name, \u0027\u0027) AS branch_name,\r\n  COALESCE(a.ispaid, FALSE) AS is_paid,\r\n  u.id AS customer_id\r\nFROM appoinment a\r\nLEFT JOIN users u ON u.id = a.userid\r\nLEFT JOIN organisationlocation ol ON ol.id = a.organisationlocationid\r\nWHERE a.organisationid = @OrgId\r\n  AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND UPPER(COALESCE(a.statuscode,\u0027\u0027)) = \u0027COMPLETED\u0027\r\n  AND (@StartDate IS NULL OR a.appoinmentdate \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR a.appoinmentdate \u003C= @EndDate::date)\r\n  AND (@StaffId IS NULL OR a.staffid = @StaffId)\r\nORDER BY a.appoinmentdate DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "StaffId",
+        "display_name": "Staff",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "staff"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "booking_id",
+        "display_name": "Booking ID",
+        "format_type": "number"
+      },
+      {
+        "column_key": "booking_date",
+        "display_name": "Date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "start_time",
+        "display_name": "From",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "staff_name",
+        "display_name": "Staff",
+        "format_type": "text"
+      },
+      {
+        "column_key": "branch_name",
+        "display_name": "Branch",
+        "format_type": "text"
+      },
+      {
+        "column_key": "is_paid",
+        "display_name": "Paid",
+        "format_type": "text"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "fin_customer_revenue",
+    "name": "Customer-Wise Revenue",
+    "category": "Sales \u0026 Finance",
+    "description": "Successful payment totals per customer (appointment payments).",
+    "sql_query": "SELECT\r\n  u.id AS customer_id,\r\n  COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n  COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n  COUNT(DISTINCT p.id) AS payment_count,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) AS total_paid,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 3), 0) AS total_refunded,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0)\r\n    - COALESCE(SUM(p.amount) FILTER (WHERE p.status = 3), 0) AS net_revenue,\r\n  MAX(p.createdon) AS last_payment_at\r\nFROM payment p\r\nINNER JOIN appoinment a ON a.id = p.appoinmentid AND a.organisationid = @OrgId\r\nINNER JOIN users u ON u.id = a.userid\r\nWHERE COALESCE(p.isactive, TRUE) = TRUE\r\n  AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND (@StartDate IS NULL OR p.createdon::date \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR p.createdon::date \u003C= @EndDate::date)\r\nGROUP BY u.id, u.name, u.mobile\r\nHAVING COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) \u003E 0\r\nORDER BY net_revenue DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "payment_count",
+        "display_name": "Payments",
+        "format_type": "number"
+      },
+      {
+        "column_key": "total_paid",
+        "display_name": "Paid",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "total_refunded",
+        "display_name": "Refunded",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "net_revenue",
+        "display_name": "Net revenue",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "last_payment_at",
+        "display_name": "Last payment",
+        "format_type": "date"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "customer_name",
+      "y_column": "net_revenue",
+      "title": "Customer revenue"
+    }
+  },
+  {
+    "catalog_key": "fin_pending_payments",
+    "name": "Pending Payments",
+    "category": "Sales \u0026 Finance",
+    "description": "Unpaid appointments and pending event registrations.",
+    "sql_query": "SELECT * FROM (\r\n  SELECT\r\n    \u0027appointment\u0027::text AS source,\r\n    a.id AS record_id,\r\n    a.appoinmentdate::timestamp AS activity_date,\r\n    COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n    COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n    COALESCE(a.statuscode, \u0027\u0027) AS status_label,\r\n    \u0027pending\u0027::text AS payment_status,\r\n    COALESCE((\r\n      SELECT SUM(p.amount) FROM payment p\r\n      WHERE p.appoinmentid = a.id AND p.status = 0 AND COALESCE(p.isactive, TRUE) = TRUE\r\n    ), 0) AS amount_due,\r\n    u.id AS customer_id\r\n  FROM appoinment a\r\n  LEFT JOIN users u ON u.id = a.userid\r\n  WHERE a.organisationid = @OrgId\r\n    AND COALESCE(a.isactive, TRUE) = TRUE\r\n    AND COALESCE(a.ispaid, FALSE) = FALSE\r\n    AND UPPER(COALESCE(a.statuscode,\u0027\u0027)) NOT IN (\u0027CANCELLED\u0027,\u0027CANCELED\u0027)\r\n\r\n  UNION ALL\r\n\r\n  SELECT\r\n    \u0027event\u0027::text AS source,\r\n    eb.id AS record_id,\r\n    COALESCE(e.event_date, e.from_date)::timestamp AS activity_date,\r\n    COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n    COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n    e.event_name AS status_label,\r\n    COALESCE(eb.payment_status, \u0027pending\u0027) AS payment_status,\r\n    COALESCE(eb.total_amount, 0) AS amount_due,\r\n    u.id AS customer_id\r\n  FROM event_bookings eb\r\n  INNER JOIN events e ON e.id = eb.event_id AND COALESCE(e.isactive, TRUE) = TRUE\r\n  LEFT JOIN users u ON u.id = eb.user_id\r\n  WHERE e.organisation_id = @OrgId\r\n    AND COALESCE(eb.isactive, TRUE) = TRUE\r\n    AND LOWER(COALESCE(eb.payment_status, \u0027pending\u0027)) = \u0027pending\u0027\r\n) q\r\nWHERE (@StartDate IS NULL OR q.activity_date::date \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR q.activity_date::date \u003C= @EndDate::date)\r\nORDER BY activity_date DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "source",
+        "display_name": "Source",
+        "format_type": "text"
+      },
+      {
+        "column_key": "record_id",
+        "display_name": "Record ID",
+        "format_type": "number"
+      },
+      {
+        "column_key": "activity_date",
+        "display_name": "Date",
+        "format_type": "date"
+      },
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "status_label",
+        "display_name": "Detail",
+        "format_type": "text"
+      },
+      {
+        "column_key": "payment_status",
+        "display_name": "Payment",
+        "format_type": "text"
+      },
+      {
+        "column_key": "amount_due",
+        "display_name": "Amount due",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "staff_performance",
+    "name": "Staff Performance",
+    "category": "Staff Performance",
+    "description": "Appointments completed, cancelled and customers served per staff member.",
+    "sql_query": "SELECT\r\n  COALESCE(a.staffid, 0) AS staff_id,\r\n  COALESCE(NULLIF(a.staffname, \u0027\u0027), su.name, \u0027Unassigned\u0027) AS staff_name,\r\n  COUNT(*) AS total_bookings,\r\n  COUNT(*) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) = \u0027COMPLETED\u0027) AS completed_bookings,\r\n  COUNT(*) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) IN (\u0027CANCELLED\u0027,\u0027CANCELED\u0027)) AS cancelled_bookings,\r\n  COUNT(*) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) = \u0027NOSHOW\u0027) AS noshow_bookings,\r\n  COUNT(DISTINCT a.userid) AS customers_served,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) AS revenue\r\nFROM appoinment a\r\nLEFT JOIN users su ON su.id = a.staffid\r\nLEFT JOIN payment p ON p.appoinmentid = a.id AND COALESCE(p.isactive, TRUE) = TRUE\r\nWHERE a.organisationid = @OrgId\r\n  AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND (@StartDate IS NULL OR a.appoinmentdate \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR a.appoinmentdate \u003C= @EndDate::date)\r\n  AND (@StaffId IS NULL OR a.staffid = @StaffId)\r\nGROUP BY COALESCE(a.staffid, 0), COALESCE(NULLIF(a.staffname, \u0027\u0027), su.name, \u0027Unassigned\u0027)\r\nORDER BY completed_bookings DESC, revenue DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "StaffId",
+        "display_name": "Staff",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "system",
+        "options_config": "staff"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "staff_name",
+        "display_name": "Staff",
+        "format_type": "text"
+      },
+      {
+        "column_key": "total_bookings",
+        "display_name": "Total",
+        "format_type": "number"
+      },
+      {
+        "column_key": "completed_bookings",
+        "display_name": "Completed",
+        "format_type": "number"
+      },
+      {
+        "column_key": "cancelled_bookings",
+        "display_name": "Cancelled",
+        "format_type": "number"
+      },
+      {
+        "column_key": "noshow_bookings",
+        "display_name": "No-shows",
+        "format_type": "number"
+      },
+      {
+        "column_key": "customers_served",
+        "display_name": "Customers",
+        "format_type": "number"
+      },
+      {
+        "column_key": "revenue",
+        "display_name": "Revenue",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "staff_id",
+        "display_name": "Staff ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "staff_name",
+      "y_column": "completed_bookings",
+      "title": "Completed bookings"
+    }
+  },
+  {
+    "catalog_key": "fin_service_revenue",
+    "name": "Service-Wise Revenue",
+    "category": "Sales \u0026 Finance",
+    "description": "Revenue inferred from appointment service line items in attributes JSON, joined to successful payments when present.",
+    "sql_query": "SELECT\r\n  COALESCE(svc.servicename, item.service_name, \u0027Unknown service\u0027) AS service_name,\r\n  COUNT(DISTINCT a.id) AS booking_count,\r\n  COALESCE(SUM(item.service_price), 0) AS listed_amount,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) AS paid_amount\r\nFROM appoinment a\r\nCROSS JOIN LATERAL (\r\n  SELECT\r\n    COALESCE(el-\u003E\u003E\u0027servicename\u0027, el-\u003E\u003E\u0027name\u0027, \u0027\u0027) AS service_name,\r\n    COALESCE(NULLIF(el-\u003E\u003E\u0027serviceprice\u0027, \u0027\u0027)::numeric, NULLIF(el-\u003E\u003E\u0027price\u0027, \u0027\u0027)::numeric, 0) AS service_price,\r\n    NULLIF(el-\u003E\u003E\u0027id\u0027, \u0027\u0027)::bigint AS service_id\r\n  FROM jsonb_array_elements(\r\n    CASE\r\n      WHEN jsonb_typeof(COALESCE(a.attributes, \u0027{}\u0027::jsonb)-\u003E\u0027servicelist\u0027) = \u0027array\u0027\r\n        THEN a.attributes-\u003E\u0027servicelist\u0027\r\n      ELSE \u0027[]\u0027::jsonb\r\n    END\r\n  ) el\r\n) item\r\nLEFT JOIN organisationservices svc ON svc.id = item.service_id\r\nLEFT JOIN payment p ON p.appoinmentid = a.id AND COALESCE(p.isactive, TRUE) = TRUE\r\nWHERE a.organisationid = @OrgId\r\n  AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND (@StartDate IS NULL OR a.appoinmentdate \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR a.appoinmentdate \u003C= @EndDate::date)\r\nGROUP BY COALESCE(svc.servicename, item.service_name, \u0027Unknown service\u0027)\r\nORDER BY paid_amount DESC, booking_count DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "service_name",
+        "display_name": "Service",
+        "format_type": "text"
+      },
+      {
+        "column_key": "booking_count",
+        "display_name": "Bookings",
+        "format_type": "number"
+      },
+      {
+        "column_key": "listed_amount",
+        "display_name": "Listed amount",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "paid_amount",
+        "display_name": "Paid amount",
+        "format_type": "currency"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "service_name",
+      "y_column": "paid_amount",
+      "title": "Service revenue"
+    }
+  },
+  {
+    "catalog_key": "mkt_customer_inactivity",
+    "name": "Customer Inactivity (30/60/90 days)",
+    "category": "Marketing \u0026 Loyalty",
+    "description": "Customers with no appointment or event activity within the selected inactive-days window.",
+    "sql_query": "WITH activity AS (\r\n  SELECT u.id AS customer_id,\r\n         COALESCE(u.name, \u0027\u0027) AS customer_name,\r\n         COALESCE(u.mobile, \u0027\u0027) AS phone,\r\n         COALESCE(u.email, \u0027\u0027) AS email,\r\n         GREATEST(\r\n           MAX(a.appoinmentdate::timestamp),\r\n           MAX(eb.created_at)\r\n         ) AS last_activity\r\n  FROM users u\r\n  LEFT JOIN appoinment a\r\n    ON a.userid = u.id AND a.organisationid = @OrgId AND COALESCE(a.isactive, TRUE) = TRUE\r\n  LEFT JOIN event_bookings eb\r\n    ON eb.user_id = u.id AND COALESCE(eb.isactive, TRUE) = TRUE\r\n  LEFT JOIN events e\r\n    ON e.id = eb.event_id AND e.organisation_id = @OrgId AND COALESCE(e.isactive, TRUE) = TRUE\r\n  WHERE a.id IS NOT NULL OR e.id IS NOT NULL\r\n  GROUP BY u.id, u.name, u.mobile, u.email\r\n)\r\nSELECT\r\n  customer_id,\r\n  customer_name,\r\n  phone,\r\n  email,\r\n  last_activity,\r\n  (CURRENT_DATE - last_activity::date) AS days_inactive\r\nFROM activity\r\nWHERE last_activity IS NOT NULL\r\n  AND last_activity::date \u003C= (CURRENT_DATE - (COALESCE(@InactiveDays, 90) || \u0027 days\u0027)::interval)\r\nORDER BY days_inactive DESC, customer_name",
+    "parameters": [
+      {
+        "parameter_name": "InactiveDays",
+        "display_name": "Inactive days",
+        "data_type": "number",
+        "input_type": "dropdown",
+        "is_required": false,
+        "default_value": "90",
+        "options_source": "static",
+        "options_config": "[{\u0022label\u0022:\u002230 days\u0022,\u0022value\u0022:\u002230\u0022},{\u0022label\u0022:\u002260 days\u0022,\u0022value\u0022:\u002260\u0022},{\u0022label\u0022:\u002290 days\u0022,\u0022value\u0022:\u002290\u0022}]"
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "customer_name",
+        "display_name": "Customer",
+        "format_type": "text"
+      },
+      {
+        "column_key": "phone",
+        "display_name": "Phone",
+        "format_type": "text"
+      },
+      {
+        "column_key": "email",
+        "display_name": "Email",
+        "format_type": "text"
+      },
+      {
+        "column_key": "last_activity",
+        "display_name": "Last activity",
+        "format_type": "date"
+      },
+      {
+        "column_key": "days_inactive",
+        "display_name": "Days inactive",
+        "format_type": "number"
+      },
+      {
+        "column_key": "customer_id",
+        "display_name": "Customer ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": null
+  },
+  {
+    "catalog_key": "ops_branch_performance",
+    "name": "Branch Performance",
+    "category": "Cross-Module Analytics",
+    "description": "Bookings, completions, event registrations and payment revenue by branch.",
+    "sql_query": "SELECT\r\n  ol.id AS branch_id,\r\n  COALESCE(ol.name, \u0027Unassigned\u0027) AS branch_name,\r\n  COUNT(DISTINCT a.id) AS bookings,\r\n  COUNT(DISTINCT a.id) FILTER (WHERE UPPER(COALESCE(a.statuscode,\u0027\u0027)) = \u0027COMPLETED\u0027) AS completed_bookings,\r\n  COUNT(DISTINCT eb.id) AS event_registrations,\r\n  COUNT(DISTINCT a.userid) AS unique_customers,\r\n  COALESCE(SUM(p.amount) FILTER (WHERE p.status = 1), 0) AS revenue\r\nFROM organisationlocation ol\r\nLEFT JOIN appoinment a\r\n  ON a.organisationlocationid = ol.id AND a.organisationid = @OrgId AND COALESCE(a.isactive, TRUE) = TRUE\r\n  AND (@StartDate IS NULL OR a.appoinmentdate \u003E= @StartDate::date)\r\n  AND (@EndDate IS NULL OR a.appoinmentdate \u003C= @EndDate::date)\r\nLEFT JOIN payment p ON p.appoinmentid = a.id AND COALESCE(p.isactive, TRUE) = TRUE\r\nLEFT JOIN events e\r\n  ON e.organisation_location_id = ol.id AND e.organisation_id = @OrgId AND COALESCE(e.isactive, TRUE) = TRUE\r\nLEFT JOIN event_bookings eb\r\n  ON eb.event_id = e.id AND COALESCE(eb.isactive, TRUE) = TRUE\r\nWHERE ol.organisationid = @OrgId\r\n  AND COALESCE(ol.isactive, TRUE) = TRUE\r\nGROUP BY ol.id, ol.name\r\nORDER BY revenue DESC, bookings DESC",
+    "parameters": [
+      {
+        "parameter_name": "StartDate",
+        "display_name": "From date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      },
+      {
+        "parameter_name": "EndDate",
+        "display_name": "To date",
+        "data_type": "date",
+        "input_type": "date",
+        "is_required": false,
+        "default_value": "",
+        "options_source": "none",
+        "options_config": ""
+      }
+    ],
+    "columns": [
+      {
+        "column_key": "branch_name",
+        "display_name": "Branch",
+        "format_type": "text"
+      },
+      {
+        "column_key": "bookings",
+        "display_name": "Bookings",
+        "format_type": "number"
+      },
+      {
+        "column_key": "completed_bookings",
+        "display_name": "Completed",
+        "format_type": "number"
+      },
+      {
+        "column_key": "event_registrations",
+        "display_name": "Event regs",
+        "format_type": "number"
+      },
+      {
+        "column_key": "unique_customers",
+        "display_name": "Customers",
+        "format_type": "number"
+      },
+      {
+        "column_key": "revenue",
+        "display_name": "Revenue",
+        "format_type": "currency"
+      },
+      {
+        "column_key": "branch_id",
+        "display_name": "Branch ID",
+        "format_type": "number"
+      }
+    ],
+    "chart": {
+      "chart_type": "bar",
+      "x_column": "branch_name",
+      "y_column": "revenue",
+      "title": "Branch revenue"
+    }
+  }
+]

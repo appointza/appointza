@@ -50,9 +50,11 @@ export class EnquiryService {
   }
 
   async update(req: Enquiry) {
-    let postdata: ActionReq<Enquiry> = new ActionReq<Enquiry>();
-    postdata.item = req;
-    let resp = await this.http.post<ActionRes<Enquiry>>(
+    const postdata: ActionReq<Enquiry> = new ActionReq<Enquiry>();
+    // Server sets updated_at; never send "" (breaks DateTime JSON binding).
+    const { created_at: _c, updated_at: _u, ...item } = req;
+    postdata.item = item as Enquiry;
+    const resp = await this.http.post<ActionRes<Enquiry>>(
       this.baseurl + '/Update',
       postdata,
     );

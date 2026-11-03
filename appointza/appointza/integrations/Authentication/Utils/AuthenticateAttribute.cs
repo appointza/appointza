@@ -16,8 +16,9 @@ namespace appointza.Authentication.Utils
             if (AllowsAnonymous(context))
                 return;
 
-            var user = (UsersContext)context.HttpContext.Items["usercontext"];
-            if (user == null)
+            var user = context.HttpContext.Items["usercontext"] as UsersContext;
+            // JwtMiddleware always stores a UsersContext object (even for bad tokens), so also require userid.
+            if (user == null || user.userid <= 0)
             {
                 context.Result = new JsonResult(new { message = "Unauthorized" }) { StatusCode = StatusCodes.Status401Unauthorized };
                 return;

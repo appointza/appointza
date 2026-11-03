@@ -176,6 +176,8 @@ namespace appointza.Models
         public long organisationlocationid { get; set; }
         public string organisationlocationname { get; set; }
         public bool isStaff { get; set; }
+        /// <summary>True when users.isfactory is set: platform super admin (display hint; the server re-checks the DB on every super admin call).</summary>
+        public bool issuperadmin { get; set; }
         public string refreshtoken { get; set; }
         public string accesstoken { get; set; }
     }
@@ -192,6 +194,7 @@ namespace appointza.Models
         public long organisationtype { get; set; }
         public long organisationlocationid { get; set; }
         public string organisationlocationname { get; set; }
+        public bool issuperadmin { get; set; }
     }
     public class UsersConnectionRequestReq
     {

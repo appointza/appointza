@@ -131,7 +131,18 @@ export async function deleteCurrentUserAccount(): Promise<void> {
 
   await TrackingServiceAPI.stopTrackingService().catch(() => {});
   await reauthWithGoogleIfPossible();
-  await deleteFirestoreUserData(user.uid);
+
+  try {
+    const { appointzaDeleteAccountData } = await import('../../billing/appointzaCloud');
+    const { clearAppointzaSession } = await import('../../billing/appointzaSession');
+    await appointzaDeleteAccountData().catch(() => {});
+    await clearAppointzaSession().catch(() => {});
+  } catch {
+    /* Appointza session may already be gone */
+  }
+
+  // Legacy Firestore cleanup if any old docs remain.
+  await deleteFirestoreUserData(user.uid).catch(() => {});
 
   try {
     await user.delete();

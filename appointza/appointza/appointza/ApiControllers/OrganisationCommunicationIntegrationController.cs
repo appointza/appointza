@@ -79,6 +79,31 @@ namespace appointza.ApiControllers
             }
         }
 
+        /// <summary>
+        /// Re-subscribe WABA apps and force the phone-number webhook override to Appointza.
+        /// Fixes the common case where Meta Test works but real chats hit a stale ngrok URL.
+        /// </summary>
+        [HttpPost("SyncInboundWebhook")]
+        public async Task<ActionResult<ActionRes<OrganisationIntegrationSafe>>> SyncInboundWebhook(
+            ActionReq<OrganisationIntegrationDisconnectReq> req)
+        {
+            var result = new ActionRes<OrganisationIntegrationSafe>();
+            try
+            {
+                result.item = await _service.SyncInboundWebhook(
+                    req.item ?? new OrganisationIntegrationDisconnectReq());
+                return Ok(result);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { success = false, message = ex.Message });
+            }
+        }
+
         [HttpPost("Disconnect")]
         public async Task<ActionResult<ActionRes<bool>>> Disconnect(ActionReq<OrganisationIntegrationDisconnectReq> req)
         {

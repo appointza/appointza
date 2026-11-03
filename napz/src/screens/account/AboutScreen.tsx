@@ -26,11 +26,9 @@ import {
   deleteCurrentUserAccount,
   signOutAndClearLocalData,
 } from '../../services/firebase/deleteAccount';
-import {
-  firestoreErrorMessage,
-  saveProfileContactToFirebase,
-  type UserProfile,
-} from '../../services/firebase/userProfileSync';
+import { appointzaUpsertProfile } from '../../billing/appointzaCloud';
+import auth from '@react-native-firebase/auth';
+import type { UserProfile } from '../../services/firebase/userProfileSync';
 import type { NapzSubscriptionTier } from '../../subscription/subscriptionTier';
 
 type StoredProfile = {
@@ -157,12 +155,15 @@ export default function AboutScreen() {
       await AsyncStorage.setItem(USER_PROFILE_KEY, JSON.stringify(next));
       setProfile(next);
       try {
-        await saveProfileContactToFirebase(firebaseProfile);
+        await appointzaUpsertProfile({
+          ...firebaseProfile,
+          firebaseUid: auth().currentUser?.uid ?? null,
+        });
         Alert.alert('Saved', 'Your details were saved.');
       } catch (e) {
         Alert.alert(
           'Saved on this device',
-          `Cloud save had an issue: ${firestoreErrorMessage(e)}`,
+          `Cloud save had an issue: ${String((e as Error)?.message ?? e)}`,
         );
       }
     } catch {

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { useOnboardingStatus } from '@/hooks/useOnboardingStatus';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -70,6 +71,22 @@ export const OnboardingGuard = ({ children, allowedRoutes = [] }: OnboardingGuar
       state: { from: location.pathname, onboarding: true },
     });
   }, [isAuthenticated, userType, user, isComplete, isLoading, navigate, location.pathname, isAllowedRoute]);
+
+  // Avoid a blank workspace while onboarding status is still resolving.
+  if (
+    isAuthenticated &&
+    userType === 'organization' &&
+    !!user?.organisationid &&
+    isLoading &&
+    !isAllowedRoute &&
+    !isComplete
+  ) {
+    return (
+      <div className="flex min-h-[40vh] w-full items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />
+      </div>
+    );
+  }
 
   return <>{children}</>;
 };

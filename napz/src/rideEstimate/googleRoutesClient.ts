@@ -1,4 +1,4 @@
-import { napzFunctions } from '../services/firebase/functionsClient';
+import { appointzaEstimateJourney } from '../billing/appointzaCloud';
 import { mergeGoogleBusOptions, parseTransitRoutes as parseDirectionsTransit } from './googleDirections';
 import { computeJourneyModesHttp } from './googleRoutesHttp';
 import { parseOverviewRoute, parseTransitRoutes, type RoutesRoute } from './googleRoutesParse';
@@ -67,12 +67,10 @@ export async function fetchGoogleRoutesJourney(
 } | null> {
   let payload: RoutesPayload | null = null;
   try {
-    const callable = napzFunctions().httpsCallable('estimateTransitJourney');
-    const result = await callable({
+    payload = (await appointzaEstimateJourney({
       origin: { lat: origin.lat, lng: origin.lng, address: origin.name },
       destination: { lat: destination.lat, lng: destination.lng, address: destination.name },
-    });
-    payload = (result.data ?? {}) as RoutesPayload;
+    })) as RoutesPayload;
   } catch {
     payload = null;
   }
@@ -95,6 +93,7 @@ export async function fetchGoogleRoutesJourney(
     };
   }
 
+  // OSM / local fallbacks only — no client Google Routes key.
   try {
     const http = await computeJourneyModesHttp(origin, destination);
     const transitError = http.transit.error?.message;

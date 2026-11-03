@@ -17,8 +17,14 @@ import { cn } from "@/lib/utils";
 const cards = [
   {
     to: "/organization/crm/business-profile",
-    title: "Business Profile",
-    description: "Organisation details, services, events, and rooms.",
+    title: "Find businesses",
+    description: "Map search Google Places, filter by phone/website, save as leads.",
+    icon: Building2,
+  },
+  {
+    to: "/organization/crm/catalogue",
+    title: "Org catalogue",
+    description: "What the organisation offers, and how it should be sold.",
     icon: Building2,
   },
   {
@@ -95,7 +101,7 @@ export default function CrmDashboard() {
               to="/organization/crm/business-profile"
               className="inline-flex items-center gap-1 text-[13px] font-medium text-[#2a5af5] hover:underline"
             >
-              View business profile
+              Find businesses on map
               <ChevronRight className="h-3.5 w-3.5" />
             </Link>
           </div>

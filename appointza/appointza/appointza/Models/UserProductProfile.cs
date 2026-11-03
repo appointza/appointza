@@ -5,6 +5,15 @@ namespace appointza.Models
         public const string Campusza = "campusza";
         public const string Appointza = "appointza";
         public const string Webzys = "webzys";
+        public const string Napz = "napz";
+    }
+
+    /// <summary>Stable markers for product-shell organisations (not booking businesses).</summary>
+    public static class ProductOrganisationMarkers
+    {
+        public const string NapzName = "Napz";
+        public const string NapzGst = "PRODUCT_NAPZ";
+        public const string NapzNotes = "product:napz";
     }
 
     public class UserProductProfile

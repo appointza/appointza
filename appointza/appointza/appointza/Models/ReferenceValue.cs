@@ -5,10 +5,10 @@ namespace appointza.Models
     public class ReferenceValue
     {
         public long id { get; set; }
-public string identifier { get; set; }
-public string displaytext { get; set; }
-public string description { get; set; }
-public string langcode { get; set; }
+public string identifier { get; set; } = "";
+public string displaytext { get; set; } = "";
+public string description { get; set; } = "";
+public string langcode { get; set; } = "en";
 public int organizationid { get; set; }
 public int referencetypeid { get; set; }
 public int version { get; set; }
@@ -33,7 +33,7 @@ public bool isactive { get; set; }
 public bool issuspended { get; set; }
 public long parentid { get; set; }
 public bool isfactory { get; set; }
-public string notes { get; set; }
+public string notes { get; set; } = "";
         
                 public class AttributesData
                 {

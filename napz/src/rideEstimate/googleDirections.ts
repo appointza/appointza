@@ -243,56 +243,24 @@ export function transitAvailabilityFromStatus(
   };
 }
 
+/** Client Directions HTTP removed — transit comes from Appointza EstimateJourney. */
 export async function fetchGoogleTransit(
-  origin: RidePlace,
-  destination: RidePlace
+  _origin: RidePlace,
+  _destination: RidePlace
 ): Promise<{ routes: BusRouteOption[]; availability: TransitAvailability }> {
-  try {
-    const departureTime = String(Math.floor(Date.now() / 1000));
-    const data = await fetchDirections(origin, destination, 'transit', {
-      alternatives: 'true',
-      departure_time: departureTime,
-    });
-    const routes = parseTransitRoutes(data);
-    return { routes, availability: transitAvailabilityFromStatus(data.status, routes) };
-  } catch {
-    return {
-      routes: [],
-      availability: {
-        status: 'unavailable',
-        message:
-          'Could not reach Google Directions for transit. Open the bus route in Google Maps instead.',
-      },
-    };
-  }
+  return {
+    routes: [],
+    availability: {
+      status: 'unavailable',
+      message: 'Transit is loaded from Appointza Google Routes.',
+    },
+  };
 }
 
+/** Client Directions HTTP removed — driving comes from Appointza EstimateJourney. */
 export async function fetchGoogleDrivingTraffic(
-  origin: RidePlace,
-  destination: RidePlace
+  _origin: RidePlace,
+  _destination: RidePlace
 ): Promise<OverviewRoute | null> {
-  try {
-    const data = await fetchDirections(origin, destination, 'driving', {
-      departure_time: 'now',
-    });
-    const route = data.routes?.[0];
-    const leg = route?.legs?.[0];
-    const trafficSeconds = leg?.duration_in_traffic?.value;
-    const durationSeconds = trafficSeconds ?? leg?.duration?.value;
-    if (data.status !== 'OK' || !leg || !Number.isFinite(durationSeconds)) return null;
-    return {
-      mode: 'car',
-      label: 'Car',
-      distanceMeters: leg.distance?.value ?? 0,
-      durationSeconds: durationSeconds as number,
-      durationIsTrafficAware: Number.isFinite(trafficSeconds),
-      source: 'google_directions',
-      geometry: decodePolyline(route?.overview_polyline?.points ?? ''),
-      note: Number.isFinite(trafficSeconds)
-        ? 'Traffic-aware driving time from Google Directions. Not an Uber or Rapido fare.'
-        : 'Driving time from Google Directions. Not live traffic, and not an Uber or Rapido fare.',
-    };
-  } catch {
-    return null;
-  }
+  return null;
 }

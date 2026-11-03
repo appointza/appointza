@@ -26,10 +26,10 @@ import { initAdMob } from '../../ads/initAdMob';
 import { showUpgradePrompt } from '../../entitlement/showUpgradePrompt';
 import { usePremiumEntitlement } from '../../entitlement/usePremiumEntitlement';
 import {
-  deleteSavedPlaceFromFirebase,
-  fetchSavedPlacesFromFirebase,
-  upsertSavedPlaceToFirebase,
-} from '../../services/firebase/userLocationSync';
+  appointzaListSavedPlaces as fetchSavedPlacesFromFirebase,
+  appointzaUpsertSavedPlace as upsertSavedPlaceToFirebase,
+  appointzaDeleteSavedPlace as deleteSavedPlaceFromFirebase,
+} from '../../billing/appointzaCloud';
 
 interface SavedPlace {
   id: string;

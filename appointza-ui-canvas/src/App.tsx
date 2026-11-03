@@ -12,6 +12,9 @@ import { Capacitor } from '@capacitor/core';
 import { isOrganisationSubdomainHost } from "@/utils/orgPublicSiteUrl.util";
 import { mustUseMainAppForAuth, redirectToLogin } from "@/utils/authNavigation.util";
 import { isPublicBookingPagePath } from "@/utils/publicBookingRoute.util";
+// Super-admin shell stays mounted (Angular-style): eager layout/guard so only the right-side page chunks suspend.
+import SuperAdminRoute from "./components/superadmin/SuperAdminRoute";
+import SuperAdminLayout from "./components/superadmin/SuperAdminLayout";
 
 const Index = lazy(() => import("./pages/Index"));
 const FullAppChrome = lazy(() => import("@/components/layout/FullAppChrome"));
@@ -28,6 +31,18 @@ const EnsureAuthOnMainHost = lazy(() =>
 const Login = lazy(() => import("./pages/Login"));
 const AdminLogin = lazy(() => import("./pages/admin/AdminLogin"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const SuperAdminDashboard = lazy(() => import("./pages/superadmin/Dashboard"));
+const SuperAdminOrganisations = lazy(() => import("./pages/superadmin/Organisations"));
+const SuperAdminOrganisationDetail = lazy(() => import("./pages/superadmin/OrganisationDetail"));
+const SuperAdminOrganisationEdit = lazy(() => import("./pages/superadmin/OrganisationEdit"));
+const SuperAdminLocations = lazy(() => import("./pages/superadmin/Locations"));
+const SuperAdminLocationDetail = lazy(() => import("./pages/superadmin/LocationDetail"));
+const SuperAdminUsers = lazy(() => import("./pages/superadmin/Users"));
+const SuperAdminReferenceData = lazy(() => import("./pages/superadmin/ReferenceData"));
+const SuperAdminReports = lazy(() => import("./pages/superadmin/Reports"));
+const SuperAdminReportBuilder = lazy(() => import("./pages/superadmin/ReportBuilder"));
+const OrganizationReports = lazy(() => import("./pages/organization/Reports"));
+const OrganizationReportRunner = lazy(() => import("./pages/organization/ReportRunner"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Register = lazy(() => import("./pages/Register"));
 const RegisterBusinessProfile = lazy(() => import("./pages/RegisterBusinessProfile"));
@@ -84,11 +99,13 @@ const CrmLayout = lazy(() => import("./pages/organization/CrmLayout"));
 const CrmDashboard = lazy(() => import("./pages/organization/crm/CrmDashboard"));
 const CrmUnifiedInbox = lazy(() => import("./pages/organization/crm/CrmUnifiedInbox"));
 const CrmComingSoon = lazy(() => import("./pages/organization/crm/CrmComingSoon"));
+const CrmEmailCampaigns = lazy(() => import("./pages/organization/crm/CrmEmailCampaigns"));
 const CrmWhatsAppTemplates = lazy(() => import("./pages/organization/crm/CrmWhatsAppTemplates"));
 const CrmWhatsAppCampaigns = lazy(() => import("./pages/organization/crm/CrmWhatsAppCampaigns"));
 const CrmWhatsAppCampaignReports = lazy(() => import("./pages/organization/crm/CrmWhatsAppCampaignReports"));
 const CrmWhatsAppAutomations = lazy(() => import("./pages/organization/crm/CrmWhatsAppAutomations"));
 const CrmCatalogue = lazy(() => import("./pages/organization/CrmCatalogue"));
+const CrmBusinessDiscovery = lazy(() => import("./pages/organization/crm/CrmBusinessDiscovery"));
 const HospitalityContentPage = lazy(() => import("./pages/organization/HospitalityContent"));
 const OrganisationLegacyRedirect = lazy(() => import("./pages/organization/OrganisationLegacyRedirect"));
 const RoomDefinitionsPage = lazy(() => import("./pages/organization/RoomDefinitions"));
@@ -216,6 +233,26 @@ const AppRoutes = () => {
         <Route path="/login" element={<Suspense fallback={<RouteChunkFallback />}><EnsureAuthOnMainHost><Login /></EnsureAuthOnMainHost></Suspense>} />
         <Route path="/admin/login" element={<Suspense fallback={<RouteChunkFallback />}><AdminLogin /></Suspense>} />
         <Route path="/admin" element={<Suspense fallback={<RouteChunkFallback />}><AdminDashboard /></Suspense>} />
+        {/* Super admin console: layout/sidebar stay mounted; only Outlet pages lazy-load. */}
+        <Route
+          path="/super-admin"
+          element={
+            <SuperAdminRoute>
+              <SuperAdminLayout />
+            </SuperAdminRoute>
+          }
+        >
+          <Route index element={<SuperAdminDashboard />} />
+          <Route path="organisations" element={<SuperAdminOrganisations />} />
+          <Route path="organisations/:id/edit" element={<SuperAdminOrganisationEdit />} />
+          <Route path="organisations/:id" element={<SuperAdminOrganisationDetail />} />
+          <Route path="locations" element={<SuperAdminLocations />} />
+          <Route path="locations/:id" element={<SuperAdminLocationDetail />} />
+          <Route path="users" element={<SuperAdminUsers />} />
+          <Route path="reference" element={<SuperAdminReferenceData />} />
+          <Route path="reports" element={<SuperAdminReports />} />
+          <Route path="reports/:id" element={<SuperAdminReportBuilder />} />
+        </Route>
         <Route path="/register" element={<Suspense fallback={<RouteChunkFallback />}><EnsureAuthOnMainHost><Register /></EnsureAuthOnMainHost></Suspense>} />
         {/* Business onboarding: web → org shell + Setup sidebar; native → standalone forms */}
         <Route
@@ -305,6 +342,8 @@ const AppRoutes = () => {
           }
         >
           <Route path="dashboard" element={<OrganizationDashboard />} />
+          <Route path="reports" element={<OrganizationReports />} />
+          <Route path="reports/:id" element={<OrganizationReportRunner />} />
           <Route path="onboarding" element={<OrganizationOnboardingWizard />} />
           <Route path="custom-domain" element={<CustomDomainScreen />} />
           <Route path="timing" element={<TimingScreen />} />
@@ -323,15 +362,16 @@ const AppRoutes = () => {
             <Route path="pipeline" element={<CrmComingSoon title="Sales Pipeline" description="Track lead stages from new enquiry through conversion. This board is next to build." />} />
             <Route path="whatsapp/inbox" element={<CrmUnifiedInbox />} />
             <Route path="inbox" element={<Navigate to="/organization/crm/whatsapp/inbox" replace />} />
-            <Route path="email-campaigns" element={<CrmComingSoon title="Email Campaigns" description="Send bulk or scheduled email. Conversations stay in Unified Inbox — this is for campaigns only." />} />
+            <Route path="email-campaigns" element={<CrmEmailCampaigns />} />
             <Route path="whatsapp-campaigns" element={<CrmWhatsAppCampaigns />} />
             <Route path="whatsapp/automations" element={<CrmWhatsAppAutomations />} />
             <Route path="templates" element={<CrmWhatsAppTemplates />} />
             <Route path="whatsapp/templates" element={<Navigate to="/organization/crm/templates" replace />} />
             <Route path="tasks" element={<CrmComingSoon title="Tasks & Follow-ups" description="Assign reminders and next steps on leads and conversations." />} />
             <Route path="reports" element={<CrmWhatsAppCampaignReports />} />
-            <Route path="business-profile" element={<CrmCatalogue />} />
-            <Route path="catalogue" element={<Navigate to="/organization/crm/business-profile" replace />} />
+            <Route path="business-profile" element={<CrmBusinessDiscovery />} />
+            <Route path="catalogue" element={<CrmCatalogue />} />
+            <Route path="sales-profile" element={<CrmCatalogue />} />
             <Route path="clients" element={<Navigate to="/organization/clients" replace />} />
           </Route>
           <Route path="leads" element={<Navigate to="/organization/crm/contacts" replace />} />

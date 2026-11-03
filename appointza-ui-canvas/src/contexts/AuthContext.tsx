@@ -1,6 +1,9 @@
 
 import React, { useContext, useState, useEffect, useRef, ReactNode, useMemo, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import axios from 'axios';
+import { environment } from '@/utils/environment';
+import { getAuthHeaders } from '@/utils/authSession.util';
 import { AuthService } from '@/services/AuthService';
 import { UsersPermissionData } from '@/models/users.model';
 import { resolvePostLoginPath, USER_POST_LOGIN_PATH } from '@/utils/postAuthNavigation';
@@ -18,6 +21,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [mobile, setMobileState] = useState<string | null>(null);
   const [canSwitchMode, setCanSwitchMode] = useState(false);
+  /** Result of the server-side super admin check for the current token (null = not checked yet). */
+  const [superAdminVerified, setSuperAdminVerified] = useState<{ token: string; value: boolean } | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
   const locationRef = useRef(location);
@@ -79,7 +84,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           username: userContext.username || '',
           imageid: userContext.userimageid || 0,
           userpermission: userContext.userpermission || new UsersPermissionData(),
-          isStaff: isStaff
+          isStaff: isStaff,
+          isSuperAdmin: userContext.issuperadmin === true
         });
         setMobileState(userContext.usermobile || '');
         
@@ -101,16 +107,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const currentPath = window.location.pathname;
         if (currentPath === '/login' || currentPath === '/register' || currentPath === '/otp') {
           const fromPath = resolveLoginReturnPath(locationRef.current);
-          const target = resolvePostLoginPath(
-            finalUserType as 'user' | 'organization',
-            fromPath
-          );
-          console.log('AuthContext: Auto-redirecting from', currentPath, 'to', target);
+          const isSuperAdmin = userContext.issuperadmin === true;
+          console.log('AuthContext: Auto-redirecting from', currentPath, 'superadmin=', isSuperAdmin);
           setTimeout(() => {
             completeAuthNavigation(
               navigate,
               finalUserType as 'user' | 'organization',
-              fromPath
+              fromPath,
+              { isSuperAdmin },
             );
           }, 100);
         }
@@ -197,6 +201,64 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     return () => window.removeEventListener('appointza:session-expired', handler);
   }, [navigate]);
 
+  // Confirm the super admin flag with the server (users.isfactory) once per token. Old sessions created
+  // before the flag existed pick it up here; a revoked flag is dropped here too. Plain axios is used on
+  // purpose so a failure never triggers the global session-expired logout.
+  useEffect(() => {
+    if (!isAuthenticated || !user || user.id <= 0) return;
+    const token = getAuthHeaders().Authorization?.replace(/^Bearer\s+/i, '') || localStorage.getItem('auth_token') || '';
+    if (!token || superAdminVerified?.token === token) return;
+    let cancelled = false;
+
+    const readFlag = (data: unknown): boolean | null => {
+      if (!data || typeof data !== 'object') return null;
+      const root = data as Record<string, unknown>;
+      const item = (root.item ?? root.Item) as Record<string, unknown> | undefined;
+      if (!item || typeof item !== 'object') return null;
+      const raw = item.issuperadmin ?? item.IsSuperAdmin ?? item.isSuperAdmin;
+      if (typeof raw === 'boolean') return raw;
+      if (typeof raw === 'string') return raw.toLowerCase() === 'true';
+      return null;
+    };
+
+    const applyFlag = (value: boolean) => {
+      setSuperAdminVerified({ token, value });
+      setUser((prev) => (prev ? { ...prev, isSuperAdmin: value } : prev));
+      try {
+        const raw = localStorage.getItem('user_context');
+        if (!raw) return;
+        const ctx = JSON.parse(raw) as Record<string, unknown>;
+        ctx.issuperadmin = value;
+        localStorage.setItem('user_context', JSON.stringify(ctx));
+      } catch {
+        // ignore storage errors
+      }
+    };
+
+    axios
+      .get(`${environment.baseurl}/api/Auth/SuperAdminStatus`, {
+        headers: { Accept: 'application/json', ...getAuthHeaders() },
+      })
+      .then((res) => {
+        if (cancelled) return;
+        const flag = readFlag(res.data);
+        if (flag !== null) applyFlag(flag);
+      })
+      .catch(() => {
+        // Keep whatever the login response said; do not log the user out over this check.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, user, superAdminVerified?.token]);
+
+  const isSuperAdmin = useMemo(() => {
+    if (!isAuthenticated || !user) return false;
+    const token = getAuthHeaders().Authorization?.replace(/^Bearer\s+/i, '') || localStorage.getItem('auth_token') || '';
+    if (superAdminVerified && superAdminVerified.token === token) return superAdminVerified.value;
+    return user.isSuperAdmin === true;
+  }, [isAuthenticated, user, superAdminVerified]);
+
   const setUserType = useCallback((type: 'user' | 'organization') => {
     console.log('AuthContext: Setting user type to', type);
     setUserTypeState(type);
@@ -229,12 +291,19 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const logout = useCallback(() => {
     console.log('AuthContext: Logging out');
+    try {
+      localStorage.removeItem('superadmin_return_session');
+      localStorage.removeItem('superadmin_assuming_org');
+    } catch {
+      // ignore
+    }
     AuthService.logout();
     setIsAuthenticated(false);
     setUserTypeState(null);
     setUser(null);
     setMobileState(null);
     setCanSwitchMode(false);
+    setSuperAdminVerified(null);
     navigate('/');
   }, [navigate]);
 
@@ -243,6 +312,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     authReady,
     userType,
     user,
+    isSuperAdmin,
     mobile,
     canSwitchMode,
     setUserType,
@@ -250,7 +320,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     switchToMode,
     logout,
     refreshAuth,
-  }), [authReady, canSwitchMode, isAuthenticated, logout, mobile, refreshAuth, setMobile, setUserType, switchToMode, user, userType]);
+  }), [authReady, canSwitchMode, isAuthenticated, isSuperAdmin, logout, mobile, refreshAuth, setMobile, setUserType, switchToMode, user, userType]);
 
   return (
     <AuthContext.Provider value={contextValue}>

@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
-import { Bell, Search } from "lucide-react";
+import { Bell, Search, X } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSuperAdminAssumeOrg } from "@/hooks/useSuperAdminAssumeOrg";
 import { cn } from "@/lib/utils";
 import OrganizationScreenSearch from "@/components/layout/OrganizationScreenSearch";
+import SuperAdminBadge from "@/components/superadmin/SuperAdminBadge";
+import {
+  getAssumedOrganisation,
+  isAssumingOrganisation,
+} from "@/utils/superAdminAssumeOrg.util";
 
 function initialsFromUser(user: {
   firstname?: string;
@@ -27,10 +33,13 @@ const topLinks = [
 
 /** Razorpay-style dark product top bar for organisation app. */
 export default function OrganizationTopBar({ className }: { className?: string }) {
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
+  const { exitAssumedOrganisation } = useSuperAdminAssumeOrg();
   const location = useLocation();
   const initials = initialsFromUser(user);
   const [searchFocusToken, setSearchFocusToken] = useState(0);
+  const assuming = isAssumingOrganisation();
+  const assumed = assuming ? getAssumedOrganisation() : null;
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -58,6 +67,30 @@ export default function OrganizationTopBar({ className }: { className?: string }
         />
         <span className="text-[15px] font-semibold tracking-tight text-white">Appointza</span>
       </Link>
+
+      {isSuperAdmin ? (
+        assuming ? (
+          <div className="flex max-w-[280px] items-center gap-1.5 rounded-md border border-amber-400/40 bg-amber-100/95 px-2 py-1">
+            <SuperAdminBadge compact />
+            <span className="truncate text-[11px] font-medium text-amber-900" title={assumed?.organisationname}>
+              Editing {assumed?.organisationname || "organisation"}
+            </span>
+            <button
+              type="button"
+              className="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded text-amber-800 hover:bg-amber-200"
+              title="Exit organisation editor"
+              aria-label="Exit organisation editor"
+              onClick={exitAssumedOrganisation}
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        ) : (
+          <Link to="/super-admin" className="no-underline" aria-label="Open Super Admin console">
+            <SuperAdminBadge />
+          </Link>
+        )
+      ) : null}
 
       <nav className="ml-4 hidden min-w-0 items-center gap-0.5 xl:flex">
         {topLinks.map((item) => {

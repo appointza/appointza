@@ -213,16 +213,21 @@ const OrganizationDashboard = () => {
     }
   }, [isAuthenticated, selectedLocationId, organisationLocationService, toast]);
 
-  // Update loading state when user becomes available
+  // Staff with no location: stop waiting for stats
   useEffect(() => {
-    if (user) {
-      const isStaff = UserTypeUtil.isStaff(user);
-      // Check if staff user has location ID, if not, don't show loading
-      if (isStaff && !user?.organisationlocationid && !user?.locationid) {
-        setIsLoading(false);
-      }
+    if (!user) return;
+    const isStaff = UserTypeUtil.isStaff(user as never);
+    if (isStaff && !(user.locationid > 0)) {
+      setIsLoading(false);
     }
   }, [user]);
+
+  // No locations after load — don't keep the stats spinner forever
+  useEffect(() => {
+    if (locationsLoaded && locations.length === 0) {
+      setIsLoading(false);
+    }
+  }, [locationsLoaded, locations.length]);
 
   // Sync when location changes elsewhere after initial load
   const updateUserContextLocation = useCallback((locationId: number) => {
@@ -315,13 +320,18 @@ const OrganizationDashboard = () => {
     }
   }, [globalLocationId, locations, selectedLocationId]);
 
-  // One stats fetch per location
+  // One stats fetch per location (only mark fetched after auth + id are valid)
   useEffect(() => {
-    if (selectedLocationId <= 0) return;
+    if (!isAuthenticated || selectedLocationId <= 0) return;
     if (lastFetchedLocationRef.current === selectedLocationId) return;
     lastFetchedLocationRef.current = selectedLocationId;
     void loadDashboardStats();
-  }, [selectedLocationId, loadDashboardStats]);
+  }, [isAuthenticated, selectedLocationId, loadDashboardStats]);
+
+  const waitingForLocations =
+    isAuthenticated &&
+    (!locationsLoaded || isLoadingLocations || (locations.length > 0 && selectedLocationId <= 0));
+  const showDashboardLoading = waitingForLocations || isLoading;
 
   const handleRefresh = async () => {
     lastFetchedLocationRef.current = 0;
@@ -542,11 +552,11 @@ const OrganizationDashboard = () => {
               variant="ghost"
               size="icon"
               onClick={handleRefresh}
-              disabled={isLoading}
+              disabled={showDashboardLoading}
               className="h-10 w-10 rounded-xl text-stone-500 shadow-none hover:bg-blue-50 hover:text-blue-700"
               aria-label="Refresh dashboard"
             >
-              <RefreshCw className={cn("h-4 w-4", isLoading && "animate-spin")} />
+              <RefreshCw className={cn("h-4 w-4", showDashboardLoading && "animate-spin")} />
             </Button>
           </div>
         </div>
@@ -683,12 +693,14 @@ const OrganizationDashboard = () => {
           </div>
         ) : null}
 
-        {isLoading ? (
+        {showDashboardLoading ? (
           <div className="flex min-h-[18rem] items-center justify-center">
             <div className="rounded-2xl border border-stone-200 bg-white px-10 py-12 text-center shadow-none">
-              <RefreshCw className="mx-auto mb-4 h-9 w-9 animate-spin text-blue-600" aria-hidden />
+              <Loader2 className="mx-auto mb-4 h-9 w-9 animate-spin text-[#E85D4C]" aria-label="Loading" />
               <p className="text-sm font-medium text-stone-600">Loading your dashboard…</p>
-              <p className="mt-1 text-xs text-stone-400">Fetching appointments and payments</p>
+              <p className="mt-1 text-xs text-stone-400">
+                {waitingForLocations ? "Loading locations…" : "Fetching appointments and payments"}
+              </p>
             </div>
           </div>
         ) : (

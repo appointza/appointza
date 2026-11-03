@@ -112,6 +112,22 @@ export function normalizeCatalogTab(
   return offerings[0] ?? "services";
 }
 
+/**
+ * Whether an onboarding offering key (stay / services / events / …) is enabled
+ * on the organisation catalog. Empty catalog = no filter (legacy).
+ */
+export function onboardingOfferingInCatalog(
+  offering: string,
+  catalog: CatalogOfferingKind[],
+): boolean {
+  if (catalog.length === 0) return true;
+  const key = (offering || "").toLowerCase();
+  if (key === "stay") return catalog.includes("rooms");
+  if (key === "services") return catalog.includes("services");
+  if (key === "events" || key === "classes") return catalog.includes("events");
+  return false;
+}
+
 export function catalogNavLabel(offerings: CatalogOfferingKind[]): string {
   const parts = OFFERING_ORDER.filter((kind) => kind !== "rooms" && offerings.includes(kind)).map(
     (kind) => CATALOG_OFFERING_LABELS[kind],

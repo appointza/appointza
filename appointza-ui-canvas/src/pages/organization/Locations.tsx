@@ -209,7 +209,18 @@ const LocationsScreen = ({
   const { user, isAuthenticated, userType } = useAuth();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
-  const organizationId = user?.organisationid || 1;
+  const organizationId = useMemo(() => {
+    const fromUser = Number(user?.organisationid || 0);
+    if (fromUser > 0) return fromUser;
+    try {
+      const ctx = JSON.parse(localStorage.getItem("user_context") || "{}") as {
+        organisationid?: number;
+      };
+      return Number(ctx.organisationid || 0);
+    } catch {
+      return 0;
+    }
+  }, [user?.organisationid]);
   const locationSubtab: "locations" | "organization" =
     section ?? (searchParams.get("subtab") === "organization" ? "organization" : "locations");
   const hideInnerTabs = Boolean(section);
@@ -906,6 +917,20 @@ const LocationsScreen = ({
     );
   }
 
+  if (organizationId <= 0) {
+    return (
+      <OrganizationPageShell embedded={embedded}>
+        <div className="rounded-lg border border-[#e6eaf0] bg-white px-4 py-12 text-center">
+          <MapPin className="mx-auto mb-3 h-9 w-9 text-[#d0d5dd]" />
+          <h3 className="text-[14px] font-semibold text-[#1a1a1a]">Organisation not loaded</h3>
+          <p className="mt-1 text-[13px] text-[#667085]">
+            Sign in again as the organisation owner to manage locations.
+          </p>
+        </div>
+      </OrganizationPageShell>
+    );
+  }
+
   if ((isLoading || isLocationsFetching) && locations.length === 0) {
     return (
       <OrganizationPageShell embedded={embedded}>
@@ -950,21 +975,25 @@ const LocationsScreen = ({
           onValueChange={(value) => syncLocationSubtab(value as "locations" | "organization")}
           className="w-full"
         >
-          <TabsList className={cn(
-            "grid w-full grid-cols-2 rounded-xl border border-stone-200 bg-white p-1 shadow-none",
-            hideInnerTabs && "hidden",
-          )}>
-            <TabsTrigger value="locations" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
-              <MapPin className="h-4 w-4" />
-              Locations
-            </TabsTrigger>
-            <TabsTrigger value="organization" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
-              <Building2 className="h-4 w-4" />
-              Organization
-            </TabsTrigger>
-          </TabsList>
+          {!hideInnerTabs ? (
+            <TabsList className="grid w-full grid-cols-2 rounded-xl border border-stone-200 bg-white p-1 shadow-none">
+              <TabsTrigger value="locations" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
+                <MapPin className="h-4 w-4" />
+                Locations
+              </TabsTrigger>
+              <TabsTrigger value="organization" className="flex items-center gap-2 rounded-lg data-[state=active]:bg-blue-600 data-[state=active]:text-white data-[state=active]:shadow-none">
+                <Building2 className="h-4 w-4" />
+                Organization
+              </TabsTrigger>
+            </TabsList>
+          ) : null}
 
-          <TabsContent value="locations" className="space-y-6">
+          {/* forceMount + explicit hide: survives when this screen is nested under Profile Tabs */}
+          <TabsContent
+            value="locations"
+            forceMount
+            className={cn("space-y-6", locationSubtab !== "locations" && "hidden")}
+          >
             {/* Show form when adding or editing */}
             {(showAddDialog || showEditDialog) ? (
               <Card className="rounded-2xl border-stone-200 bg-white shadow-none">
@@ -1376,7 +1405,11 @@ const LocationsScreen = ({
 
           </TabsContent>
 
-          <TabsContent value="organization" className="space-y-4">
+          <TabsContent
+            value="organization"
+            forceMount
+            className={cn("space-y-4", locationSubtab !== "organization" && "hidden")}
+          >
             {!organization ? (
               <div className="flex items-center gap-2 py-10 text-[13px] text-[#667085]">
                 <Loader2 className="h-4 w-4 animate-spin text-[#2a5af5]" />

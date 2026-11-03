@@ -81,6 +81,10 @@ namespace appointza
             services.AddScoped<OrganisationSiteService>();
             services.AddScoped<QRCoderService>();
             services.AddScoped<AdminService>();
+            services.AddScoped<SuperAdminService>();
+            services.AddScoped<NapzService>();
+            services.AddScoped<NapzCloudService>();
+            services.AddScoped<NapzGoogleProxyService>();
             services.AddScoped<AppointmentRecordService>();
             services.AddScoped<EventService>();
             services.AddScoped<EventBookingService>();
@@ -88,6 +92,14 @@ namespace appointza
             services.AddScoped<PaymentGatewayCredentialsService>();
             services.AddScoped<SecretProtector>();
             services.AddScoped<OrganisationCommunicationIntegrationService>();
+            services.AddScoped<OrganisationEmailMailService>();
+            services.AddScoped<EmailCampaignService>();
+            services.AddScoped<ReportDefinitionService>();
+            services.AddScoped<ReportCatalogSeedService>();
+            services.AddScoped<ReportDemoDataSeedService>();
+            services.AddScoped<ReportParameterOptionsService>();
+            services.AddScoped<ReportExecutionService>();
+            services.AddScoped<ReportExportService>();
             services.AddHttpClient<WhatsAppCloudApiClient>();
             services.AddSingleton<WhatsAppCrmRealtimePublisher>();
             services.AddScoped<WhatsAppOutboundGuard>();
@@ -102,6 +114,8 @@ namespace appointza
             services.AddHostedService<WhatsAppAutomationWorker>();
             services.AddSignalR();
             services.AddScoped<OrganisationCrmCatalogueService>();
+            services.AddScoped<CrmLeadDiscoveryService>();
+            services.AddScoped<OrganisationSalesProfileService>();
             services.AddScoped<ApplicationSettingsService>();
             services.AddScoped<WebsiteService>();
             services.AddScoped<EnquiryService>();

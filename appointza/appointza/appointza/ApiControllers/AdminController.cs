@@ -8,7 +8,8 @@ namespace appointza.Controllers
 {
     [Route("api/[controller]")]
     [ApiController]
-    [AdminAuthenticate]
+    // Every endpoint here is super admin only (platform-admin JWT OR users.isfactory user, verified in the DB).
+    [SuperAdminAuthenticate]
     public class AdminController : ControllerBase
     {
         private readonly ILogger<AdminController> logger;
@@ -42,6 +43,7 @@ namespace appointza.Controllers
             }
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("ChangePassword")]
         public async Task<ActionResult<ActionRes<AdminContext>>> ChangePassword(ActionReq<AdminChangePasswordReq> req)
         {
@@ -57,6 +59,7 @@ namespace appointza.Controllers
             }
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpGet("Me")]
         public ActionResult<ActionRes<AdminContext>> Me()
         {
@@ -68,24 +71,28 @@ namespace appointza.Controllers
             return Ok(new ActionRes<AdminContext> { item = admin });
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("Select")]
         public async Task<ActionResult<ActionRes<List<Admin>>>> Select(ActionReq<AdminSelectReq> req)
         {
             return Ok(new ActionRes<List<Admin>> { item = await adminService.Select(req.item) });
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("Insert")]
         public async Task<ActionResult<ActionRes<Admin>>> Insert(ActionReq<Admin> req)
         {
             return Ok(new ActionRes<Admin> { item = await adminService.Insert(req.item) });
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("Update")]
         public async Task<ActionResult<ActionRes<Admin>>> Update(ActionReq<Admin> req)
         {
             return Ok(new ActionRes<Admin> { item = await adminService.Update(req.item) });
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("Save")]
         public async Task<ActionResult<ActionRes<Admin>>> Save(ActionReq<Admin> req)
         {
@@ -95,6 +102,7 @@ namespace appointza.Controllers
             return Ok(new ActionRes<Admin> { item = item });
         }
 
+        [AdminAuthenticate] // legacy platform-admin account management only
         [HttpPost("Delete")]
         public async Task<ActionResult<ActionRes<bool>>> Delete(ActionReq<AdminDeleteReq> req)
         {
@@ -183,6 +191,12 @@ namespace appointza.Controllers
             {
                 item = await adminService.ToggleLocationVerification(req.item.LocationId, req.item.IsVerified)
             });
+        }
+
+        [HttpPost("ActivateLocation")]
+        public async Task<ActionResult<ActionRes<bool>>> ActivateLocation(ActionReq<AdminActivateLocationReq> req)
+        {
+            return Ok(new ActionRes<bool> { item = await adminService.ActivateLocation(req.item.LocationId) });
         }
 
         [HttpPost("DeleteLocation")]

@@ -150,7 +150,9 @@ const OtpVerification = () => {
                 stillPending ? BUSINESS_ONBOARDING_RETURN_PATH : from,
               )
             : from;
-        completeAuthNavigation(navigate, userTypeValue, returnTo);
+        completeAuthNavigation(navigate, userTypeValue, returnTo, {
+          isSuperAdmin: loginresp.issuperadmin === true,
+        });
       }, 100);
     } catch (error: unknown) {
       const err = error as { response?: { data?: { message?: string } }; message?: string };

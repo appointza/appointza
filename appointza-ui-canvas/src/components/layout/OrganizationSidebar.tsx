@@ -13,6 +13,9 @@ import {
   Images,
   ContactRound,
   Users,
+  Building2,
+  ShieldCheck,
+  FileBarChart2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Button } from "@/components/ui/button";
@@ -58,7 +61,9 @@ const SidebarLink = ({
         "relative flex items-center gap-2.5 rounded-md py-2 text-[13px] font-medium transition-colors",
         collapsed ? "justify-center px-2" : "px-3",
         isActive
-          ? "bg-[#eef2f7] text-[#1a1a1a]"
+          ? collapsed
+            ? "bg-[#e8f0fe] text-[#1a1a1a]"
+            : "bg-[#eef2f7] text-[#1a1a1a]"
           : "text-[#5b6572] hover:bg-[#f4f6f9] hover:text-[#1a1a1a]",
       )}
       onClick={onClick}
@@ -69,7 +74,7 @@ const SidebarLink = ({
       <Icon
         className={cn(
           "size-[18px] shrink-0",
-          isActive ? "text-[#528ff0]" : "text-[#7a8494]"
+          isActive ? "text-[#2a5af5]" : "text-[#7a8494]"
         )}
         strokeWidth={1.75}
         aria-hidden
@@ -96,7 +101,7 @@ interface OrganizationSidebarProps {
 const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSidebarProps) => {
   const isMobile = useIsMobile();
   const isCollapsed = collapsed;
-  const { user } = useAuth();
+  const { user, isSuperAdmin } = useAuth();
   const organisationId = user?.organisationid ?? 0;
   const {
     offerings,
@@ -215,6 +220,22 @@ const OrganizationSidebar = ({ collapsed, onCollapsedChange }: OrganizationSideb
             <SidebarLink to="/organization/crm" icon={ContactRound} collapsed={isCollapsed}>
               CRM
             </SidebarLink>
+          )}
+
+          <SidebarLink to="/organization/reports" icon={FileBarChart2} collapsed={isCollapsed}>
+            Reports
+          </SidebarLink>
+
+          {isSuperAdmin && (
+            <>
+              <NavSectionLabel collapsed={isCollapsed}>Super Admin</NavSectionLabel>
+              <SidebarLink to="/super-admin" icon={ShieldCheck} collapsed={isCollapsed}>
+                Super Admin console
+              </SidebarLink>
+              <SidebarLink to="/super-admin/organisations" icon={Building2} collapsed={isCollapsed}>
+                All organisations
+              </SidebarLink>
+            </>
           )}
         </div>
 

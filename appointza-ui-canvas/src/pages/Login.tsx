@@ -104,7 +104,9 @@ const Login = () => {
             ? resolveOrganizationAuthPath(userContext, from)
             : from;
 
-          completeAuthNavigation(navigate, finalUserType, landing);
+          completeAuthNavigation(navigate, finalUserType, landing, {
+            isSuperAdmin: userContext.issuperadmin === true,
+          });
         } catch (error) {
           console.error('Login: Error parsing stored user context:', error);
           // Clear invalid data
@@ -309,7 +311,9 @@ const Login = () => {
                 : from,
             )
           : from;
-      completeAuthNavigation(navigate, userTypeValue, landing);
+      completeAuthNavigation(navigate, userTypeValue, landing, {
+        isSuperAdmin: userContext.issuperadmin === true,
+      });
     }, 100);
   };
 

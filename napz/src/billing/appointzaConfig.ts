@@ -1,9 +1,4 @@
-/** Appointza host used for Razorpay CreateOrder / VerifyPayment. */
-export const APPOINTZA_API_BASE_URL = 'https://appointza.com';
+/** Appointza API host for Napz auth, EnsureUser, and Razorpay packages. */
+export const APPOINTZA_API_BASE_URL = 'http://192.168.1.20:5051';
 
-export const APPOINTZA_PAYMENT_ORG = {
-  organizationid: 1,
-  organisationlocationid: 1,
-  /** Numeric Appointza user id for Napz Premium checkout. Update if your org uses another user. */
-  userid: 1,
-} as const;
+export const NAPZ_PRODUCT_CLIENT = 'napz';
