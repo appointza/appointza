@@ -329,7 +329,19 @@ namespace appointza.Services
 
             RoomStayHistory.OverlayBoardDay(room, asOf);
 
-            if (RoomStayHistory.AnyStayCoversDay(room, asOf))
+            // Never rewrite an explicit Available (post-checkout / mark-clean) back to Reserved
+            // while a closed or stale stay window still exists — that caused Occupied badge +
+            // Reserved dropdown mismatches after reload.
+            if (stored == "available")
+            {
+                room.status = "available";
+                if (!RoomStayHistory.AnyStayCoversDay(room, asOf)
+                    && !RoomStayHistory.AnyStayOnCheckoutMorning(room, asOf))
+                {
+                    room.guest = null;
+                }
+            }
+            else if (RoomStayHistory.AnyStayCoversDay(room, asOf))
             {
                 room.status = stored is "occupied" or "checkout_pending" ? stored : "reserved";
             }
@@ -343,9 +355,11 @@ namespace appointza.Services
                 room.guest = null;
             }
 
+            // Recompute after status normalization so badge and dropdown share one truth.
+            availabilityState = RoomStayHistory.GetAvailabilityState(room, asOf);
             room.availability_state = availabilityState;
-            room.has_active_booking = hasBooking;
-            room.can_manage = hasBooking && availabilityState != "Available";
+            room.has_active_booking = RoomStayHistory.HasActiveBooking(room);
+            room.can_manage = room.has_active_booking && availabilityState != "Available";
         }
 
         public async Task<bool> UpdateStatus(OrganisationRoomStatusUpdateReq req)

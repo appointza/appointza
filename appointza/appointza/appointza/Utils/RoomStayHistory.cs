@@ -78,16 +78,21 @@ namespace appointza.Utils
             var stays = Collect(room);
             foreach (var stay in stays)
             {
+                if (stay.closed)
+                    continue;
                 if (!TryParseDate(stay.check_in, out var checkIn) || !TryParseDate(stay.check_out, out var checkOut))
                     continue;
 
                 if (CoversNight(stay, day))
                     return status == "reserved" ? "Reserved" : "Occupied";
 
+                // Checkout morning: only while the stay is still open and ops status says so.
                 if (day == checkOut && status is "checkout_pending" or "occupied")
                     return status == "checkout_pending" ? "Check-out" : "Occupied";
             }
 
+            if (stays.Any(s => !s.closed))
+                return "Available";
             if (stays.Count > 0)
                 return "Available";
 
@@ -108,19 +113,31 @@ namespace appointza.Utils
         public static bool HasActiveBooking(OrganisationRoom room) =>
             Collect(room).Any(s => !s.closed);
 
-        /// <summary>Ends the stay occupying today and marks the room available.</summary>
+        /// <summary>Ends open stays and marks the room available (ops checkout).</summary>
         public static void CompleteCheckout(OrganisationRoom room, DateOnly asOf)
         {
             var stays = Collect(room);
-            var covering = stays.FirstOrDefault(s => !s.closed && CoversNight(s, asOf))
-                ?? stays.FirstOrDefault(s =>
-                    !s.closed
-                    && TryParseDate(s.check_out, out var outDate)
-                    && outDate == asOf);
-            if (covering != null)
-                covering.closed = true;
+            // Close the stay for today; if none match the window, close every open stay
+            // so the board cannot keep showing Occupied after Checkout → Available.
+            var matched = false;
+            foreach (var stay in stays.Where(s => !s.closed))
+            {
+                var onCheckoutMorning =
+                    TryParseDate(stay.check_out, out var outDate) && outDate == asOf;
+                if (CoversNight(stay, asOf) || onCheckoutMorning)
+                {
+                    stay.closed = true;
+                    matched = true;
+                }
+            }
+            if (!matched)
+            {
+                foreach (var stay in stays.Where(s => !s.closed))
+                    stay.closed = true;
+            }
 
             room.status = "available";
+            room.guest = null;
             ApplyToRoom(room, stays, asOf);
         }
 

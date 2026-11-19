@@ -94,9 +94,15 @@ export function OrganizationCalendarRoomsView({
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {rooms.map((room) => {
+              // One source of truth: board availability_state (derived from stays + ops status).
               const state = room.availability_state || "Available";
               const isBusy = busyRoomId === room.id;
               const canManage = room.can_manage;
+              const isCheckedIn =
+                (room.status || "").toLowerCase() === "occupied" ||
+                (room.status || "").toLowerCase() === "checkout_pending" ||
+                state === "Occupied" ||
+                state === "Check-out";
               const guestName = room.guest?.name?.trim() ? roomGuestName(room) : null;
               const guestPhone = room.guest?.phone?.trim() ? roomGuestPhone(room) : null;
               const guestEmail = room.guest?.email?.trim() || "";
@@ -188,7 +194,7 @@ export function OrganizationCalendarRoomsView({
                           </Button>
                         ) : null}
                         <div className="flex gap-2">
-                          {onCheckout ? (
+                          {onCheckout && isCheckedIn ? (
                             <Button
                               type="button"
                               className={cn(org.btnPrimary, "h-9 w-full")}
@@ -198,7 +204,9 @@ export function OrganizationCalendarRoomsView({
                               Checkout — room available
                             </Button>
                           ) : null}
-                          {onMarkClean ? (
+                          {onMarkClean &&
+                          (state === "Cleaning" ||
+                            (room.status || "").toLowerCase() === "cleaning") ? (
                             <Button
                               type="button"
                               variant="outline"
