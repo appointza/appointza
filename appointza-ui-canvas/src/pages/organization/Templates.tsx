@@ -61,7 +61,12 @@ import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
-import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
+import {
+  invalidatePublicSiteCacheForLocation,
+  markPublicSiteSubdomainStale,
+} from "@/utils/publicSiteCache.util";
+import { Badge } from "@/components/ui/badge";
+import { formatAppointzaDateTime } from "@/utils/appointzaFormatters";
 
 const templatesSectionIconWrap =
   "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-50 text-blue-600";
@@ -275,16 +280,27 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
 
     const numericTemplateId = parseInt(templateId, 10) || 0;
     const currentLocation = locations.find((loc) => loc.id === locationId);
-    if (currentLocation?.templateid === numericTemplateId) {
-      return;
-    }
+    const alreadyAssigned = currentLocation?.templateid === numericTemplateId;
 
     setIsCreatingTemplate(true);
     try {
-      const success = await updateLocationTemplateId(locationId, templateId);
+      const success = alreadyAssigned
+        ? true
+        : await updateLocationTemplateId(locationId, templateId);
 
       if (success) {
         invalidatePublicSiteCacheForLocation(locationId);
+        if (currentLocation?.customurl) {
+          markPublicSiteSubdomainStale(currentLocation.customurl);
+        }
+        try {
+          localStorage.setItem(
+            `appointza:template-last-published:${locationId}`,
+            new Date().toISOString(),
+          );
+        } catch {
+          /* ignore */
+        }
         void queryClient.invalidateQueries({
           queryKey: organisationLocationsQueryKey(
             user?.organisationid || 0,
@@ -292,8 +308,10 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
           ),
         });
         toast({
-          title: "Template updated",
-          description: "This location now uses the selected template.",
+          title: "Published",
+          description: alreadyAssigned
+            ? "Public page cache refreshed for this location."
+            : "Template is live on this location’s booking page.",
         });
       } else {
         toast({
@@ -683,42 +701,91 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                 ) : null}
               </div>
             </CardHeader>
-            <CardFooter className="flex gap-2 pt-0">
-              <Button
-                variant={selectedTemplate === template.id ? "default" : "outline"}
-                className={cn(
-                  selectedTemplate === template.id ? org.btnPrimary : org.btnOutline,
-                  "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none",
-                  selectedTemplate === template.id && "border-blue-600 bg-blue-600 text-white hover:bg-blue-700",
-                )}
-                disabled={isCreatingTemplate || !selectedLocationId}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  selectAndAssignTemplate(template.id);
-                }}
-              >
-                {selectedLocationId &&
-                locations.find((loc) => loc.id === selectedLocationId)?.templateid ===
-                  Number(template.id)
-                  ? "Assigned"
-                  : selectedTemplate === template.id
-                    ? "Selected"
-                    : "Select"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className={cn(org.btnOutline, "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSelectedTemplate(template.id as TemplateType);
-                  const numericId = Number(template.id);
-                  if (numericId > 0) openTemplateBuilder("edit", numericId);
-                }}
-              >
-                <PencilLine className="mr-2 h-4 w-4 text-blue-600" />
-                Edit
-              </Button>
+            <CardFooter className="flex flex-col gap-2 pt-0">
+              {(() => {
+                const isAssigned =
+                  !!selectedLocationId &&
+                  locations.find((loc) => loc.id === selectedLocationId)?.templateid ===
+                    Number(template.id);
+                let lastPublished = "";
+                if (selectedLocationId) {
+                  try {
+                    const raw = localStorage.getItem(
+                      `appointza:template-last-published:${selectedLocationId}`,
+                    );
+                    if (raw && isAssigned) {
+                      lastPublished = formatAppointzaDateTime(raw);
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                }
+                return (
+                  <>
+                    <div className="flex w-full items-center gap-2">
+                      {isAssigned ? (
+                        <Badge
+                          variant="secondary"
+                          className="h-10 flex-1 justify-center rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800"
+                        >
+                          <CheckCircle className="mr-1.5 h-3.5 w-3.5" />
+                          Assigned
+                        </Badge>
+                      ) : (
+                        <Button
+                          variant={selectedTemplate === template.id ? "default" : "outline"}
+                          className={cn(
+                            selectedTemplate === template.id ? org.btnPrimary : org.btnOutline,
+                            "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none",
+                            selectedTemplate === template.id &&
+                              "border-blue-600 bg-blue-600 text-white hover:bg-blue-700",
+                          )}
+                          disabled={isCreatingTemplate || !selectedLocationId}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            selectAndAssignTemplate(template.id);
+                          }}
+                        >
+                          {selectedTemplate === template.id ? "Selected" : "Select"}
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className={cn(
+                          org.btnOutline,
+                          "min-h-10 flex-1 rounded-xl border-stone-200 shadow-none",
+                        )}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedTemplate(template.id as TemplateType);
+                          const numericId = Number(template.id);
+                          if (numericId > 0) openTemplateBuilder("edit", numericId);
+                        }}
+                      >
+                        <PencilLine className="mr-2 h-4 w-4 text-blue-600" />
+                        Edit
+                      </Button>
+                    </div>
+                    <Button
+                      type="button"
+                      className={cn(org.btnPrimary, "min-h-10 w-full rounded-xl")}
+                      disabled={isCreatingTemplate || !selectedLocationId}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        selectAndAssignTemplate(template.id);
+                      }}
+                    >
+                      Publish
+                    </Button>
+                    {lastPublished ? (
+                      <p className="w-full text-center text-[11px] text-stone-500">
+                        Last published: {lastPublished}
+                      </p>
+                    ) : null}
+                  </>
+                );
+              })()}
             </CardFooter>
           </Card>
           );
@@ -817,7 +884,7 @@ const OrganizationTemplates = ({ embedded = false }: { embedded?: boolean }) => 
                   Create page with AI
                 </h3>
                 <p className="text-sm text-stone-500">
-                  Copy the AI prompt, paste HTML from ChatGPT or Claude, and save. You can keep up to{" "}
+                  Describe your website, generate a live-data design, then Save &amp; Publish. You can keep up to{" "}
                   {ORG_WEBSITE_TEMPLATE_MAX_PER_ORG} templates.
                 </p>
                 </div>

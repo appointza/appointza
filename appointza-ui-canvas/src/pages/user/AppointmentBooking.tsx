@@ -351,7 +351,9 @@ const AppointmentBooking = () => {
         const paymentRequired = locRes[0].isPaymentRequired === true || locRes[0].isPaymentRequired === 'true';
         setIsPaymentRequired(paymentRequired);
         console.log('💰 Payment required (final):', paymentRequired);
-        
+        // Unblock the booking UI as soon as org/location are ready; credentials can finish after.
+        setIsLoading(false);
+
         // Check if payment gateway credentials exist and are active for the organization
         // If no records OR is_active = false, make it free booking
         if (paymentRequired && parseInt(organisationId || '0') > 0) {
@@ -1207,10 +1209,13 @@ const AppointmentBooking = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [prevImage, nextImage, locationDetails]);
 
-  // Load time slots and leave requests when date changes
+  // Debounce availability checks when the date changes quickly.
   useEffect(() => {
-    loadTimeSlots();
-    loadLeaveRequests();
+    const handle = window.setTimeout(() => {
+      void loadTimeSlots();
+      void loadLeaveRequests();
+    }, 280);
+    return () => window.clearTimeout(handle);
   }, [loadTimeSlots, loadLeaveRequests, selectedDate]);
 
   useEffect(() => {
@@ -1226,10 +1231,16 @@ const AppointmentBooking = () => {
   if (isLoading) {
     return (
       <UserLayout>
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading appointment booking...</p>
+        <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
+          <div className="h-8 w-48 animate-pulse rounded-lg bg-stone-200" />
+          <div className="h-40 animate-pulse rounded-2xl bg-stone-100" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="h-28 animate-pulse rounded-2xl bg-stone-100" />
+            <div className="h-28 animate-pulse rounded-2xl bg-stone-100" />
+          </div>
+          <div className="flex items-center gap-2 text-sm text-stone-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading appointment booking…
           </div>
         </div>
       </UserLayout>

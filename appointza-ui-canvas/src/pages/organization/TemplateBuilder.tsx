@@ -40,7 +40,10 @@ import { OnboardingPageGuide } from "@/components/onboarding/OrganizationOnboard
 import { useOrgTemplateAssets } from "@/contexts/OrgTemplateAssetsContext";
 import { ReferenceValueService } from "@/services/referencevalue.service";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
-import { invalidatePublicSiteCacheForLocation } from "@/utils/publicSiteCache.util";
+import {
+  invalidatePublicSiteCacheForLocation,
+  markPublicSiteSubdomainStale,
+} from "@/utils/publicSiteCache.util";
 import { EventService } from "@/services/event.service";
 import { OrganisationLocationService } from "@/services/organisationlocation.service";
 import { useOrganisationLocations, organisationLocationsQueryKey } from "@/hooks/useOrganisationLocations";
@@ -57,7 +60,7 @@ import { HeroBlockPalette } from "@/components/templateBuilder/HeroBlockPalette"
 import { TemplateBuilderStructurePanel } from "@/components/templateBuilder/TemplateBuilderStructurePanel";
 import { TemplateBuilderBlockEditor } from "@/components/templateBuilder/TemplateBuilderBlockEditor";
 import { ORG_TEMPLATE_ASSETS_IDENTIFIER } from "@/types/orgAssets.types";
-import type { TemplateBuilderProject } from "@/types/templateBuilder.types";
+import type { TemplateBuilderPage, TemplateBuilderProject } from "@/types/templateBuilder.types";
 import { TEMPLATE_BUILDER_CATEGORIES } from "@/utils/templateBuilder/catalog";
 import { createBlock } from "@/utils/templateBuilder/defaults";
 import { generateTemplateHtml } from "@/utils/templateBuilder/html";
@@ -463,6 +466,24 @@ function TemplateBuilderInner() {
     });
   };
 
+  const handleUseAiDesign = useCallback(
+    (page: TemplateBuilderPage) => {
+      setProject((prev) => ({
+        ...prev,
+        pages: {
+          ...prev.pages,
+          [HOME_PAGE_ID]: { ...page, id: HOME_PAGE_ID },
+        },
+      }));
+      setTemplateName(page.name || templateName || "Booking page");
+      setBuilderMode("blocks");
+      setPersistBlocks(true);
+      setShowPreview(true);
+      setSimplePane("look");
+    },
+    [templateName],
+  );
+
   const moveBlock = (index: number, direction: -1 | 1) => {
     setBlocks((prev) => {
       const next = [...prev];
@@ -627,6 +648,18 @@ function TemplateBuilderInner() {
 
       if (previewLocationId > 0) {
         invalidatePublicSiteCacheForLocation(previewLocationId);
+        const loc = locations.find((item) => item.id === previewLocationId);
+        if (loc?.customurl) {
+          markPublicSiteSubdomainStale(loc.customurl);
+        }
+        try {
+          localStorage.setItem(
+            `appointza:template-last-published:${previewLocationId}`,
+            new Date().toISOString(),
+          );
+        } catch {
+          /* ignore */
+        }
       }
 
       const locationAlreadyAssigned = locations.some(
@@ -916,9 +949,10 @@ function TemplateBuilderInner() {
         <div className="mt-3 grid grid-cols-3 gap-2">
           <TemplateVariablesCopyDialog
             triggerClassName="h-11 w-full justify-center md:h-10"
-            triggerLabel="AI prompt"
+            triggerLabel="Describe site"
             locationId={selectedLocation?.id}
             locationName={selectedLocation?.name}
+            onUseDesign={handleUseAiDesign}
           />
           <Button
             type="button"
@@ -928,9 +962,10 @@ function TemplateBuilderInner() {
               builderMode === "html" && "bg-blue-600 text-white hover:bg-blue-700",
             )}
             onClick={() => switchMode("html")}
+            title="Advanced: paste raw HTML"
           >
             <Code2 className="mr-1.5 h-4 w-4 shrink-0" />
-            HTML
+            Advanced
           </Button>
           <Button
             type="button"
@@ -1076,9 +1111,10 @@ function TemplateBuilderInner() {
                     </p>
                     <TemplateVariablesCopyDialog
                       triggerClassName="h-11 w-full justify-center"
-                      triggerLabel="Ask AI for help"
+                      triggerLabel="Describe your website"
                       locationId={selectedLocation?.id}
                       locationName={selectedLocation?.name}
+                      onUseDesign={handleUseAiDesign}
                     />
                   </div>
                   {TEMPLATE_BUILDER_CATEGORIES.map((cat) => (

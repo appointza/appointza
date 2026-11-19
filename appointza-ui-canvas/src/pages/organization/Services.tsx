@@ -529,9 +529,19 @@ const OrganizationServices = () => {
       return failServiceValidation("Offer price must be 0 or greater");
     }
 
-    // Validate duration
-    if (!service.timetaken || service.timetaken <= 0) {
-      return failServiceValidation("Please enter a valid duration in minutes");
+    // Validate duration (reject 0 / silent 1-min coercion; cap at 24h)
+    if (!service.timetaken || service.timetaken < 1) {
+      return failServiceValidation("Duration must be at least 1 minute");
+    }
+    if (service.timetaken > 1440) {
+      return failServiceValidation("Duration cannot exceed 1440 minutes (24 hours)");
+    }
+
+    if (service.prize < 0) {
+      return failServiceValidation("Price cannot be negative");
+    }
+    if (service.weekday_price < 0 || service.weekend_price < 0) {
+      return failServiceValidation("Weekday/weekend prices cannot be negative");
     }
 
     return true;

@@ -16,6 +16,19 @@ import {
   buildTemplateRooms,
   extractHospitalityFromSite,
 } from "@/utils/hospitalityTemplate.util";
+import { formatAppointzaTime } from "@/utils/appointzaFormatters";
+
+/** Number-only INR formatting — templates usually already include the ₹ prefix. */
+const formatInrAmount = (amount: unknown): string => {
+  const n = typeof amount === "string" ? Number(amount.replace(/[^\d.-]/g, "")) : Number(amount);
+  const safe = Number.isFinite(n) ? n : 0;
+  return safe.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+};
+
+const formatDisplayTime = (value: unknown): string => {
+  const formatted = formatAppointzaTime(value as string | Date | null | undefined);
+  return formatted || String(value ?? "");
+};
 
 const replaceToken = (html: string, token: string, value: string | number | null | undefined) => {
   const safeValue = value === null || value === undefined ? "" : String(value);
@@ -325,7 +338,10 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
       const serviceImageUrl = buildFileGetUrl(filesApiBaseUrl, serviceImageId);
       let serviceHtml = loopTemplate
         .replaceAll("{{Servicename}}", service?.Servicename || "")
-        .replaceAll("{{prize}}", String(getServiceStartingPrice(service as any) ?? ""))
+        .replaceAll(
+          "{{prize}}",
+          formatInrAmount(getServiceStartingPrice(service as any) ?? 0),
+        )
         .replaceAll("{{timetaken}}", String(service?.timetaken ?? ""))
         .replaceAll("{{notes}}", service?.notes || "")
         .replaceAll("{{service_id}}", String(serviceId))
@@ -354,8 +370,8 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
       loopTemplate
         .replaceAll("{{day_name}}", dayNames[timing?.day_of_week || 0] || `Day ${timing?.day_of_week || 0}`)
         .replaceAll("{{day_of_week}}", String(timing?.day_of_week ?? ""))
-        .replaceAll("{{start_time}}", String(timing?.start_time ?? ""))
-        .replaceAll("{{end_time}}", String(timing?.end_time ?? ""))
+        .replaceAll("{{start_time}}", formatDisplayTime(timing?.start_time))
+        .replaceAll("{{end_time}}", formatDisplayTime(timing?.end_time))
   );
 
   const events = (siteData as unknown as { events?: Array<Record<string, unknown>> })?.events || [];
@@ -375,7 +391,10 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
         .replaceAll("{{event_date}}", formatDateValue((evt as { event_date?: unknown }).event_date))
         .replaceAll("{{from_date}}", formatDateValue((evt as { from_date?: unknown }).from_date))
         .replaceAll("{{to_date}}", formatDateValue((evt as { to_date?: unknown }).to_date))
-        .replaceAll("{{entry_amount}}", String((evt as { entry_amount?: unknown }).entry_amount ?? ""))
+        .replaceAll(
+          "{{entry_amount}}",
+          formatInrAmount((evt as { entry_amount?: unknown }).entry_amount ?? 0),
+        )
         .replaceAll("{{remainingslot}}", String((evt as { remainingslot?: unknown }).remainingslot ?? ""))
         .replaceAll("{{description}}", String((evt as { description?: unknown }).description || ""))
         .replaceAll("{{status}}", String((evt as { status?: unknown }).status || ""))
@@ -462,7 +481,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
       .replaceAll("{{room.name}}", room.name)
       .replaceAll("{{room.type}}", room.type)
       .replaceAll("{{room.capacity}}", String(room.capacity))
-      .replaceAll("{{room.price}}", String(room.price))
+      .replaceAll("{{room.price}}", formatInrAmount(room.price))
       .replaceAll("{{room.main_photo}}", room.main_photo)
       .replaceAll("{{room.video_url}}", room.video_url)
       .replaceAll("{{room.status}}", room.status)
@@ -493,7 +512,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
       loopTemplate
         .replaceAll("{{package.id}}", pkg.id)
         .replaceAll("{{package.name}}", pkg.name)
-        .replaceAll("{{package.price}}", pkg.price)
+        .replaceAll("{{package.price}}", formatInrAmount(pkg.price))
         .replaceAll("{{package.description}}", pkg.description)
         .replaceAll("{{package.badge}}", pkg.badge)
         .replaceAll("{{package.image_url}}", pkg.image_url)
@@ -540,7 +559,7 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
     (loopTemplate, guest) =>
       loopTemplate
         .replaceAll("{{guest.name}}", guest.name)
-        .replaceAll("{{guest.price}}", guest.price)
+        .replaceAll("{{guest.price}}", formatInrAmount(guest.price))
         .replaceAll("{{guest.description}}", guest.description)
         .replaceAll("{{guest.category}}", guest.category)
         .replaceAll("{{guest.icon}}", guest.icon),
@@ -599,6 +618,11 @@ export const renderSiteTemplateHtml = (templateHtml: string, siteData: SiteDetai
   html = html.replace(/\{\{#[^}]+\}\}/g, "");
   html = html.replace(/\{\{\/[^}]+\}\}/g, "");
   html = html.replace(/\{\{[^}]+\}\}/g, "");
+
+  // Strip AI/JSX leftovers that sometimes leak into Contact/Hours (e.g. `$136" />`, stray `" "`).
+  html = html.replace(/\$\d+"\s*\/>/g, "");
+  html = html.replace(/\s+"\s*"\s*/g, " ");
+  html = html.replace(/<(?:MapPin|Clock|Phone|Mail|Calendar|Users)[^>]*\/?>/gi, "");
 
   // Legacy templates may store absolute booking URLs — keep navigation on current subdomain.
   html = html.replace(

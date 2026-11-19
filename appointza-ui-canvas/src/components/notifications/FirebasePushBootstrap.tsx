@@ -68,8 +68,18 @@ const PushNotificationPrompt = () => {
     return null;
   }
 
+  const location = useLocation();
+  const path = location.pathname || "";
+  // Align with fixed sidebar on dashboard shells so the banner is not clipped underneath.
+  const underSidebar =
+    path.startsWith("/user/") || path.startsWith("/organization/");
+
   return (
-    <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 flex items-center justify-between gap-3">
+    <div
+      className={`w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 flex items-center justify-between gap-3 ${
+        underSidebar ? "lg:pl-[calc(16rem+1rem)]" : ""
+      }`}
+    >
       <span className="flex-1">
         Enable notifications to get appointment updates.
         {permission === "denied" && (

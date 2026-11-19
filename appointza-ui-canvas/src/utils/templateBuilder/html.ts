@@ -330,7 +330,7 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
         <div class="appointza-package-body">
           <span class="appointza-package-badge">{{package.badge}}</span>
           <h3>{{package.name}}</h3>
-          <p class="appointza-package-price">{{package.price}}</p>
+          <p class="appointza-package-price">₹{{package.price}}</p>
           <p class="appointza-package-desc">{{package.description}}</p>
           <p class="appointza-package-meta">{{package.minimum_nights}} nights min · Up to {{package.max_guests}} guests</p>
           <p class="appointza-package-includes">{{package.includes}}</p>
@@ -398,7 +398,7 @@ function generateAppointzaBlockHtml(block: TemplateBuilderBlock): string {
       <article class="appointza-guest-service-card">
         <span class="appointza-guest-service-icon">{{guest.icon}}</span>
         <h3>{{guest.name}}</h3>
-        <p class="appointza-guest-service-price">{{guest.price}}</p>
+        <p class="appointza-guest-service-price">₹{{guest.price}}</p>
         <p class="appointza-guest-service-category">{{guest.category}}</p>
         <p>{{guest.description}}</p>
       </article>
