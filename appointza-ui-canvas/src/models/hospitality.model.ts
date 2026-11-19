@@ -163,11 +163,42 @@ export class RoomStayRecord {
   check_in: string = "";
   check_out: string = "";
   nights: number = 0;
+  persons: number = 0;
   guest?: RoomGuestData | null;
   payment?: RoomPaymentData | null;
   package_ids: string[] = [];
+  status: string = "reserved";
+  cancel_reason: string = "";
+  modify_request_note: string = "";
+  requested_check_in: string = "";
+  requested_check_out: string = "";
   closed: boolean = false;
 }
+
+export class OrganisationRoomStayActionReq {
+  organisation_id: number = 0;
+  room_id: number = 0;
+  booking_id: string = "";
+  booking_guid: string = "";
+  action: string = "";
+  cancel_reason?: string;
+  check_in?: string;
+  check_out?: string;
+  guest_name?: string;
+  guest_phone?: string;
+  guest_email?: string;
+  persons?: number;
+}
+
+export const BOOKING_STAY_STATUSES = [
+  { value: "reserved", label: "Reserved" },
+  { value: "confirmed", label: "Confirmed" },
+  { value: "checked_in", label: "Checked in" },
+  { value: "checked_out", label: "Checked out" },
+  { value: "cancelled", label: "Cancelled" },
+  { value: "no_show", label: "No-show" },
+  { value: "modification_requested", label: "Modification requested" },
+] as const;
 
 export class RoomBookingData {
   booking_id: string = "";

@@ -110,6 +110,15 @@ export function OrganizationCalendarRoomsView({
               const checkOutLabel = formatStayDate(room.booking?.check_out);
               const nights = room.booking?.nights ?? 0;
               const bookingRef = room.booking?.booking_id?.trim() || "";
+              const selectedKey = format(selectedDate, "yyyy-MM-dd");
+              const isCheckoutDay =
+                Boolean(room.booking?.check_out?.trim()) &&
+                room.booking!.check_out!.slice(0, 10) === selectedKey;
+              const checkoutTimeHint = isCheckoutDay
+                ? state === "Check-out" || state === "Occupied"
+                  ? "Checking out today"
+                  : null
+                : null;
 
               return (
                 <div
@@ -130,7 +139,11 @@ export function OrganizationCalendarRoomsView({
                     </Badge>
                   </div>
 
-                  {canManage ? (
+                  {checkoutTimeHint ? (
+                    <p className="mt-2 text-[12px] font-medium text-[#b54708]">{checkoutTimeHint}</p>
+                  ) : null}
+
+                  {canManage || (isCheckoutDay && guestName) ? (
                     <div className="mt-3 space-y-1.5 rounded-lg border border-[#eef1f5] bg-[#f8fafc] px-3 py-2.5">
                       <p className="text-[13px] font-semibold text-[#1a1a1a]">
                         {guestName || "Guest details"}

@@ -45,6 +45,11 @@ type RoomBookingDetailsDialogProps = {
   onStatusChange?: (room: OrganisationRoom, status: string) => void;
   onCheckout?: (room: OrganisationRoom) => void;
   onMarkClean?: (room: OrganisationRoom) => void;
+  onStayAction?: (
+    room: OrganisationRoom,
+    action: string,
+    extra?: { cancel_reason?: string; check_in?: string; check_out?: string; guest_name?: string; guest_phone?: string; persons?: number },
+  ) => void;
 };
 
 function formatInr(amount: number) {
@@ -72,10 +77,25 @@ export default function RoomBookingDetailsDialog({
   onStatusChange,
   onCheckout,
   onMarkClean,
+  onStayAction,
 }: RoomBookingDetailsDialogProps) {
   const isMobile = useIsMobile();
   const [events, setEvents] = useState<OrganisationRoomStatusEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
+  const [editCheckIn, setEditCheckIn] = useState("");
+  const [editCheckOut, setEditCheckOut] = useState("");
+  const [editGuestName, setEditGuestName] = useState("");
+  const [editGuestPhone, setEditGuestPhone] = useState("");
+
+  useEffect(() => {
+    if (!open || !room) return;
+    setEditCheckIn(room.booking?.check_in || "");
+    setEditCheckOut(room.booking?.check_out || "");
+    setEditGuestName(room.guest?.name || "");
+    setEditGuestPhone(room.guest?.phone || "");
+    setCancelReason("");
+  }, [open, room]);
 
   useEffect(() => {
     if (!open || !room?.id || !room.organisation_id) {
@@ -375,9 +395,120 @@ export default function RoomBookingDetailsDialog({
             </section>
           ) : null}
 
+          {onStayAction && room.booking?.booking_id ? (
+            <section className="space-y-3 border-t border-stone-100 pt-4">
+              <h3 className="font-semibold text-appointza-navy">Booking actions</h3>
+              <p className="text-xs text-stone-500">
+                These update the stay status. Housekeeping status stays separate below.
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-2xl"
+                  disabled={busy}
+                  onClick={() => onStayAction(room, "confirm")}
+                >
+                  Confirm
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-2xl"
+                  disabled={busy}
+                  onClick={() => onStayAction(room, "check_in")}
+                >
+                  Check-in
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-2xl"
+                  disabled={busy}
+                  onClick={() => onStayAction(room, "check_out")}
+                >
+                  Check-out
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-10 rounded-2xl"
+                  disabled={busy}
+                  onClick={() => onStayAction(room, "no_show")}
+                >
+                  No-show
+                </Button>
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs text-stone-500">Cancel reason</label>
+                <input
+                  className="h-10 w-full rounded-xl border border-stone-200 px-3 text-sm"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  placeholder="Optional reason"
+                />
+                <Button
+                  type="button"
+                  variant="destructive"
+                  className="h-10 w-full rounded-2xl"
+                  disabled={busy}
+                  onClick={() =>
+                    onStayAction(room, "cancel", { cancel_reason: cancelReason.trim() || undefined })
+                  }
+                >
+                  Cancel booking
+                </Button>
+              </div>
+              <div className="space-y-2 rounded-xl border border-stone-100 bg-stone-50/80 p-3">
+                <p className="text-xs font-medium text-stone-600">Edit dates / guest</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-stone-200 px-3 text-sm"
+                    value={editCheckIn}
+                    onChange={(e) => setEditCheckIn(e.target.value)}
+                  />
+                  <input
+                    type="date"
+                    className="h-10 rounded-xl border border-stone-200 px-3 text-sm"
+                    value={editCheckOut}
+                    onChange={(e) => setEditCheckOut(e.target.value)}
+                  />
+                  <input
+                    className="h-10 rounded-xl border border-stone-200 px-3 text-sm sm:col-span-2"
+                    value={editGuestName}
+                    onChange={(e) => setEditGuestName(e.target.value)}
+                    placeholder="Guest name"
+                  />
+                  <input
+                    className="h-10 rounded-xl border border-stone-200 px-3 text-sm sm:col-span-2"
+                    value={editGuestPhone}
+                    onChange={(e) => setEditGuestPhone(e.target.value)}
+                    placeholder="Guest phone"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  className="h-10 w-full rounded-2xl"
+                  disabled={busy}
+                  onClick={() =>
+                    onStayAction(room, "edit", {
+                      check_in: editCheckIn,
+                      check_out: editCheckOut,
+                      guest_name: editGuestName,
+                      guest_phone: editGuestPhone,
+                    })
+                  }
+                >
+                  Save booking edits
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
           {canManage ? (
             <section className="space-y-3 border-t border-stone-100 pt-4">
-              <h3 className="font-semibold text-appointza-navy">Manage room</h3>
+              <h3 className="font-semibold text-appointza-navy">Housekeeping</h3>
               {onStatusChange ? (
                 <Select
                   value={room.status || "available"}

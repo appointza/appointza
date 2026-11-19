@@ -49,7 +49,7 @@ import {
   getRoomBookingStartDate,
   roomBookingLabel,
   roomBookingReference,
-  roomHasActiveBooking,
+  expandClientRoomStays,
   roomPaymentSummary,
   roomStatusDisplay,
 } from "@/utils/roomBooking.util";
@@ -314,7 +314,7 @@ const ClientManagement = () => {
 
   const loadRoomStaysForClient = useCallback(
     async (client: ClientInfoRes): Promise<OrganisationRoom[]> => {
-      if (!client.is_room_customer) return [];
+      if (!client.is_room_customer && !(client.mobile || "").trim()) return [];
       const organisationlocationid = globalLocationId
         ? Number(globalLocationId)
         : (user?.locationid || 0);
@@ -327,13 +327,10 @@ const ClientManagement = () => {
           status: "",
         })) || [];
 
-      const phoneDigits = (client.mobile || "").replace(/\D/g, "");
-      return rooms.filter((room) => {
-        if (!roomHasActiveBooking(room)) return false;
-        if (client.room_id && room.id === client.room_id) return true;
-        const guestPhone = (room.guest?.phone || "").replace(/\D/g, "");
-        if (phoneDigits.length >= 6 && guestPhone.length >= 6 && guestPhone === phoneDigits) return true;
-        return false;
+      // Include closed history stays (e.g. BK-… after checkout), not only the active header.
+      return expandClientRoomStays(rooms, {
+        mobile: client.mobile,
+        room_id: client.room_id,
       });
     },
     [globalLocationId, hospitalityService, user?.locationid, user?.organisationid],

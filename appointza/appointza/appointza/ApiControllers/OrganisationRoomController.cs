@@ -114,6 +114,24 @@ namespace appointza.Controllers
             }
         }
 
+        [HttpPost("UpdateStayAction")]
+        public async Task<ActionResult<ActionRes<bool>>> UpdateStayAction(ActionReq<OrganisationRoomStayActionReq>? req)
+        {
+            if (req?.item == null || req.item.room_id <= 0)
+                return BadRequest(new ActionRes<bool> { error = "room_id is required." });
+
+            try
+            {
+                var ok = await organisationRoomService.UpdateStayAction(req.item);
+                return Ok(new ActionRes<bool> { item = ok });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "UpdateStayAction failed");
+                return BadRequest(new ActionRes<bool> { error = ex.Message });
+            }
+        }
+
         [HttpPost("Checkout")]
         public async Task<ActionResult<ActionRes<bool>>> Checkout(ActionReq<OrganisationRoomIdReq>? req)
         {

@@ -23,7 +23,7 @@ namespace appointza.Utils
         public static void ApplyToRoom(OrganisationRoom room, List<RoomStayRecord> stays, DateOnly displayDay)
         {
             stays = stays.Where(HasDates).Select(Clone).ToList();
-            var open = stays.Where(s => !s.closed).ToList();
+            var open = stays.Where(IsOccupyingStay).ToList();
             var display = PickDisplayStay(open, displayDay) ?? open.LastOrDefault();
 
             room.booking ??= new RoomBookingData();
@@ -52,18 +52,27 @@ namespace appointza.Utils
             var stays = Collect(room);
             room.booking ??= new RoomBookingData();
             room.booking.stays = stays;
-            var covering = stays.FirstOrDefault(s => CoversNight(s, asOf));
+            // Prefer an overnight covering stay; on turnover day also surface the departing stay.
+            var covering = stays.FirstOrDefault(s => CoversNight(s, asOf))
+                ?? stays.FirstOrDefault(s => IsCheckoutMorning(s, asOf));
             if (covering == null)
+            {
+                // Do not keep a sticky guest from another date on the board.
+                room.booking.booking_id = "";
+                room.booking.check_in = "";
+                room.booking.check_out = "";
+                room.booking.nights = 0;
+                room.guest = null;
+                room.payment = null;
                 return;
+            }
 
             room.booking.booking_id = covering.booking_id;
             room.booking.check_in = covering.check_in;
             room.booking.check_out = covering.check_out;
             room.booking.nights = covering.nights;
-            if (covering.guest != null)
-                room.guest = CloneGuest(covering.guest);
-            if (covering.payment != null)
-                room.payment = ClonePayment(covering.payment);
+            room.guest = covering.guest == null ? null : CloneGuest(covering.guest);
+            room.payment = covering.payment == null ? null : ClonePayment(covering.payment);
         }
 
         /// <summary>Calendar/board label for a day. Uses stored operational status plus stay windows.</summary>
@@ -80,15 +89,15 @@ namespace appointza.Utils
             {
                 if (stay.closed)
                     continue;
-                if (!TryParseDate(stay.check_in, out var checkIn) || !TryParseDate(stay.check_out, out var checkOut))
+                if (!TryParseDate(stay.check_in, out _) || !TryParseDate(stay.check_out, out var checkOut))
                     continue;
 
                 if (CoversNight(stay, day))
                     return status == "reserved" ? "Reserved" : "Occupied";
 
-                // Checkout morning: only while the stay is still open and ops status says so.
-                if (day == checkOut && status is "checkout_pending" or "occupied")
-                    return status == "checkout_pending" ? "Check-out" : "Occupied";
+                // Checkout morning: show departing stay so turnover days are visible.
+                if (day == checkOut)
+                    return "Check-out";
             }
 
             if (stays.Any(s => !s.closed))
@@ -111,7 +120,7 @@ namespace appointza.Utils
         }
 
         public static bool HasActiveBooking(OrganisationRoom room) =>
-            Collect(room).Any(s => !s.closed);
+            Collect(room).Any(IsOccupyingStay);
 
         /// <summary>Ends open stays and marks the room available (ops checkout).</summary>
         public static void CompleteCheckout(OrganisationRoom room, DateOnly asOf)
@@ -120,20 +129,33 @@ namespace appointza.Utils
             // Close the stay for today; if none match the window, close every open stay
             // so the board cannot keep showing Occupied after Checkout → Available.
             var matched = false;
-            foreach (var stay in stays.Where(s => !s.closed))
+            foreach (var stay in stays.Where(IsOccupyingStay))
             {
                 var onCheckoutMorning =
                     TryParseDate(stay.check_out, out var outDate) && outDate == asOf;
                 if (CoversNight(stay, asOf) || onCheckoutMorning)
                 {
                     stay.closed = true;
+                    stay.status = "checked_out";
                     matched = true;
                 }
             }
             if (!matched)
             {
-                foreach (var stay in stays.Where(s => !s.closed))
+                foreach (var stay in stays.Where(IsOccupyingStay))
+                {
                     stay.closed = true;
+                    if (string.IsNullOrWhiteSpace(stay.status)
+                        || stay.status is "reserved" or "confirmed" or "checked_in" or "modification_requested")
+                        stay.status = "checked_out";
+                }
+            }
+            else
+            {
+                foreach (var stay in stays.Where(s => s.closed
+                             && (string.IsNullOrWhiteSpace(s.status)
+                                 || s.status is "reserved" or "confirmed" or "checked_in" or "modification_requested")))
+                    stay.status = "checked_out";
             }
 
             room.status = "available";
@@ -158,10 +180,12 @@ namespace appointza.Utils
             Collect(room).Any(s => CoversNight(s, day));
 
         public static bool AnyStayOnCheckoutMorning(OrganisationRoom room, DateOnly day) =>
-            Collect(room).Any(s =>
-                !s.closed
-                && TryParseDate(s.check_out, out var outDate)
-                && day == outDate);
+            Collect(room).Any(s => IsCheckoutMorning(s, day));
+
+        static bool IsCheckoutMorning(RoomStayRecord stay, DateOnly day) =>
+            IsOccupyingStay(stay)
+            && TryParseDate(stay.check_out, out var outDate)
+            && day == outDate;
 
         public static bool HasAnyStay(OrganisationRoom room) => Collect(room).Count > 0;
 
@@ -177,7 +201,7 @@ namespace appointza.Utils
 
         public static bool OverlapsAnyStay(OrganisationRoom room, DateOnly requestStart, DateOnly requestEnd) =>
             Collect(room).Any(s =>
-                !s.closed &&
+                IsOccupyingStay(s) &&
                 TryParseDate(s.check_in, out var inDate) &&
                 TryParseDate(s.check_out, out var outDate) &&
                 RangesOverlap(requestStart, requestEnd, inDate, outDate));
@@ -236,13 +260,22 @@ namespace appointza.Utils
 
         static bool CoversNight(RoomStayRecord stay, DateOnly day)
         {
-            if (stay.closed)
+            if (!IsOccupyingStay(stay))
                 return false;
             if (!TryParseDate(stay.check_in, out var checkIn) || !TryParseDate(stay.check_out, out var checkOut))
                 return false;
             if (checkOut <= checkIn)
                 return day == checkIn;
             return day >= checkIn && day < checkOut;
+        }
+
+        /// <summary>Open stays that still block inventory (not cancelled / checked out / no-show).</summary>
+        public static bool IsOccupyingStay(RoomStayRecord stay)
+        {
+            if (stay.closed)
+                return false;
+            var status = (stay.status ?? "").Trim().ToLowerInvariant();
+            return status is not ("cancelled" or "no_show" or "checked_out");
         }
 
         static bool HasHeaderStay(OrganisationRoom room) =>
@@ -270,10 +303,16 @@ namespace appointza.Utils
             check_in = stay.check_in,
             check_out = stay.check_out,
             nights = stay.nights,
+            persons = stay.persons,
             guest = stay.guest == null ? null : CloneGuest(stay.guest),
             payment = stay.payment == null ? null : ClonePayment(stay.payment),
             package_ids = stay.package_ids?.ToList() ?? [],
             user_id = stay.user_id,
+            status = string.IsNullOrWhiteSpace(stay.status) ? (stay.closed ? "checked_out" : "reserved") : stay.status,
+            cancel_reason = stay.cancel_reason ?? "",
+            modify_request_note = stay.modify_request_note ?? "",
+            requested_check_in = stay.requested_check_in ?? "",
+            requested_check_out = stay.requested_check_out ?? "",
             closed = stay.closed,
         };
 

@@ -612,6 +612,38 @@ const OrganizationBookings = () => {
     );
   };
 
+  const handleStayAction = (
+    room: OrganisationRoom,
+    action: string,
+    extra?: {
+      cancel_reason?: string;
+      check_in?: string;
+      check_out?: string;
+      guest_name?: string;
+      guest_phone?: string;
+      persons?: number;
+    },
+  ) => {
+    void runRoomAction(
+      room,
+      () =>
+        hospitalityService.updateStayAction({
+          organisation_id: organizationId,
+          room_id: room.id,
+          booking_id: room.booking?.booking_id || "",
+          booking_guid: "",
+          action,
+          cancel_reason: extra?.cancel_reason,
+          check_in: extra?.check_in,
+          check_out: extra?.check_out,
+          guest_name: extra?.guest_name,
+          guest_phone: extra?.guest_phone,
+          persons: extra?.persons,
+        }),
+      `Booking ${action.replaceAll("_", " ")} saved.`,
+    );
+  };
+
   const selectedDayBookings = appointments;
 
   const calendarControls = (
@@ -884,6 +916,7 @@ const OrganizationBookings = () => {
           onStatusChange={handleRoomStatusChange}
           onCheckout={handleRoomCheckout}
           onMarkClean={handleRoomMarkClean}
+          onStayAction={handleStayAction}
         />
       ) : null}    </OrganizationPageShell>
   );

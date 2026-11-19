@@ -263,13 +263,40 @@ namespace appointza.Models.Hospitality
         public string check_in { get; set; } = "";
         public string check_out { get; set; } = "";
         public int nights { get; set; }
+        public int persons { get; set; }
         public RoomGuestData? guest { get; set; }
         public RoomPaymentData? payment { get; set; }
         public List<string> package_ids { get; set; } = [];
         /// <summary>Logged-in Appointza user who created the stay, when known.</summary>
         public long user_id { get; set; }
-        /// <summary>True after checkout. Stay is kept for history and no longer occupies the room.</summary>
+        /// <summary>
+        /// Booking lifecycle (separate from room housekeeping status):
+        /// reserved, confirmed, checked_in, checked_out, cancelled, no_show, modification_requested.
+        /// </summary>
+        public string status { get; set; } = "reserved";
+        public string cancel_reason { get; set; } = "";
+        public string modify_request_note { get; set; } = "";
+        public string requested_check_in { get; set; } = "";
+        public string requested_check_out { get; set; } = "";
+        /// <summary>True after checkout/cancel/no-show. Stay is kept for history and no longer occupies the room.</summary>
         public bool closed { get; set; }
+    }
+
+    public class OrganisationRoomStayActionReq
+    {
+        public long organisation_id { get; set; }
+        public long room_id { get; set; }
+        public string booking_id { get; set; } = "";
+        public string booking_guid { get; set; } = "";
+        /// <summary>confirm | check_in | check_out | cancel | no_show | edit</summary>
+        public string action { get; set; } = "";
+        public string? cancel_reason { get; set; }
+        public string? check_in { get; set; }
+        public string? check_out { get; set; }
+        public string? guest_name { get; set; }
+        public string? guest_phone { get; set; }
+        public string? guest_email { get; set; }
+        public int? persons { get; set; }
     }
 
     public class RoomPaymentData

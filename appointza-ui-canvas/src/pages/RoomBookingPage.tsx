@@ -118,6 +118,9 @@ export default function RoomBookingPage() {
     total?: number;
     checkIn?: string;
     checkOut?: string;
+    roomLabel?: string;
+    persons?: number;
+    paymentPolicy?: string;
   } | null>(null);
 
   const scopeReady = parsed.organisationId > 0 && parsed.organisationLocationId > 0;
@@ -148,6 +151,8 @@ export default function RoomBookingPage() {
 
   const datesReady = useMemo(() => {
     if (!checkIn || !checkOut) return false;
+    // Overnight: date-only readiness (policy times applied later). Hourly: include times.
+    if (checkOut > checkIn) return true;
     const start = new Date(`${checkIn}T${checkInTime || "14:00"}`);
     const end = new Date(`${checkOut}T${checkOutTime || "11:00"}`);
     return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start;
@@ -194,6 +199,22 @@ export default function RoomBookingPage() {
       }),
   });
 
+  const bootstrapOrg = useMemo(() => {
+    const page = pickRecord(bootstrapData);
+    return pickRecord(page.organisation);
+  }, [bootstrapData]);
+  const isHourlyBooking =
+    pickStr(bootstrapOrg, "booking_type", "bookingType").toLowerCase() === "hourly";
+  const policyCheckInTime = normalizeTime(
+    pickStr(bootstrapOrg, "check_in_time", "checkInTime"),
+    "14:00",
+  );
+  const policyCheckOutTime = normalizeTime(
+    pickStr(bootstrapOrg, "check_out_time", "checkOutTime"),
+    "11:00",
+  );
+  const paymentPolicy = pickStr(bootstrapOrg, "payment_policy", "paymentPolicy");
+
   // Rooms for the selected stay window only.
   const {
     data: availabilityData,
@@ -206,8 +227,9 @@ export default function RoomBookingPage() {
       parsed.organisationLocationId,
       checkIn,
       checkOut,
-      checkInTime,
-      checkOutTime,
+      // Only bind times into availability when hourly — avoids remount/mangling on keystrokes.
+      isHourlyBooking ? checkInTime : "policy",
+      isHourlyBooking ? checkOutTime : "policy",
     ],
     enabled: scopeReady && datesReady,
     queryFn: () =>
@@ -218,8 +240,8 @@ export default function RoomBookingPage() {
         packageId: parsed.packageId || undefined,
         checkIn,
         checkOut,
-        checkInTime,
-        checkOutTime,
+        checkInTime: isHourlyBooking ? checkInTime : policyCheckInTime,
+        checkOutTime: isHourlyBooking ? checkOutTime : policyCheckOutTime,
       }),
   });
 
@@ -228,9 +250,6 @@ export default function RoomBookingPage() {
     [availabilityData, bootstrapData],
   );
   const organisation = useMemo(() => pickRecord(page.organisation), [page.organisation]);
-  const isHourlyBooking = pickStr(organisation, "booking_type", "bookingType").toLowerCase() === "hourly";
-  const policyCheckInTime = normalizeTime(pickStr(organisation, "check_in_time", "checkInTime"), "14:00");
-  const policyCheckOutTime = normalizeTime(pickStr(organisation, "check_out_time", "checkOutTime"), "11:00");
 
   const preferredPackage = useMemo(() => {
     if (!preferredPackageId) return null;
@@ -431,11 +450,19 @@ export default function RoomBookingPage() {
 
       if (!result) throw new Error("Booking failed.");
 
+      const roomLabel = selectedRoom
+        ? `Room ${selectedRoom.room_number}${selectedRoom.room_name ? ` — ${selectedRoom.room_name}` : ""}`
+        : result.room_name
+          ? `Room ${result.room_number} — ${result.room_name}`
+          : `Room ${result.room_number}`;
       setConfirmed({
         bookingCode: result.booking_code,
         total: result.quote?.total,
         checkIn: result.check_in,
         checkOut: result.check_out,
+        roomLabel,
+        persons: values.persons,
+        paymentPolicy: paymentPolicy || undefined,
       });
       toast({
         title: "Booking confirmed",
@@ -471,6 +498,17 @@ export default function RoomBookingPage() {
   }
 
   if (confirmed) {
+    const formatConfirmDate = (iso?: string) => {
+      if (!iso) return "";
+      const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString("en-IN", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    };
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
         <Card className="w-full max-w-lg border-emerald-200">
@@ -481,10 +519,15 @@ export default function RoomBookingPage() {
             <p>
               Reference: <span className="font-semibold">{confirmed.bookingCode}</span>
             </p>
+            {confirmed.roomLabel ? <p>{confirmed.roomLabel}</p> : null}
             {confirmed.checkIn && confirmed.checkOut ? (
               <p>
-                Stay: {confirmed.checkIn} → {confirmed.checkOut}
+                Stay: {formatConfirmDate(confirmed.checkIn)} → {formatConfirmDate(confirmed.checkOut)}
               </p>
+            ) : null}
+            {confirmed.persons ? <p>Guests: {confirmed.persons}</p> : null}
+            {confirmed.paymentPolicy ? (
+              <p className="text-stone-600">Payment: {confirmed.paymentPolicy}</p>
             ) : null}
             {confirmed.total != null ? <p className="font-medium">{formatInr(confirmed.total)}</p> : null}
             <Button asChild variant="outline" className="mt-2">
@@ -572,8 +615,13 @@ export default function RoomBookingPage() {
                     </p>
                   ) : preferredRoomId ? (
                     <p className="text-sm text-stone-500">
-                      Preferred room <strong>{preferredRoomId}</strong> will be selected if it’s free
-                      for your dates.
+                      Preferred room{" "}
+                      <strong>
+                        {selectedRoom && selectedRoom.id === preferredRoomId
+                          ? `Room ${selectedRoom.room_number}${selectedRoom.room_name ? ` — ${selectedRoom.room_name}` : ""}`
+                          : preferredRoomId.replace(/^room-/i, "Room ")}
+                      </strong>{" "}
+                      will be selected if it’s free for your dates.
                     </p>
                   ) : (
                     <p className="text-sm text-stone-500">
@@ -593,16 +641,30 @@ export default function RoomBookingPage() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label>Check-in time</Label>
-                      <Input type="time" {...form.register("checkInTime")} />
+                  {isHourlyBooking ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Start time</Label>
+                        <Input
+                          type="time"
+                          value={checkInTime}
+                          onChange={(e) => form.setValue("checkInTime", e.target.value, { shouldDirty: true })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>End time</Label>
+                        <Input
+                          type="time"
+                          value={checkOutTime}
+                          onChange={(e) => form.setValue("checkOutTime", e.target.value, { shouldDirty: true })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Check-out time</Label>
-                      <Input type="time" {...form.register("checkOutTime")} />
-                    </div>
-                  </div>
+                  ) : (
+                    <p className="rounded-lg border border-stone-100 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+                      Property times: check-in {policyCheckInTime} · check-out {policyCheckOutTime}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -626,13 +688,17 @@ export default function RoomBookingPage() {
                       <>
                         {preferredUnavailable ? (
                           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                            Room <strong>{preferredRoomId}</strong> is not free for these dates. Pick
-                            another available room below.
+                            Your preferred room is not free for these dates. Pick another available
+                            room below.
                           </p>
-                        ) : preferredRoomId && roomId === preferredRoomId ? (
+                        ) : preferredRoomId && roomId === preferredRoomId && selectedRoom ? (
                           <p className="text-sm text-stone-500">
-                            Preferred room <strong>{preferredRoomId}</strong> is available for your
-                            dates.
+                            Preferred room{" "}
+                            <strong>
+                              Room {selectedRoom.room_number}
+                              {selectedRoom.room_name ? ` — ${selectedRoom.room_name}` : ""}
+                            </strong>{" "}
+                            is available for your dates.
                           </p>
                         ) : null}
 
