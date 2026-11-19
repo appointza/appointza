@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
 import { loadAppointmentTaskValues, parseDataTypeFromNotes } from "@/utils/appointmentTaskValues.util";
 import { ReferenceTypeService } from "@/services/referencetype.service";
+import { getAppointmentStatusLabel } from "@/utils/appointmentStatus.util";
 
 const compactCardHeader = "space-y-0.5 p-4 pb-2";
 const compactCardContent = "space-y-3 p-4 pt-0";
@@ -477,7 +478,7 @@ const AppointmentRecordPage = () => {
             </div>
             <div>
               <p className="text-xs text-stone-500">Status</p>
-              <Badge className="mt-0.5">{appointment.statuscode || "N/A"}</Badge>
+              <Badge className="mt-0.5">{getAppointmentStatusLabel(appointment.statuscode)}</Badge>
             </div>
           </div>
         ) : null}

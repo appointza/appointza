@@ -47,6 +47,7 @@ import OrganizationCalendarDayPanel, {
   TimingSlot,
 } from "@/pages/organization/OrganizationCalendarDayPanel";
 import {
+  formatAppointmentTime,
   getAppointmentDayNumber,
   sendAppointmentDateToApi,
   toDateKey,
@@ -801,6 +802,16 @@ const OrganizationBookings = () => {
         onViewDetails={handleViewDetails}
         onManageRecord={handleManageRecord}
         onStatusChange={handleStatusChange}
+        onSlotClick={(slot) => {
+          const date = format(selectedDate, "yyyy-MM-dd");
+          const from =
+            typeof slot.fromtime === "string"
+              ? slot.fromtime
+              : formatAppointmentTime(slot.fromtime);
+          navigate(
+            `/organization/clients/on-spot-registration?date=${encodeURIComponent(date)}&from=${encodeURIComponent(from || "")}`,
+          );
+        }}
       />
     );
 

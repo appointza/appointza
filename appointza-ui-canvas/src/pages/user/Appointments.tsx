@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ import {
   CreditCard,
   Trash2,
   MapPin,
+  CalendarClock,
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
@@ -23,6 +25,12 @@ import { cn } from "@/lib/utils";
 import { AppoinmentService } from "@/services/appoinment.service";
 import { BookedAppoinmentRes, UpdateStatusReq, UpdatePaymentReq } from "@/models/appoinment.model";
 import { useBookedAppointments } from "@/hooks/useBookedAppointments";
+import {
+  getAppointmentStatusPresentation,
+  isPastOrCancelledAppointmentStatus,
+  isUpcomingAppointmentStatus,
+  normalizeAppointmentStatusCode,
+} from "@/utils/appointmentStatus.util";
 
 /** Shared shell — soft elevation, warm hover, top accent (matches Appointza / Explore tone). */
 const appointmentCardClassName =
@@ -31,6 +39,7 @@ const appointmentCardClassName =
 const UserAppointments = () => {
   const { isAuthenticated, user } = useAuth();
   const { toast } = useToast();
+  const navigate = useNavigate();
 
   // API services
   const appointmentService = useMemo(() => new AppoinmentService(), []);
@@ -75,42 +84,32 @@ const UserAppointments = () => {
     const upcoming = response.filter((appointment) => {
       const appointmentDate = new Date(appointment.appoinmentdate);
       appointmentDate.setHours(0, 0, 0, 0);
-      return appointmentDate >= now;
+      return appointmentDate >= now && isUpcomingAppointmentStatus(appointment.statuscode);
     });
 
     const previous = response.filter((appointment) => {
       const appointmentDate = new Date(appointment.appoinmentdate);
       appointmentDate.setHours(0, 0, 0, 0);
-      return appointmentDate < now;
+      return (
+        appointmentDate < now ||
+        isPastOrCancelledAppointmentStatus(appointment.statuscode)
+      );
     });
 
     return { upcomingAppointments: upcoming, previousAppointments: previous };
   }, [appointmentsData]);
 
-  // Status pill — matches mock (e.g. green "Upcoming" on confirmed future visits)
   const getStatusPresentation = (appointment: BookedAppoinmentRes, tab: "upcoming" | "previous") => {
-    const c = (appointment.statuscode || "").toUpperCase();
-    if (tab === "upcoming") {
-      if (c === "CANCELLED")
-        return { label: "Cancelled", className: "text-xs leading-tight bg-red-50 text-red-700 px-2.5 py-1 rounded-xl font-medium ring-1 ring-red-200/60 shadow-sm" };
-      if (c === "COMPLETED")
-        return { label: "Completed", className: "text-xs leading-tight bg-sky-50 text-sky-800 px-2.5 py-1 rounded-xl font-medium ring-1 ring-sky-200/60 shadow-sm" };
-      if (c === "CONFIRMED")
-        return { label: "Upcoming", className: "text-xs leading-tight bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-xl font-medium ring-1 ring-emerald-200/60 shadow-sm" };
-      if (c === "PENDING")
-        return { label: "Pending", className: "text-xs leading-tight bg-amber-50 text-amber-900 px-2.5 py-1 rounded-xl font-medium ring-1 ring-amber-200/60 shadow-sm" };
+    const presentation = getAppointmentStatusPresentation(appointment.statuscode);
+    if (tab === "upcoming" && presentation.code === "CONFIRMED") {
+      return {
+        label: "Upcoming",
+        className: `text-xs leading-tight px-2.5 py-1 rounded-xl font-medium ring-1 ring-emerald-200/60 shadow-sm ${presentation.className}`,
+      };
     }
-    if (c === "COMPLETED")
-      return { label: "Completed", className: "text-xs leading-tight bg-sky-50 text-sky-800 px-2.5 py-1 rounded-xl font-medium ring-1 ring-sky-200/60 shadow-sm" };
-    if (c === "CANCELLED")
-      return { label: "Cancelled", className: "text-xs leading-tight bg-red-50 text-red-700 px-2.5 py-1 rounded-xl font-medium ring-1 ring-red-200/60 shadow-sm" };
-    if (c === "CONFIRMED")
-      return { label: "Confirmed", className: "text-xs leading-tight bg-emerald-50 text-emerald-800 px-2.5 py-1 rounded-xl font-medium ring-1 ring-emerald-200/60 shadow-sm" };
-    if (c === "PENDING")
-      return { label: "Pending", className: "text-xs leading-tight bg-amber-50 text-amber-900 px-2.5 py-1 rounded-xl font-medium ring-1 ring-amber-200/60 shadow-sm" };
     return {
-      label: c || "Unknown",
-      className: "text-xs leading-tight bg-zinc-100 text-zinc-700 px-2.5 py-1 rounded-xl font-medium ring-1 ring-zinc-200/80 shadow-sm",
+      label: presentation.label,
+      className: `text-xs leading-tight px-2.5 py-1 rounded-xl font-medium ring-1 ring-zinc-200/60 shadow-sm ${presentation.className}`,
     };
   };
 
@@ -236,7 +235,11 @@ const UserAppointments = () => {
   const getFilteredAppointments = (appointments: BookedAppoinmentRes[]) => {
     return appointments.filter(appointment => {
       // Status filter
-      if (selectedStatus !== 'ALL' && appointment.statuscode !== selectedStatus) {
+      if (
+        selectedStatus !== 'ALL' &&
+        normalizeAppointmentStatusCode(appointment.statuscode) !==
+          normalizeAppointmentStatusCode(selectedStatus)
+      ) {
         return false;
       }
 
@@ -413,9 +416,14 @@ const UserAppointments = () => {
                         ) : null}
 
                         {(() => {
+                          const statusCode = normalizeAppointmentStatusCode(appointment.statuscode);
                           const showCancel =
-                            appointment.statuscode !== "CANCELLED" && appointment.statuscode !== "COMPLETED";
-                          const showFooter = total > 0 || showCancel;
+                            statusCode !== "CANCELLED" && statusCode !== "COMPLETED" && statusCode !== "NO_SHOW";
+                          const canReschedule =
+                            showCancel &&
+                            appointment.organizationid > 0 &&
+                            appointment.organisationlocationid > 0;
+                          const showFooter = total > 0 || showCancel || canReschedule;
                           return showFooter ? (
                             <div className="mt-auto space-y-4 border-t border-zinc-100 pt-5">
                               {total > 0 ? (
@@ -426,20 +434,41 @@ const UserAppointments = () => {
                                   </span>
                                 </div>
                               ) : null}
-                              {showCancel ? (
-                                <Button
-                                  onClick={() => {
-                                    setSelectedAppointment(appointment);
-                                    setShowCancelDialog(true);
-                                  }}
-                                  variant="outline"
-                                  className="w-full min-h-[48px] rounded-2xl border-red-200/90 bg-white py-3.5 text-sm font-medium text-red-600 shadow-sm transition-all hover:border-red-300 hover:bg-red-50/80 hover:text-red-700 touch-manipulation"
-                                >
-                                  <span className="inline-flex items-center justify-center gap-2">
-                                    <Trash2 className="size-4 shrink-0 opacity-80" />
-                                    Cancel appointment
-                                  </span>
-                                </Button>
+                              {canReschedule || showCancel ? (
+                                <div className="flex flex-col gap-2">
+                                  {canReschedule ? (
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      className="w-full min-h-[48px] rounded-2xl border-zinc-200 bg-white py-3.5 text-sm font-medium text-zinc-800 shadow-sm touch-manipulation"
+                                      onClick={() => {
+                                        navigate(
+                                          `/book-appointment/${appointment.organizationid}/${appointment.organisationlocationid}?reschedule=${appointment.id}`,
+                                        );
+                                      }}
+                                    >
+                                      <span className="inline-flex items-center justify-center gap-2">
+                                        <CalendarClock className="size-4 shrink-0 opacity-80" />
+                                        Reschedule
+                                      </span>
+                                    </Button>
+                                  ) : null}
+                                  {showCancel ? (
+                                    <Button
+                                      onClick={() => {
+                                        setSelectedAppointment(appointment);
+                                        setShowCancelDialog(true);
+                                      }}
+                                      variant="outline"
+                                      className="w-full min-h-[48px] rounded-2xl border-red-200/90 bg-white py-3.5 text-sm font-medium text-red-600 shadow-sm transition-all hover:border-red-300 hover:bg-red-50/80 hover:text-red-700 touch-manipulation"
+                                    >
+                                      <span className="inline-flex items-center justify-center gap-2">
+                                        <Trash2 className="size-4 shrink-0 opacity-80" />
+                                        Cancel appointment
+                                      </span>
+                                    </Button>
+                                  ) : null}
+                                </div>
                               ) : null}
                             </div>
                           ) : (
@@ -449,7 +478,7 @@ const UserAppointments = () => {
 
                         {false &&
                           !appointment.ispaid &&
-                          appointment.statuscode !== "CANCELLED" && (
+                          normalizeAppointmentStatusCode(appointment.statuscode) !== "CANCELLED" && (
                             <Button
                               onClick={() => {
                                 setSelectedAppointment(appointment);

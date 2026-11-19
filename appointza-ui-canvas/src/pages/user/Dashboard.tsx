@@ -29,8 +29,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea";
 import {
   countAppointmentsByStatus,
+  getAppointmentStatusLabel,
+  getAppointmentStatusPresentation,
   isUpcomingAppointmentStatus,
-  normalizeAppointmentStatusCode,
   toAppointmentStatusBucket,
 } from "@/utils/appointmentStatus.util";
 
@@ -381,8 +382,8 @@ const UserDashboard = () => {
                         </p>
                       </div>
                     </div>
-                    <Badge className={`${statusColors[toAppointmentStatusBucket(appointment.statuscode)] || 'bg-gray-100 text-gray-800'} text-xs sm:text-sm px-2 sm:px-3 py-1 w-fit`}>
-                      {normalizeAppointmentStatusCode(appointment.statuscode) || "PENDING"}
+                    <Badge className={`${getAppointmentStatusPresentation(appointment.statuscode).className} text-xs sm:text-sm px-2 sm:px-3 py-1 w-fit`}>
+                      {getAppointmentStatusLabel(appointment.statuscode)}
                     </Badge>
                   </div>
                 ))}
@@ -477,8 +478,8 @@ const UserDashboard = () => {
                       {/* Right Side: Badge, Price, Button */}
                       <div className="flex flex-col sm:flex-col items-start sm:items-end gap-2 sm:gap-2 sm:text-right w-full sm:w-auto">
                         <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
-                          <Badge className={`${statusColors[toAppointmentStatusBucket(appointment.statuscode)] || 'bg-gray-100 text-gray-800'} text-xs sm:text-sm px-2 sm:px-3 py-1`}>
-                            {normalizeAppointmentStatusCode(appointment.statuscode) || "PENDING"}
+                          <Badge className={`${getAppointmentStatusPresentation(appointment.statuscode).className} text-xs sm:text-sm px-2 sm:px-3 py-1`}>
+                            {getAppointmentStatusLabel(appointment.statuscode)}
                           </Badge>
                           {appointment.attributes?.servicelist && appointment.attributes.servicelist.length > 0 && (
                             <p className="text-sm sm:text-base font-medium text-gray-900">

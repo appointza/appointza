@@ -17,6 +17,10 @@ import {
   formatAppointmentTime,
   parseDotNetTimeSpanToMilliseconds,
 } from "@/utils/appointmentTime.util";
+import {
+  getAppointmentStatusLabel,
+  normalizeAppointmentStatusCode,
+} from "@/utils/appointmentStatus.util";
 
 export type TimingSlot = AppoinmentFinal & {
   statuscode?: string;
@@ -30,9 +34,11 @@ type OrganizationCalendarDayPanelProps = {
   selectedDayBookings: BookedAppoinmentRes[];
   isLoadingAppointments: boolean;
   appointmentStatusList?: ReferenceValue[];
+  statusUpdatingId?: number | null;
   onViewDetails?: (appointment: BookedAppoinmentRes) => void;
   onManageRecord?: (appointment: BookedAppoinmentRes) => void;
   onStatusChange?: (appointmentId: number, status: string) => void;
+  onSlotClick?: (slot: TimingSlot) => void;
 };
 
 export function OrganizationCalendarDayPanel({
@@ -42,13 +48,19 @@ export function OrganizationCalendarDayPanel({
   selectedDayBookings,
   isLoadingAppointments,
   appointmentStatusList = [],
+  statusUpdatingId = null,
   onViewDetails,
   onManageRecord,
   onStatusChange,
+  onSlotClick,
 }: OrganizationCalendarDayPanelProps) {
   const availableSeats = timeSlots.reduce((sum, s) => sum + Math.max(0, s.remaining ?? 0), 0);
   const totalCapacity = timeSlots.reduce((sum, s) => sum + Math.max(0, s.capacity ?? 0), 0);
   const bookedSeats = Math.max(0, totalCapacity - availableSeats);
+
+  const activeBookings = selectedDayBookings.filter(
+    (b) => normalizeAppointmentStatusCode(b.statuscode) !== "CANCELLED",
+  );
 
   const sortedBookings = [...selectedDayBookings].sort((a, b) => {
     const ta = parseDotNetTimeSpanToMilliseconds(a.fromtime) ?? 0;
@@ -76,8 +88,8 @@ export function OrganizationCalendarDayPanel({
               variant="outline"
               className="rounded-md border-[#e6eaf0] font-medium text-[#667085]"
             >
-              {sortedBookings.length} booking
-              {sortedBookings.length === 1 ? "" : "s"}
+              {activeBookings.length} booking
+              {activeBookings.length === 1 ? "" : "s"}
             </Badge>
           </div>
         </div>
@@ -102,14 +114,24 @@ export function OrganizationCalendarDayPanel({
                 const remaining = Math.max(0, slot.remaining ?? 0);
                 const capacity = Math.max(0, slot.capacity ?? 0);
                 const isAvailable = remaining > 0;
+                const SlotTag = onSlotClick && isAvailable ? "button" : "div";
                 return (
-                  <div
+                  <SlotTag
                     key={`${String(slot.fromtime)}-${index}`}
+                    type={onSlotClick && isAvailable ? "button" : undefined}
+                    onClick={
+                      onSlotClick && isAvailable
+                        ? () => onSlotClick(slot)
+                        : undefined
+                    }
                     className={cn(
                       "rounded-lg border px-3 py-2.5 text-center text-[13px] transition-colors",
                       isAvailable
                         ? "border-[#abefc6] bg-[#ecfdf3] text-[#067647]"
                         : "border-[#e6eaf0] bg-[#f2f4f7] text-[#667085]",
+                      onSlotClick && isAvailable
+                        ? "cursor-pointer hover:border-[#2a5af5] hover:bg-[#eef4ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2a5af5]/40"
+                        : null,
                     )}
                   >
                     <div className="font-semibold tabular-nums text-[#1a1a1a]">
@@ -120,12 +142,17 @@ export function OrganizationCalendarDayPanel({
                         ? `${remaining} of ${capacity || remaining} left`
                         : slot.notes || "Fully booked"}
                     </div>
+                    {onSlotClick && isAvailable ? (
+                      <div className="mt-0.5 text-[10px] font-medium text-[#2a5af5]">
+                        Book walk-in
+                      </div>
+                    ) : null}
                     {slot.is_within_booking_window === false ? (
                       <div className="mt-0.5 text-[10px] text-[#b54708]">
                         Outside booking window
                       </div>
                     ) : null}
-                  </div>
+                  </SlotTag>
                 );
               })}
             </div>
@@ -179,41 +206,53 @@ export function OrganizationCalendarDayPanel({
                     <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
                       {onStatusChange ? (
                         <Select
-                          value={apt.statuscode || "PENDING"}
+                          value={normalizeAppointmentStatusCode(apt.statuscode) || "PENDING"}
+                          disabled={statusUpdatingId === apt.id}
                           onValueChange={(value) => onStatusChange(apt.id, value)}
                         >
-                          <SelectTrigger className={cn(org.selectTrigger, "sm:w-[140px]")}>
-                            <SelectValue>
-                              <span className="text-[12px] font-medium capitalize">
-                                {(apt.statuscode || "PENDING").toLowerCase()}
+                          <SelectTrigger className={cn(org.selectTrigger, "sm:w-[150px]")}>
+                            {statusUpdatingId === apt.id ? (
+                              <span className="flex items-center gap-2 text-[12px] font-medium text-[#667085]">
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                Updating…
                               </span>
-                            </SelectValue>
+                            ) : (
+                              <SelectValue>
+                                <span className="text-[12px] font-medium">
+                                  {getAppointmentStatusLabel(apt.statuscode)}
+                                </span>
+                              </SelectValue>
+                            )}
                           </SelectTrigger>
                           <SelectContent>
                             {appointmentStatusList.length > 0 ? (
                               appointmentStatusList.map((status) => (
-                                <SelectItem key={status.id} value={status.identifier}>
-                                  {status.displaytext}
+                                <SelectItem
+                                  key={status.id}
+                                  value={normalizeAppointmentStatusCode(status.identifier) || status.identifier}
+                                >
+                                  {status.displaytext || getAppointmentStatusLabel(status.identifier)}
                                 </SelectItem>
                               ))
                             ) : (
                               <>
                                 <SelectItem value="PENDING">Pending</SelectItem>
                                 <SelectItem value="CONFIRMED">Confirmed</SelectItem>
+                                <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
                                 <SelectItem value="COMPLETED">Completed</SelectItem>
                                 <SelectItem value="CANCELLED">Cancelled</SelectItem>
                               </>
                             )}
                           </SelectContent>
                         </Select>
-                      ) : apt.statuscode ? (
+                      ) : (
                         <Badge
                           variant="outline"
-                          className="rounded-md border-[#e6eaf0] text-[12px] capitalize text-[#667085]"
+                          className="rounded-md border-[#e6eaf0] text-[12px] text-[#667085]"
                         >
-                          {apt.statuscode}
+                          {getAppointmentStatusLabel(apt.statuscode)}
                         </Badge>
-                      ) : null}
+                      )}
                     </div>
                   </div>
 

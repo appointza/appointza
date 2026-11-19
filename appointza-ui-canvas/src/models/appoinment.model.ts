@@ -145,6 +145,14 @@ export class UpdateStatusReq {
   statusid: number =0;
   organisationid: number =0;
   organisationlocationid: number =0;
+  cancellationreason: string = '';
+}
+
+export class UpdateStatusRes {
+  success: boolean = false;
+  notified: boolean = false;
+  channels: string[] = [];
+  statuscode: string = '';
 }
 
 export class UpdatePaymentReq {

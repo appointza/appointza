@@ -110,9 +110,9 @@ namespace appointza.Controllers
         }
 
         [HttpPost("UpdateStatus")]
-        public async Task<ActionResult<ActionRes<bool>>> UpdateStatus(ActionReq<UpdateStatusReq> req)
+        public async Task<ActionResult<ActionRes<UpdateStatusRes>>> UpdateStatus(ActionReq<UpdateStatusReq> req)
         {
-            ActionRes<bool> result = new ActionRes<bool>();
+            ActionRes<UpdateStatusRes> result = new ActionRes<UpdateStatusRes>();
 
             result.item = await appoinmentService.UpdateStatus(req.item);
 

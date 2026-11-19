@@ -816,7 +816,12 @@ db.AddParameter(command, "notes", DbTypes.Types.String).Value = String.IsNullOrE
                 return (ex.Message, null);
             }
 
-            return ("Successfully booked.", notificationContext);
+            var reference = appoinment.id > 0 ? $"APT-{appoinment.id}" : "";
+            return (
+                string.IsNullOrEmpty(reference)
+                    ? "Successfully booked."
+                    : $"Successfully booked.|{reference}",
+                notificationContext);
         }
 
         private async Task SendPostBookingNotificationsAsync(PostBookingNotificationContext context)

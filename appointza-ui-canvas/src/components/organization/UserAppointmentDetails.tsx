@@ -32,6 +32,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import FileViewer from "@/components/common/FileViewer";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { getAppointmentStatusPresentation } from "@/utils/appointmentStatus.util";
 
 interface UserAppointmentDetailsProps {
   appointment: BookedAppoinmentRes;
@@ -252,16 +253,14 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
   };
 
   const getStatusBadge = () => {
-    const appointmentDate = new Date(appointment.appoinmentdate);
-    const isUpcoming = appointmentDate >= new Date();
-    
-    if (!appointment.isactive) {
-      return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Cancelled</Badge>;
-    } else if (isUpcoming) {
-      return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Upcoming</Badge>;
-    } else {
-      return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Completed</Badge>;
-    }
+    const presentation = getAppointmentStatusPresentation(
+      currentAppointment.statuscode || appointment.statuscode,
+    );
+    return (
+      <Badge className={cn(presentation.className, "hover:opacity-90")}>
+        {presentation.label}
+      </Badge>
+    );
   };
 
   // Combined save function for all appointment data
