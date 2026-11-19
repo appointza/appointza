@@ -5,6 +5,7 @@ using appointza.Services;
 using appointza.Utils;
 using appointza.Authentication.Utils;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Caching.Memory;
 
 namespace appointza.Authentication.Controllers
 {
@@ -16,13 +17,20 @@ namespace appointza.Authentication.Controllers
         UsersService usersService;
         EventBookingService eventBookingService;
         RequestState requestState;
+        IMemoryCache memoryCache;
         
-        public UsersController(ILogger<UsersController> logger, UsersService usersService, EventBookingService eventBookingService, RequestState requestState)
+        public UsersController(
+            ILogger<UsersController> logger,
+            UsersService usersService,
+            EventBookingService eventBookingService,
+            RequestState requestState,
+            IMemoryCache memoryCache)
         {
             this.logger = logger;
             this.usersService = usersService;
             this.eventBookingService = eventBookingService;
             this.requestState = requestState;
+            this.memoryCache = memoryCache;
         }
         [HttpGet("Entity")]
         public async Task<ActionResult<ActionRes<Users>>> Entity()
@@ -39,9 +47,72 @@ namespace appointza.Authentication.Controllers
         {
             ActionRes<List<Users>> result = new ActionRes<List<Users>>();
 
+            // Block unrestricted phone-directory lookups (PII leak across organisations).
+            // Mobile search must be scoped by organisationid, or use LookupForStaffInvite.
+            if (req?.item != null
+                && !string.IsNullOrWhiteSpace(req.item.mobile)
+                && req.item.id <= 0
+                && req.item.organisationid <= 0)
+            {
+                return BadRequest(new ActionRes<List<Users>>
+                {
+                    error = "Mobile lookup requires organisation scope. Use LookupForStaffInvite for staff invites.",
+                });
+            }
+
             result.item = await usersService.Select(req.item);
 
             return Ok(result);
+        }
+
+        /// <summary>
+        /// Org-admin staff invite phone lookup. Does not return name/email for users in other orgs.
+        /// Rate-limited per caller.
+        /// </summary>
+        [HttpPost("LookupForStaffInvite")]
+        [Authenticate]
+        public async Task<ActionResult<ActionRes<StaffInviteLookupRes>>> LookupForStaffInvite(
+            ActionReq<StaffInviteLookupReq> req)
+        {
+            var ctx = requestState.usercontext;
+            if (ctx == null || ctx.userid <= 0 || ctx.organisationid <= 0)
+            {
+                return Unauthorized(new ActionRes<StaffInviteLookupRes>
+                {
+                    error = "Organisation admin authentication required.",
+                });
+            }
+
+            var mobile = (req?.item?.mobile ?? "").Trim();
+            if (string.IsNullOrEmpty(mobile))
+            {
+                return BadRequest(new ActionRes<StaffInviteLookupRes>
+                {
+                    error = "mobile is required.",
+                });
+            }
+
+            // Rate limit: 20 lookups / minute / user (and per IP as secondary key).
+            var ip = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var minuteBucket = DateTime.UtcNow.ToString("yyyyMMddHHmm");
+            var rateKey = $"staff-invite-lookup:{ctx.userid}:{ip}:{minuteBucket}";
+            var count = memoryCache.GetOrCreate(rateKey, entry =>
+            {
+                entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromMinutes(2);
+                return 0;
+            });
+            count++;
+            memoryCache.Set(rateKey, count, TimeSpan.FromMinutes(2));
+            if (count > 20)
+            {
+                return StatusCode(StatusCodes.Status429TooManyRequests, new ActionRes<StaffInviteLookupRes>
+                {
+                    error = "Too many lookup attempts. Please wait a minute and try again.",
+                });
+            }
+
+            var item = await usersService.LookupForStaffInvite(mobile, ctx.organisationid);
+            return Ok(new ActionRes<StaffInviteLookupRes> { item = item });
         }
         [HttpPost("Insert")]
         public async Task<ActionResult<ActionRes<Users>>> Insert(ActionReq<Users> req)

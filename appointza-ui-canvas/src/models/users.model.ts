@@ -35,6 +35,21 @@ export class UsersSelectReq {
   organisationid: number = 0;
 }
 
+export class StaffInviteLookupReq {
+  mobile: string = '';
+}
+
+export class StaffInviteLookupRes {
+  exists: boolean = false;
+  can_invite: boolean = false;
+  belongs_to_other_organisation: boolean = false;
+  userid: number = 0;
+  display_name: string = '';
+  email: string = '';
+  mobile: string = '';
+  message: string = '';
+}
+
 export class UsersDeleteReq {
   id: number = 0;
   version: number = 0;

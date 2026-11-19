@@ -24,6 +24,7 @@ import SettingsEmbeddedHeader from "@/components/layout/SettingsEmbeddedHeader";
 import { settingsEmbedded } from "@/lib/settingsEmbedded";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+import { mapStaffInviteLookup } from "@/utils/staffInviteLookup.util";
 
 const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
   const { user, isAuthenticated } = useAuth();
@@ -91,7 +92,7 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
     }
   }, [locations, selectedLocationId]);
 
-  // Search user by mobile number
+  // Search user by mobile — privacy-safe staff invite lookup (no cross-org PII).
   const searchUserByMobile = async () => {
     if (!searchMobile.trim()) {
       toast({
@@ -104,28 +105,35 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
 
     setIsSearching(true);
     try {
-      console.log('🔍 Searching user by mobile:', searchMobile);
-      const req = new UsersSelectReq();
-      req.mobile = searchMobile;
-      
-      const response = await usersService.select(req);
-      console.log('✅ User search API response:', response);
-      
-      if (response && response.length > 0) {
-        const user = response[0];
-        setFoundUser(user);
-        toast({
-          title: "User Found",
-          description: `Found user: ${user.name}`,
-        });
-      } else {
+      const lookup = await usersService.lookupForStaffInvite(searchMobile.trim());
+      const ui = mapStaffInviteLookup(lookup, searchMobile.trim());
+
+      if (ui.kind === "not_found") {
+        setFoundUser(null);
+        toast({ title: "No account found", description: ui.message });
+        return;
+      }
+
+      if (ui.kind === "blocked") {
         setFoundUser(null);
         toast({
-          title: "User Not Found",
-          description: `No user found with mobile number: ${searchMobile}`,
-          variant: "destructive"
+          title: "Cannot invite this number",
+          description: ui.message,
+          variant: "destructive",
         });
+        return;
       }
+
+      const user = new Users();
+      user.id = ui.userid;
+      user.name = ui.name;
+      user.email = ui.email;
+      user.mobile = ui.mobile;
+      setFoundUser(user);
+      toast({
+        title: "User found",
+        description: ui.message,
+      });
     } catch (error) {
       console.error('❌ Error searching user:', error);
       toast({
