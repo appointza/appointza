@@ -3,6 +3,7 @@ import { getUiBaseUrl } from "@/utils/environment";
 import {
   buildOrganisationPublicSiteUrl,
   buildOrganisationTemplateBookingUrl,
+  isOrgLocTempId,
 } from "@/utils/orgPublicSiteUrl.util";
 
 export function organisationInitials(name: string): string {
@@ -13,22 +14,27 @@ export function organisationInitials(name: string): string {
 }
 
 /**
- * Public profile / book URL for marketing browse cards.
- * Prefer custom subdomain → published template GUID → direct book-appointment path.
+ * Final public profile / book URL for marketing browse cards.
+ * Prefer subdomain + /template/{guid} so the tab opens the renderer directly
+ * (skips about:blank + subdomain root resolve hop).
  */
 export function organisationPublicUrls(org: OrganisationDetail) {
-  const subdomainUrl = buildOrganisationPublicSiteUrl({
+  const subdomainOrigin = buildOrganisationPublicSiteUrl({
     customUrl: org.organisationlocationcustomurl,
   });
-  const templateUrl = buildOrganisationTemplateBookingUrl(
-    org.organisationlocationorgloctempid,
-  );
-  const bookUrl =
-    org.organisationid > 0 && org.organisationlocationid > 0
-      ? `${getUiBaseUrl()}/book-appointment/${org.organisationid}/${org.organisationlocationid}`
-      : "";
+  const guid = (org.organisationlocationorgloctempid || "").trim();
+  const templateOnMain = buildOrganisationTemplateBookingUrl(guid);
 
-  const fullUrl = subdomainUrl || templateUrl || bookUrl || "";
+  let fullUrl = "";
+  if (subdomainOrigin && guid && isOrgLocTempId(guid)) {
+    fullUrl = `${subdomainOrigin.replace(/\/+$/, "")}/template/${encodeURIComponent(guid)}`;
+  } else if (subdomainOrigin) {
+    fullUrl = subdomainOrigin;
+  } else if (templateOnMain) {
+    fullUrl = templateOnMain;
+  } else if (org.organisationid > 0 && org.organisationlocationid > 0) {
+    fullUrl = `${getUiBaseUrl()}/book-appointment/${org.organisationid}/${org.organisationlocationid}`;
+  }
 
   if (!fullUrl) {
     return { fullUrl: "", displayUrl: "Booking page not set up yet" };

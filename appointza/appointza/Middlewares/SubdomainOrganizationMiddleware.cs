@@ -19,6 +19,13 @@ namespace appointza.Middlewares
             _logger = logger;
         }
 
+        static bool NeedsOrganisationResolve(string path)
+        {
+            if (string.IsNullOrEmpty(path) || path == "/") return true;
+            if (path.StartsWith("/api/", StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
         public async Task InvokeAsync(
             HttpContext context,
             OrganisationService organisationService,
@@ -28,46 +35,53 @@ namespace appointza.Middlewares
             {
                 var host = context.Request.Host.Host;
                 var customUrlSlug = SubdomainHelper.ExtractCustomUrlSlug(host);
+                var path = context.Request.Path.Value ?? "";
 
                 context.Items["CustomUrlSlug"] = customUrlSlug ?? "";
 
                 if (!string.IsNullOrEmpty(customUrlSlug))
                 {
-                    _logger.LogInformation("Processing request for custom URL subdomain: {CustomUrl}", customUrlSlug);
-
-                    var organization = await organisationService.GetOrganisationByCustomUrl(customUrlSlug);
-
-                    if (organization != null)
+                    // Skip DB work for SPA assets (/template/*, JS/CSS). Resolve only for / and /api/*.
+                    if (NeedsOrganisationResolve(path))
                     {
-                        context.Items["CurrentOrganization"] = organization;
-                        context.Items["OrganizationId"] = organization.organisationid;
-                        context.Items["OrganizationName"] = organization.organisationname;
+                        _logger.LogInformation("Processing request for custom URL subdomain: {CustomUrl}", customUrlSlug);
 
-                        _logger.LogInformation(
-                            "Found organization: {OrganizationName} (ID: {OrganizationId}) for custom URL: {CustomUrl}",
-                            organization.organisationname,
-                            organization.organisationid,
-                            customUrlSlug);
-                    }
-                    else
-                    {
-                        _logger.LogWarning("No organization found for custom URL: {CustomUrl}", customUrlSlug);
-                        context.Items["OrganizationId"] = 0;
-                    }
+                        // Single SQL-filtered lookup (no full-table scan).
+                        var publicSite = await organisationLocationService.ResolvePublicSiteByCustomUrl(customUrlSlug);
 
-                    // Server-side redirect: subdomain root → same renderer as /template/{orgloctempid}
-                    if (HttpMethods.IsGet(context.Request.Method))
-                    {
-                        var path = context.Request.Path.Value ?? "";
-                        if (path == "/" || string.IsNullOrEmpty(path))
+                        if (publicSite != null && publicSite.id > 0)
                         {
-                            var publicSite = await organisationLocationService.ResolvePublicSiteByCustomUrl(customUrlSlug);
+                            context.Items["OrganizationId"] = publicSite.organisationid;
+                            context.Items["OrganisationLocationId"] = publicSite.id;
+
+                            var organization = await organisationService.GetOrganisationByCustomUrl(customUrlSlug);
+                            if (organization != null)
+                            {
+                                context.Items["CurrentOrganization"] = organization;
+                                context.Items["OrganizationName"] = organization.organisationname;
+                                _logger.LogInformation(
+                                    "Found organization: {OrganizationName} (ID: {OrganizationId}) for custom URL: {CustomUrl}",
+                                    organization.organisationname,
+                                    organization.organisationid,
+                                    customUrlSlug);
+                            }
+                        }
+                        else
+                        {
+                            _logger.LogWarning("No organization found for custom URL: {CustomUrl}", customUrlSlug);
+                            context.Items["OrganizationId"] = 0;
+                        }
+
+                        // Server-side redirect: subdomain root → same renderer as /template/{orgloctempid}
+                        if (HttpMethods.IsGet(context.Request.Method)
+                            && (path == "/" || string.IsNullOrEmpty(path)))
+                        {
                             var orgLocTempId = publicSite?.orgloctempid?.Trim() ?? "";
 
-                            if (string.IsNullOrEmpty(orgLocTempId) && organization?.organisationlocationid > 0)
+                            if (string.IsNullOrEmpty(orgLocTempId) && publicSite?.id > 0)
                             {
                                 orgLocTempId = (await organisationLocationService.GetOrgLocTempIdByLocationId(
-                                    organization.organisationlocationid)).Trim();
+                                    publicSite.id)).Trim();
                             }
 
                             if (!string.IsNullOrEmpty(orgLocTempId))
@@ -84,8 +98,12 @@ namespace appointza.Middlewares
                             _logger.LogWarning(
                                 "Subdomain {CustomUrl} matched but orgloctempid is missing on location {LocationId}",
                                 customUrlSlug,
-                                publicSite?.id ?? organization?.organisationlocationid ?? 0);
+                                publicSite?.id ?? 0);
                         }
+                    }
+                    else
+                    {
+                        context.Items["OrganizationId"] = 0;
                     }
                 }
                 else
@@ -93,7 +111,7 @@ namespace appointza.Middlewares
                     _logger.LogInformation("No custom URL subdomain detected");
                     context.Items["OrganizationId"] = 0;
 
-                    if (context.Request.Path.Value == "/" || string.IsNullOrEmpty(context.Request.Path.Value))
+                    if (path == "/" || string.IsNullOrEmpty(path))
                     {
                         try
                         {
@@ -119,8 +137,7 @@ namespace appointza.Middlewares
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing subdomain organization middleware");
-                context.Items["OrganizationId"] = 0;
+                _logger.LogError(ex, "Error in SubdomainOrganizationMiddleware");
             }
 
             await _next(context);

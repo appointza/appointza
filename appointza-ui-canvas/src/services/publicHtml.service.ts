@@ -10,6 +10,7 @@ export type PublicHtmlPayload = {
   templateid?: number;
   html?: string;
   versionKey?: string;
+  organisationname?: string;
 };
 
 export type PublicHtmlFetchResult = PublicHtmlPayload & {

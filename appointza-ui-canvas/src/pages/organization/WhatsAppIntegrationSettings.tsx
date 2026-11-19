@@ -152,7 +152,7 @@ const WhatsAppIntegrationSettings = ({ embedded = false }: Props) => {
       toast({
         title: "Verify token not configured",
         description:
-          "Set ApplicationSettings:whatsapp:verify_token to appointza_wa_verify_2026 in appsettings.json and restart the API.",
+          "Ask your Appointza admin to configure the WhatsApp webhook password, then refresh this page.",
         variant: "destructive",
       });
       return;
@@ -294,10 +294,9 @@ const WhatsAppIntegrationSettings = ({ embedded = false }: Props) => {
             <div className="rounded-xl border border-stone-200 bg-stone-50/80 p-4">
               <Label htmlFor="wa-webhook-url">Meta webhook callback URL</Label>
               <p className="mt-1 text-xs text-stone-500">
-                Paste into Meta Developer → WhatsApp → Configuration → Callback URL. Verify token must
-                match <code className="rounded bg-white px-1">whatsapp.verify_token</code> in API
-                appsettings. Subscribe to <strong>messages</strong>. The API must be reachable on
-                public HTTPS.
+                In Meta Developer → WhatsApp → Configuration, paste this as the Callback URL. Use the
+                webhook password shown below as the Verify token. Subscribe to messages, then save.
+                Your API must be reachable over public HTTPS.
               </p>
               <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
                 <Input

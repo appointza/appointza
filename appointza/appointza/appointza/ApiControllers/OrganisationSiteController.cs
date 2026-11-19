@@ -401,6 +401,7 @@ namespace appointza.Controllers
                 templateid = context.TemplateId,
                 html = boundHtml,
                 versionKey = context.VersionKey,
+                organisationname = context.OrganisationDetail?.organisationname ?? "",
             };
         }
 
@@ -630,6 +631,7 @@ namespace appointza.Controllers
             }
 
             // Prefer SPA route /template/{orgloctempid} — same renderer as direct booking links.
+            // Skip a second org join when the GUID is already known (title comes from GetPublicHtml).
             if (!string.IsNullOrWhiteSpace(publicSite.orgloctempid))
             {
                 result.item = new OrganisationTemplateResolveRes
@@ -651,6 +653,7 @@ namespace appointza.Controllers
                     organisationid = publicSite.organisationid,
                     organisationlocationid = publicSite.id,
                     templateid = publicSite.templateid,
+                    organisationname = organisationDetail?.organisationname ?? "",
                 };
                 return Ok(result);
             }

@@ -528,6 +528,7 @@ db.AddParameter(command, "organisation_type", DbTypes.Types.String).Value = Norm
                 return result;
             }
 
+            // Match subdomain slug in SQL so we do not scan every location into memory.
             string query = @"
     SELECT 
         Organisation.id AS organisationid,
@@ -559,16 +560,27 @@ db.AddParameter(command, "organisation_type", DbTypes.Types.String).Value = Norm
     ON Organisation.id = OrganisationLocation.organisationid
     AND OrganisationLocation.customurl IS NOT NULL
     AND TRIM(OrganisationLocation.customurl) <> ''
+    AND Organisation.isactive = true
+    AND OrganisationLocation.isactive = true
+    AND OrganisationLocation.isverified = true
+    AND LOWER(
+      REGEXP_REPLACE(
+        SPLIT_PART(
+          SPLIT_PART(
+            REGEXP_REPLACE(TRIM(OrganisationLocation.customurl), '^https?://', '', 'i'),
+            '/', 1
+          ),
+          '.', 1
+        ),
+        '[^a-z0-9]', '', 'g'
+      )
+    ) = @slug
+    ORDER BY Organisation.id ASC
+    LIMIT 5
     ";
 
-            var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
-
-            queryBuilder.AddParameter("Organisation.isactive", "=", "isactive", true, DbTypes.Types.Boolean);
-            queryBuilder.AddParameter("OrganisationLocation.isactive", "=", "locationisactive", true, DbTypes.Types.Boolean);
-            queryBuilder.AddParameter("OrganisationLocation.isverified", "=", "locationisverified", true, DbTypes.Types.Boolean);
-            queryBuilder.AddOrderBy(QueryBuilder.Order.ASC, "Organisation.id");
-
-            var command = queryBuilder.GetCommand(db);
+            using DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "slug", DbTypes.Types.String).Value = normalizedCustomUrl;
 
             using (DbDataReader reader = await db.Execute(command))
             {
@@ -577,11 +589,6 @@ db.AddParameter(command, "organisation_type", DbTypes.Types.String).Value = Norm
                     var storedCustomUrl = reader["organisationlocationcustomurl"] == DBNull.Value
                         ? ""
                         : reader["organisationlocationcustomurl"].ToString();
-
-                    if (!SlugHelper.CustomUrlSlugMatches(storedCustomUrl, normalizedCustomUrl))
-                    {
-                        continue;
-                    }
 
                     OrganisationDetail temp = new OrganisationDetail();
 
