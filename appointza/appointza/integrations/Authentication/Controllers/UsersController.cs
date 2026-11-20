@@ -43,30 +43,68 @@ namespace appointza.Authentication.Controllers
             return Ok(result);
         }
         [HttpPost("Select")]
+        [Authenticate]
         public async Task<ActionResult<ActionRes<List<Users>>>> Select(ActionReq<UsersSelectReq> req)
         {
             ActionRes<List<Users>> result = new ActionRes<List<Users>>();
-
-            // Block unrestricted phone-directory lookups (PII leak across organisations).
-            // Mobile search must be scoped by organisationid, or use LookupForStaffInvite.
-            if (req?.item != null
-                && !string.IsNullOrWhiteSpace(req.item.mobile)
-                && req.item.id <= 0
-                && req.item.organisationid <= 0)
+            var ctx = requestState.usercontext;
+            if (ctx == null || ctx.userid <= 0)
             {
-                return BadRequest(new ActionRes<List<Users>>
+                return Unauthorized(new ActionRes<List<Users>>
                 {
-                    error = "Mobile lookup requires organisation scope. Use LookupForStaffInvite for staff invites.",
+                    error = "Authentication required.",
                 });
             }
 
-            result.item = await usersService.Select(req.item);
+            var item = req?.item ?? new UsersSelectReq();
+
+            // Block unrestricted phone/email directory lookups (PII leak across organisations).
+            if (!ctx.issuperadmin)
+            {
+                var isMobileOrEmailSearch =
+                    !string.IsNullOrWhiteSpace(item.mobile) || !string.IsNullOrWhiteSpace(item.email);
+                if (isMobileOrEmailSearch && item.id <= 0)
+                {
+                    if (ctx.organisationid <= 0)
+                    {
+                        return BadRequest(new ActionRes<List<Users>>
+                        {
+                            error = "Mobile lookup requires organisation scope. Use LookupForStaffInvite for staff invites.",
+                        });
+                    }
+                    // Always scope to caller's own organisation; never trust arbitrary organisationid.
+                    item.organisationid = ctx.organisationid;
+                }
+                else if (item.id <= 0 && item.organisationid <= 0)
+                {
+                    // Prevent unbounded table dump.
+                    item.id = ctx.userid;
+                }
+                else if (item.id <= 0 && item.organisationid > 0 && item.organisationid != ctx.organisationid)
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new ActionRes<List<Users>>
+                    {
+                        error = "Access denied for another organisation.",
+                    });
+                }
+            }
+
+            var rows = await usersService.Select(item);
+            if (!ctx.issuperadmin && item.id > 0 && item.id != ctx.userid)
+            {
+                // Only allow reading another user's record if they belong to the caller's org.
+                rows = rows
+                    .Where(u => ctx.organisationid > 0 && u.organisationid == ctx.organisationid)
+                    .ToList();
+            }
+
+            result.item = rows;
 
             return Ok(result);
         }
 
         /// <summary>
-        /// Org-admin staff invite phone lookup. Does not return name/email for users in other orgs.
+        /// Org-admin staff invite phone lookup. Does not return name/email for users outside the caller's org.
         /// Rate-limited per caller.
         /// </summary>
         [HttpPost("LookupForStaffInvite")]
@@ -80,6 +118,15 @@ namespace appointza.Authentication.Controllers
                 return Unauthorized(new ActionRes<StaffInviteLookupRes>
                 {
                     error = "Organisation admin authentication required.",
+                });
+            }
+
+            var callerRecord = (await usersService.Select(new UsersSelectReq { id = ctx.userid })).FirstOrDefault();
+            if (!StaffInvitePrivacy.IsOrgAdminForStaffInvite(callerRecord, ctx.organisationid))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new ActionRes<StaffInviteLookupRes>
+                {
+                    error = "Organisation admin permission required to look up staff.",
                 });
             }
 

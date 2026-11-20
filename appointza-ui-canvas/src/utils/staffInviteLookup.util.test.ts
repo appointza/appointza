@@ -43,6 +43,28 @@ describe("mapStaffInviteLookup", () => {
     });
   });
 
+  it("maps unattached external user with masked name and no email PII", () => {
+    const lookup = Object.assign(new StaffInviteLookupRes(), {
+      exists: true,
+      can_invite: true,
+      belongs_to_other_organisation: false,
+      userid: 44,
+      display_name: "A*** K***",
+      email: "",
+      mobile: "9000000004",
+      message: "Appointza account exists. You can invite this user by phone (name and email are hidden for privacy).",
+    });
+    const ui = mapStaffInviteLookup(lookup, "9000000004");
+    expect(ui).toEqual({
+      kind: "inviteable",
+      userid: 44,
+      name: "A*** K***",
+      email: "",
+      mobile: "9000000004",
+      message: "Appointza account exists. You can invite this user by phone (name and email are hidden for privacy).",
+    });
+  });
+
   it("treats missing account as not_found", () => {
     const ui = mapStaffInviteLookup(
       Object.assign(new StaffInviteLookupRes(), { exists: false }),

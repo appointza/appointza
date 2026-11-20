@@ -108,7 +108,7 @@ namespace appointza.Authentication.Services
             res.mobile = string.IsNullOrWhiteSpace(user.mobile) ? res.mobile : user.mobile;
 
             var userOrg = user.organisationid;
-            if (!StaffInvitePrivacy.CanRevealIdentity(userOrg, callerOrganisationId))
+            if (userOrg > 0 && userOrg != callerOrganisationId)
             {
                 res.belongs_to_other_organisation = true;
                 res.can_invite = false;
@@ -119,14 +119,25 @@ namespace appointza.Authentication.Services
                 return res;
             }
 
-            // Same org or customer account (organisationid 0) — safe to show identity for invite.
+            if (!StaffInvitePrivacy.CanRevealIdentity(userOrg, callerOrganisationId))
+            {
+                // User exists outside the caller's org (e.g. customer account, organisationid 0):
+                // allow invite by phone without revealing full name or email PII.
+                res.belongs_to_other_organisation = false;
+                res.can_invite = true;
+                res.userid = user.id;
+                res.display_name = StaffInvitePrivacy.MaskDisplayName(user.name);
+                res.email = "";
+                res.message = "Appointza account exists. You can invite this user by phone (name and email are hidden for privacy).";
+                return res;
+            }
+
+            // Same organisation — safe to display existing member details.
             res.can_invite = true;
             res.userid = user.id;
             res.display_name = string.IsNullOrWhiteSpace(user.name) ? "Appointza user" : user.name.Trim();
             res.email = user.email ?? "";
-            res.message = userOrg == callerOrganisationId
-                ? "User already belongs to your organisation."
-                : "User found. You can add them as staff.";
+            res.message = "User already belongs to your organisation.";
             return res;
         }
         public async Task<List<Users>> SelectTransaction(IDb db, UsersSelectReq req)

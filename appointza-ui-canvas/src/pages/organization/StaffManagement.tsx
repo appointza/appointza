@@ -685,8 +685,12 @@ const StaffManagement = ({ embedded = false }: { embedded?: boolean }) => {
                           {foundUser.name}
                         </h3>
                         <p className="text-gray-600">{foundUser.mobile}</p>
-                        {foundUser.email && (
+                        {foundUser.email ? (
                           <p className="text-sm text-gray-500">{foundUser.email}</p>
+                        ) : (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            Account exists — invite by phone. Full name and email are hidden for privacy.
+                          </p>
                         )}
                         {(foundUser.city || foundUser.country) && (
                           <p className="text-sm text-gray-500">
