@@ -1,5 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  buildWalkInBookingUrl,
+  parseWalkInSlotParams,
+} from "@/utils/walkInBooking.util";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,6 +36,8 @@ import { format } from "date-fns";
 
 const OnSpotRegistration = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const walkInSlot = useMemo(() => parseWalkInSlotParams(searchParams), [searchParams]);
   const { toast } = useToast();
   const { user } = useAuth();
   const { id: globalLocationId } = useGlobalId();
@@ -57,7 +63,13 @@ const OnSpotRegistration = () => {
   const [events, setEvents] = useState<Event[]>([]);
   const [selectedService, setSelectedService] = useState<OrganisationServices | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date>(() => {
+    if (walkInSlot.date && /^\d{4}-\d{2}-\d{2}$/.test(walkInSlot.date)) {
+      const parsed = new Date(`${walkInSlot.date}T12:00:00`);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+  });
   const [isBooking, setIsBooking] = useState(false);
 
   const organisationId = user?.organisationid || 0;
@@ -339,8 +351,16 @@ const OnSpotRegistration = () => {
 
     setIsBooking(true);
     try {
-      // Navigate to booking page with the created user context
-      const bookingUrl = `/book-appointment/${organisationId}/${organisationLocationId}?userId=${createdUser.userid}&userMobile=${formData.mobile}`;
+      const bookingUrl = buildWalkInBookingUrl({
+        organisationId,
+        organisationLocationId,
+        userId: createdUser.userid,
+        userMobile: formData.mobile,
+        date: walkInSlot.date || format(selectedDate, "yyyy-MM-dd"),
+        from: walkInSlot.from || undefined,
+        to: walkInSlot.to || undefined,
+        serviceId: selectedService.id,
+      });
       window.location.href = bookingUrl;
     } catch (error) {
       console.error("Error navigating to booking:", error);
@@ -439,6 +459,24 @@ const OnSpotRegistration = () => {
 
               {/* Right column — main form card */}
               <div className="space-y-6">
+        {walkInSlot.hasPrefill ? (
+          <Card className="border-sky-200 bg-sky-50/70 shadow-none">
+            <CardContent className="flex items-start gap-3 pt-5 text-sm text-sky-950">
+              <CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-sky-700" />
+              <div>
+                <p className="font-semibold">Walk-in slot selected</p>
+                <p className="mt-1 text-sky-900/80">
+                  {walkInSlot.date}
+                  {walkInSlot.from ? ` · ${walkInSlot.from.slice(0, 5)}` : ""}
+                  {walkInSlot.to ? `–${walkInSlot.to.slice(0, 5)}` : ""}
+                </p>
+                <p className="mt-1 text-xs text-sky-800/70">
+                  After the customer is verified, pick a service and continue — this date/time will be prefilled.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {/* Registration Form Step */}
         {step === "form" && (

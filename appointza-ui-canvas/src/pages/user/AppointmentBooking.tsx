@@ -117,7 +117,17 @@ const AppointmentBooking = () => {
   const [locationDetails, setLocationDetails] = useState<OrganisationLocation | null>(null);
   const [services, setServices] = useState<OrganisationServices[]>([]);
   const [timeSlots, setTimeSlots] = useState<AppoinmentFinal[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const prefillDateParam = (searchParams.get("date") || "").trim();
+  const prefillFromParam = (searchParams.get("from") || "").trim();
+  const initialPrefillDate = useMemo(() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(prefillDateParam)) {
+      const parsed = new Date(`${prefillDateParam}T12:00:00`);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+  }, [prefillDateParam]);
+
+  const [selectedDate, setSelectedDate] = useState<Date>(initialPrefillDate);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<AppoinmentFinal>(new AppoinmentFinal());
   const [selectedServices, setSelectedServices] = useState<SelectedSerivice[]>([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -133,6 +143,7 @@ const AppointmentBooking = () => {
   const [isLoadingLeaveRequests, setIsLoadingLeaveRequests] = useState(false);
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(5); // Default to 5 days if not loaded
   const appliedServicePreselect = useRef(false);
+  const appliedSlotPrefill = useRef(false);
 
   // Auth tokens live on the main app host only. Never book on org subdomains.
   useEffect(() => {
@@ -614,6 +625,25 @@ const AppointmentBooking = () => {
     appliedServicePreselect.current = true;
     handleServiceSelection(match);
   }, [preselectedServiceId, services, handleServiceSelection]);
+
+  // Walk-in / calendar slot click: pre-select matching time when slots load.
+  useEffect(() => {
+    if (appliedSlotPrefill.current || !prefillFromParam || timeSlots.length === 0) {
+      return;
+    }
+    const normalize = (value: string) => value.trim().slice(0, 5);
+    const target = normalize(prefillFromParam);
+    const match = timeSlots.find((slot) => {
+      const from =
+        typeof slot.fromtime === "string"
+          ? normalize(slot.fromtime)
+          : normalize(String(slot.fromtime || ""));
+      return from === target;
+    });
+    if (!match) return;
+    appliedSlotPrefill.current = true;
+    handleTimeSlotSelection(match);
+  }, [prefillFromParam, timeSlots]);
 
   // Handle time slot selection
   const handleTimeSlotSelection = (timeSlot: AppoinmentFinal) => {

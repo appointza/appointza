@@ -423,6 +423,20 @@ const OrganizationBookings = () => {
     navigate(`/organization/appointments/${appointment.id}/record`);
   };
 
+  const handleReschedule = (appointment: BookedAppoinmentRes) => {
+    const orgId = appointment.organizationid || organizationId;
+    const locId = appointment.organisationlocationid || organisationLocationId;
+    if (!orgId || !locId || !appointment.id) {
+      toast({
+        title: "Cannot reschedule",
+        description: "Missing organisation or appointment details.",
+        variant: "destructive",
+      });
+      return;
+    }
+    navigate(`/book-appointment/${orgId}/${locId}?reschedule=${appointment.id}`);
+  };
+
   const applyStatusLocally = (appointmentId: number, status: string) => {
     const key = bookedAppointmentsQueryKey({
       organisationId: organizationId,
@@ -801,6 +815,7 @@ const OrganizationBookings = () => {
         statusUpdatingId={statusUpdatingId}
         onViewDetails={handleViewDetails}
         onManageRecord={handleManageRecord}
+        onReschedule={handleReschedule}
         onStatusChange={handleStatusChange}
         onSlotClick={(slot) => {
           const date = format(selectedDate, "yyyy-MM-dd");

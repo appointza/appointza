@@ -21,6 +21,7 @@ import {
   getAppointmentStatusLabel,
   normalizeAppointmentStatusCode,
 } from "@/utils/appointmentStatus.util";
+import { canRescheduleAppointmentStatus } from "@/utils/walkInBooking.util";
 
 export type TimingSlot = AppoinmentFinal & {
   statuscode?: string;
@@ -37,6 +38,7 @@ type OrganizationCalendarDayPanelProps = {
   statusUpdatingId?: number | null;
   onViewDetails?: (appointment: BookedAppoinmentRes) => void;
   onManageRecord?: (appointment: BookedAppoinmentRes) => void;
+  onReschedule?: (appointment: BookedAppoinmentRes) => void;
   onStatusChange?: (appointmentId: number, status: string) => void;
   onSlotClick?: (slot: TimingSlot) => void;
 };
@@ -51,6 +53,7 @@ export function OrganizationCalendarDayPanel({
   statusUpdatingId = null,
   onViewDetails,
   onManageRecord,
+  onReschedule,
   onStatusChange,
   onSlotClick,
 }: OrganizationCalendarDayPanelProps) {
@@ -68,7 +71,7 @@ export function OrganizationCalendarDayPanel({
     return ta - tb;
   });
 
-  const canManage = Boolean(onViewDetails || onManageRecord || onStatusChange);
+  const canManage = Boolean(onViewDetails || onManageRecord || onReschedule || onStatusChange);
 
   return (
     <div className="min-w-0 space-y-4">
@@ -277,6 +280,17 @@ export function OrganizationCalendarDayPanel({
                         >
                           <FileText className="mr-1.5 h-4 w-4" />
                           Manage record
+                        </Button>
+                      ) : null}
+                      {onReschedule && canRescheduleAppointmentStatus(apt.statuscode) ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className={cn(org.btnOutline, "h-9 flex-1")}
+                          onClick={() => onReschedule(apt)}
+                        >
+                          <CalendarClock className="mr-1.5 h-4 w-4" />
+                          Reschedule
                         </Button>
                       ) : null}
                     </div>
