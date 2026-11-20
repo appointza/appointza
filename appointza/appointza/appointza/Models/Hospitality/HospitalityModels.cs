@@ -262,6 +262,10 @@ namespace appointza.Models.Hospitality
         public string booking_guid { get; set; } = "";
         public string check_in { get; set; } = "";
         public string check_out { get; set; } = "";
+        /// <summary>Optional HH:mm (or HH:mm:ss) for hourly / same-day stays.</summary>
+        public string check_in_time { get; set; } = "";
+        /// <summary>Optional HH:mm (or HH:mm:ss) for hourly / same-day stays.</summary>
+        public string check_out_time { get; set; } = "";
         public int nights { get; set; }
         public int persons { get; set; }
         public RoomGuestData? guest { get; set; }

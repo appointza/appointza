@@ -54,5 +54,24 @@ describe("expandClientRoomStays", () => {
       "BK-OPEN",
     ]);
     expect(rows.find((r) => r.booking?.booking_id === "BK-261118-3709")?.payment?.total).toBe(2000);
+    expect(rows.find((r) => r.booking?.booking_id === "BK-OPEN")?.payment?.balance).toBe(4000);
+  });
+
+  it("formats room display label as Room number — name", () => {
+    const formatRoomLabel = (room: { room_number?: string; room_name?: string } | null) => {
+      if (!room) return "";
+      const number = (room.room_number || "").trim();
+      const name = (room.room_name || "").trim();
+      if (number && name) return `Room ${number} — ${name}`;
+      if (number) return `Room ${number}`;
+      if (name) return name;
+      return "";
+    };
+
+    expect(formatRoomLabel({ room_number: "101", room_name: "Deluxe Room" })).toBe(
+      "Room 101 — Deluxe Room",
+    );
+    expect(formatRoomLabel({ room_number: "101", room_name: "" })).toBe("Room 101");
+    expect(formatRoomLabel(null)).toBe("");
   });
 });

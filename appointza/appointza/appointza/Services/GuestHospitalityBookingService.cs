@@ -208,6 +208,8 @@ namespace appointza.Services
                 booking_guid = bookingId,
                 check_in = checkIn,
                 check_out = checkOut,
+                check_in_time = checkInTime,
+                check_out_time = checkOutTime,
                 nights = quote.nights,
                 persons = req.persons,
                 guest = guest,
@@ -637,29 +639,54 @@ namespace appointza.Services
             room.isactive && !StructurallyBlockedStatuses.Contains(room.status ?? "");
 
         /// <summary>
-        /// Match organisation appointments board (<c>getRoomAvailabilityState</c>):
-        /// a stay is blocked when any requested night is not Available.
+        /// Blocks when the requested datetime window overlaps an occupying stay.
+        /// Hourly/same-day uses precise time ranges; overnight uses night coverage plus housekeeping.
         /// </summary>
         static bool HasRoomConflict(OrganisationRoom room, DateTime windowStart, DateTime windowEnd)
         {
+            if (windowEnd <= windowStart)
+                return true;
+
+            if (RoomStayHistory.OverlapsAnyStayWindow(room, windowStart, windowEnd))
+                return true;
+
             var requestStart = DateOnly.FromDateTime(windowStart);
             var requestEnd = DateOnly.FromDateTime(windowEnd);
 
-            if (RoomStayHistory.OverlapsAnyStay(room, requestStart, requestEnd))
-                return true;
-
-            // Hourly same calendar day — check that one day.
+            // Hourly same calendar day — also respect housekeeping for that day.
             if (requestEnd <= requestStart)
-                return !IsDayAvailableForGuest(room, requestStart);
+                return !IsDayAvailableForGuestIgnoringStayWindows(room, requestStart);
 
-            // Overnight nights: [check-in date, check-out date)
+            // Overnight nights: [check-in date, check-out date) housekeeping only
+            // (stay windows already checked above).
             for (var day = requestStart; day < requestEnd; day = day.AddDays(1))
             {
-                if (!IsDayAvailableForGuest(room, day))
+                if (!IsDayAvailableForGuestIgnoringStayWindows(room, day))
                     return true;
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Housekeeping / structural day availability without re-checking stay date windows
+        /// (those are handled by <see cref="RoomStayHistory.OverlapsAnyStayWindow"/>).
+        /// </summary>
+        static bool IsDayAvailableForGuestIgnoringStayWindows(OrganisationRoom room, DateOnly day)
+        {
+            var status = (room.status ?? "").Trim().ToLowerInvariant();
+
+            if (status is "maintenance" or "blocked" or "cleaning")
+                return false;
+
+            if (RoomStayHistory.HasAnyStay(room))
+                return true;
+
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            if (day != today)
+                return true;
+
+            return status is not ("occupied" or "reserved" or "checkout_pending" or "hold");
         }
 
         /// <summary>

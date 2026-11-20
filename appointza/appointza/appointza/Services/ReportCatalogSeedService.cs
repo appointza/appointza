@@ -595,6 +595,68 @@ ORDER BY completed_bookings DESC, revenue DESC",
                     Chart("bar", "staff_name", "completed_bookings", "Completed bookings")),
 
                 Report(
+                    "fin_room_revenue",
+                    "Room Booking Revenue",
+                    "Sales & Finance",
+                    "Paid and due amounts from room stays (excludes cancelled / no-show).",
+                    @"
+SELECT
+  COALESCE(r.room_number, '') AS room_number,
+  COALESCE(r.room_name, '') AS room_name,
+  COALESCE(s.stay->>'booking_id', '') AS booking_id,
+  COALESCE(NULLIF(s.stay->>'check_in', '')::date, NULL) AS check_in,
+  COALESCE(NULLIF(s.stay->>'check_out', '')::date, NULL) AS check_out,
+  COALESCE(s.stay->>'status', '') AS stay_status,
+  COALESCE(NULLIF(s.stay->'payment'->>'total', '')::numeric, 0) AS total_amount,
+  COALESCE(NULLIF(s.stay->'payment'->>'paid', '')::numeric, 0) AS paid_amount,
+  COALESCE(NULLIF(s.stay->'payment'->>'balance', '')::numeric,
+           GREATEST(
+             COALESCE(NULLIF(s.stay->'payment'->>'total', '')::numeric, 0)
+               - COALESCE(NULLIF(s.stay->'payment'->>'paid', '')::numeric, 0),
+             0
+           )) AS due_amount
+FROM organisation_rooms r
+CROSS JOIN LATERAL (
+  SELECT jsonb_array_elements(
+    CASE
+      WHEN jsonb_typeof(COALESCE(r.booking::jsonb->'stays', '[]'::jsonb)) = 'array'
+           AND jsonb_array_length(COALESCE(r.booking::jsonb->'stays', '[]'::jsonb)) > 0
+        THEN r.booking::jsonb->'stays'
+      WHEN COALESCE(r.booking::jsonb->>'check_in', '') <> ''
+        THEN jsonb_build_array(jsonb_build_object(
+          'booking_id', COALESCE(r.booking::jsonb->>'booking_id', ''),
+          'check_in', r.booking::jsonb->>'check_in',
+          'check_out', r.booking::jsonb->>'check_out',
+          'status', COALESCE(r.status, 'reserved'),
+          'closed', false,
+          'payment', COALESCE(r.payment::jsonb, '{}'::jsonb)
+        ))
+      ELSE '[]'::jsonb
+    END
+  ) AS stay
+) s
+WHERE r.organisation_id = @OrgId
+  AND COALESCE(r.isactive, TRUE) = TRUE
+  AND LOWER(COALESCE(s.stay->>'status', '')) NOT IN ('cancelled', 'no_show')
+  AND (@StartDate IS NULL OR COALESCE(NULLIF(s.stay->>'check_in', '')::date, CURRENT_DATE) >= @StartDate::date)
+  AND (@EndDate IS NULL OR COALESCE(NULLIF(s.stay->>'check_in', '')::date, CURRENT_DATE) <= @EndDate::date)
+ORDER BY check_in DESC NULLS LAST, room_number",
+                    Params(
+                        P("StartDate", "From date", "date", "date", false),
+                        P("EndDate", "To date", "date", "date", false)),
+                    Cols(
+                        C("room_number", "Room #"),
+                        C("room_name", "Room"),
+                        C("booking_id", "Booking"),
+                        C("check_in", "Check-in", "date"),
+                        C("check_out", "Check-out", "date"),
+                        C("stay_status", "Status"),
+                        C("total_amount", "Total", "currency"),
+                        C("paid_amount", "Paid", "currency"),
+                        C("due_amount", "Due", "currency")),
+                    Chart("bar", "room_number", "total_amount", "Room revenue")),
+
+                Report(
                     "fin_service_revenue",
                     "Service-Wise Revenue",
                     "Sales & Finance",

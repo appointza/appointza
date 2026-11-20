@@ -199,12 +199,88 @@ namespace appointza.Utils
             return aStart < bEnd && bStart < aEnd;
         }
 
+        /// <summary>Half-open interval overlap: [aStart, aEnd) vs [bStart, bEnd).</summary>
+        public static bool TimestampRangesOverlap(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) =>
+            aStart < aEnd && bStart < bEnd && aStart < bEnd && bStart < aEnd;
+
         public static bool OverlapsAnyStay(OrganisationRoom room, DateOnly requestStart, DateOnly requestEnd) =>
             Collect(room).Any(s =>
                 IsOccupyingStay(s) &&
                 TryParseDate(s.check_in, out var inDate) &&
                 TryParseDate(s.check_out, out var outDate) &&
                 RangesOverlap(requestStart, requestEnd, inDate, outDate));
+
+        /// <summary>
+        /// Hourly / timed stays: compare full datetime windows using stay check_in_time / check_out_time when present.
+        /// Falls back to date-only overnight overlap when stays have no times.
+        /// </summary>
+        public static bool OverlapsAnyStayWindow(OrganisationRoom room, DateTime windowStart, DateTime windowEnd)
+        {
+            if (windowEnd <= windowStart)
+                return false;
+
+            foreach (var stay in Collect(room).Where(IsOccupyingStay))
+            {
+                if (!TryGetStayWindow(stay, out var stayStart, out var stayEnd))
+                    continue;
+
+                // Same-day hourly stays with times: use precise timestamp overlap.
+                var requestSameDay = DateOnly.FromDateTime(windowStart) == DateOnly.FromDateTime(windowEnd)
+                    || windowEnd.Date == windowStart.Date;
+                var staySameDay = stayStart.Date == stayEnd.Date;
+                var hasStayTimes = !string.IsNullOrWhiteSpace(stay.check_in_time)
+                    || !string.IsNullOrWhiteSpace(stay.check_out_time)
+                    || staySameDay;
+
+                if (requestSameDay || hasStayTimes)
+                {
+                    if (TimestampRangesOverlap(windowStart, windowEnd, stayStart, stayEnd))
+                        return true;
+                    continue;
+                }
+
+                // Overnight date-only: [check-in, check-out) nights.
+                if (RangesOverlap(
+                        DateOnly.FromDateTime(windowStart),
+                        DateOnly.FromDateTime(windowEnd),
+                        DateOnly.FromDateTime(stayStart),
+                        DateOnly.FromDateTime(stayEnd)))
+                    return true;
+            }
+
+            return false;
+        }
+
+        public static bool TryGetStayWindow(RoomStayRecord stay, out DateTime start, out DateTime end)
+        {
+            start = default;
+            end = default;
+            if (!TryParseDate(stay.check_in, out var inDate) || !TryParseDate(stay.check_out, out var outDate))
+                return false;
+
+            var inTime = ParseTimeOrDefault(stay.check_in_time, new TimeOnly(14, 0));
+            var outTime = ParseTimeOrDefault(stay.check_out_time, outDate <= inDate ? new TimeOnly(17, 0) : new TimeOnly(11, 0));
+            start = inDate.ToDateTime(inTime);
+            end = outDate.ToDateTime(outTime);
+            if (end <= start && outDate <= inDate)
+            {
+                // Same-day stay missing/invalid end time — treat as a one-hour block so we don't block the whole day incorrectly.
+                end = start.AddHours(1);
+            }
+            return end > start;
+        }
+
+        static TimeOnly ParseTimeOrDefault(string? value, TimeOnly fallback)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+                return fallback;
+            var trimmed = value.Trim();
+            if (TimeOnly.TryParse(trimmed, out var parsed))
+                return parsed;
+            if (trimmed.Length >= 5 && TimeOnly.TryParse(trimmed[..5], out parsed))
+                return parsed;
+            return fallback;
+        }
 
         public static void PreserveStaysOnUpdate(OrganisationRoom incoming, OrganisationRoom existing)
         {
@@ -302,6 +378,8 @@ namespace appointza.Utils
             booking_guid = stay.booking_guid,
             check_in = stay.check_in,
             check_out = stay.check_out,
+            check_in_time = stay.check_in_time ?? "",
+            check_out_time = stay.check_out_time ?? "",
             nights = stay.nights,
             persons = stay.persons,
             guest = stay.guest == null ? null : CloneGuest(stay.guest),

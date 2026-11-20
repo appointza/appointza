@@ -708,21 +708,29 @@ WITH appointment_counts AS (
       AND (@date_to::date IS NULL OR DATE(appoinmentdate) <= @date_to::date)
 ),
 -- Appointment revenue = listed service prices on COMPLETED bookings.
+-- Accept common key casings (serviceprice / ServicePrice / prize / offerprize).
 appointment_revenue AS (
     SELECT COALESCE(SUM(item.service_price), 0) AS total_revenue
     FROM appoinment a
     CROSS JOIN LATERAL (
-        SELECT COALESCE(NULLIF(el->>'serviceprice', '')::numeric, NULLIF(el->>'price', '')::numeric, 0) AS service_price
+        SELECT COALESCE(
+            NULLIF(COALESCE(el->>'serviceprice', el->>'ServicePrice', el->>'servicePrice'), '')::numeric,
+            NULLIF(COALESCE(el->>'offerprize', el->>'OfferPrize', el->>'offerPrize'), '')::numeric,
+            NULLIF(COALESCE(el->>'prize', el->>'Prize', el->>'price', el->>'Price'), '')::numeric,
+            0
+        ) AS service_price
         FROM jsonb_array_elements(
             CASE
                 WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'servicelist') = 'array'
                     THEN a.attributes::jsonb->'servicelist'
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'ServiceList') = 'array'
+                    THEN a.attributes::jsonb->'ServiceList'
                 ELSE '[]'::jsonb
             END
         ) el
     ) item
     WHERE a.organisationlocationid = @orglocid
-      AND UPPER(COALESCE(a.statuscode, '')) = 'COMPLETED'
+      AND UPPER(COALESCE(a.statuscode, '')) IN ('COMPLETED', 'COMPLETE', 'DONE')
       AND (@date_from::date IS NULL OR DATE(a.appoinmentdate) >= @date_from::date)
       AND (@date_to::date IS NULL OR DATE(a.appoinmentdate) <= @date_to::date)
 ),
@@ -793,17 +801,24 @@ revenue_weeks AS (
         COALESCE(SUM(item.service_price), 0) AS revenue
     FROM appoinment a
     CROSS JOIN LATERAL (
-        SELECT COALESCE(NULLIF(el->>'serviceprice', '')::numeric, NULLIF(el->>'price', '')::numeric, 0) AS service_price
+        SELECT COALESCE(
+            NULLIF(COALESCE(el->>'serviceprice', el->>'ServicePrice', el->>'servicePrice'), '')::numeric,
+            NULLIF(COALESCE(el->>'offerprize', el->>'OfferPrize', el->>'offerPrize'), '')::numeric,
+            NULLIF(COALESCE(el->>'prize', el->>'Prize', el->>'price', el->>'Price'), '')::numeric,
+            0
+        ) AS service_price
         FROM jsonb_array_elements(
             CASE
                 WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'servicelist') = 'array'
                     THEN a.attributes::jsonb->'servicelist'
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'ServiceList') = 'array'
+                    THEN a.attributes::jsonb->'ServiceList'
                 ELSE '[]'::jsonb
             END
         ) el
     ) item
     WHERE a.organisationlocationid = @orglocid
-      AND UPPER(COALESCE(a.statuscode, '')) = 'COMPLETED'
+      AND UPPER(COALESCE(a.statuscode, '')) IN ('COMPLETED', 'COMPLETE', 'DONE')
       AND (
             (@date_from::date IS NOT NULL AND @date_to::date IS NOT NULL
                 AND DATE(a.appoinmentdate) >= @date_from::date

@@ -126,4 +126,75 @@ public class RoomStayHistoryCheckoutTests
         Assert.Equal("Bob", room.guest?.name);
         Assert.Equal("Check-out", RoomStayHistory.GetAvailabilityState(room, new DateOnly(2026, 11, 20)));
     }
+
+    [Fact]
+    public void OverlapsAnyStayWindow_allows_non_overlapping_hourly_same_day()
+    {
+        var room = new OrganisationRoom
+        {
+            status = "reserved",
+            booking = new RoomBookingData
+            {
+                stays =
+                [
+                    new RoomStayRecord
+                    {
+                        booking_id = "BK-H1",
+                        check_in = "2026-11-18",
+                        check_out = "2026-11-18",
+                        check_in_time = "10:00",
+                        check_out_time = "12:00",
+                        closed = false,
+                        status = "reserved",
+                    },
+                ],
+            },
+        };
+
+        var morning = new DateTime(2026, 11, 18, 10, 0, 0);
+        var noon = new DateTime(2026, 11, 18, 12, 0, 0);
+        var afternoonStart = new DateTime(2026, 11, 18, 14, 0, 0);
+        var afternoonEnd = new DateTime(2026, 11, 18, 16, 0, 0);
+        var overlapStart = new DateTime(2026, 11, 18, 11, 0, 0);
+        var overlapEnd = new DateTime(2026, 11, 18, 13, 0, 0);
+
+        Assert.False(RoomStayHistory.OverlapsAnyStayWindow(room, afternoonStart, afternoonEnd));
+        Assert.True(RoomStayHistory.OverlapsAnyStayWindow(room, morning, noon));
+        Assert.True(RoomStayHistory.OverlapsAnyStayWindow(room, overlapStart, overlapEnd));
+        Assert.False(RoomStayHistory.TimestampRangesOverlap(morning, noon, afternoonStart, afternoonEnd));
+        Assert.True(RoomStayHistory.TimestampRangesOverlap(morning, noon, overlapStart, overlapEnd));
+    }
+
+    [Fact]
+    public void OverlapsAnyStayWindow_overnight_still_blocks_nights()
+    {
+        var room = new OrganisationRoom
+        {
+            booking = new RoomBookingData
+            {
+                stays =
+                [
+                    new RoomStayRecord
+                    {
+                        booking_id = "BK-O1",
+                        check_in = "2026-11-18",
+                        check_out = "2026-11-20",
+                        check_in_time = "14:00",
+                        check_out_time = "11:00",
+                        closed = false,
+                        status = "confirmed",
+                    },
+                ],
+            },
+        };
+
+        Assert.True(RoomStayHistory.OverlapsAnyStayWindow(
+            room,
+            new DateTime(2026, 11, 19, 14, 0, 0),
+            new DateTime(2026, 11, 20, 11, 0, 0)));
+        Assert.False(RoomStayHistory.OverlapsAnyStayWindow(
+            room,
+            new DateTime(2026, 11, 20, 14, 0, 0),
+            new DateTime(2026, 11, 21, 11, 0, 0)));
+    }
 }
