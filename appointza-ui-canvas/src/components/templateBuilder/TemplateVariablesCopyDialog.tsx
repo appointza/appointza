@@ -22,6 +22,7 @@ import {
 import { cn } from "@/lib/utils";
 import { OrganisationService } from "@/services/organisation.service";
 import { OrganisationSelectReq } from "@/models/organisation.model";
+import { SiteDetailsService } from "@/services/siteDetails.service";
 import type { TemplateBuilderPage } from "@/types/templateBuilder.types";
 import {
   AI_SITE_CHIPS,
@@ -31,6 +32,17 @@ import {
   generateSitePageFromDescription,
 } from "@/utils/templateBuilder/aiSiteGenerator";
 import { generateTemplateHtml } from "@/utils/templateBuilder/html";
+
+function pageFromServerDraft(pageJson: string | undefined | null): TemplateBuilderPage | null {
+  if (!pageJson) return null;
+  try {
+    const parsed = JSON.parse(pageJson) as TemplateBuilderPage;
+    if (!parsed || !Array.isArray(parsed.blocks)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
 
 type PromptMode = "html" | "blocks";
 
@@ -121,7 +133,7 @@ export default function TemplateVariablesCopyDialog({
     setHistory((prev) => [clonePageSnapshot(page), ...prev].slice(0, 8));
   }, []);
 
-  const handleGenerate = useCallback(() => {
+  const handleGenerate = useCallback(async () => {
     if (!description.trim() && selectedChips.length === 0) {
       toast({
         title: "Add a description",
@@ -133,10 +145,27 @@ export default function TemplateVariablesCopyDialog({
     setIsGenerating(true);
     try {
       if (draftPage) pushHistory(draftPage);
-      const page = generateSitePageFromDescription(description, selectedChips, {
-        organisationName,
-        theme,
-      });
+      let page: TemplateBuilderPage | null = null;
+      try {
+        const siteService = new SiteDetailsService();
+        const draft = await siteService.generateTemplateDraft({
+          description,
+          chips: selectedChips,
+          organisation_id: user?.organisationid ?? 0,
+          organisation_location_id: locationId ?? user?.locationid ?? 0,
+          organisation_name: organisationName,
+          theme,
+        });
+        page = pageFromServerDraft(draft?.page_json);
+      } catch {
+        page = null;
+      }
+      if (!page) {
+        page = generateSitePageFromDescription(description, selectedChips, {
+          organisationName,
+          theme,
+        });
+      }
       setDraftPage(page);
       toast({
         title: "Design ready",
@@ -145,7 +174,18 @@ export default function TemplateVariablesCopyDialog({
     } finally {
       setIsGenerating(false);
     }
-  }, [description, selectedChips, draftPage, pushHistory, organisationName, theme, toast]);
+  }, [
+    description,
+    selectedChips,
+    draftPage,
+    pushHistory,
+    organisationName,
+    theme,
+    toast,
+    user?.organisationid,
+    user?.locationid,
+    locationId,
+  ]);
 
   const handleChip = useCallback(
     (chip: AiSiteChip) => {

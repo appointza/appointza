@@ -114,4 +114,24 @@ export class SiteDetailsService {
     );
     return resp.item;
   }
+
+  /** Deterministic live-block website draft (server-side, no paid LLM). */
+  async generateTemplateDraft(req: {
+    description: string;
+    chips?: string[];
+    organisation_id?: number;
+    organisation_location_id?: number;
+    organisation_name?: string;
+    theme?: string;
+    has_rooms?: boolean;
+    has_services?: boolean;
+    has_events?: boolean;
+  }) {
+    const postdata = new ActionReq<typeof req>();
+    postdata.item = req;
+    const resp = await this.http.post<
+      ActionRes<{ page_json?: string; live_blocks?: string[]; message?: string }>
+    >(this.baseurl + "/GenerateTemplateDraft", postdata);
+    return resp.item;
+  }
 }
