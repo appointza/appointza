@@ -31,6 +31,7 @@ import { useLocation } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { decodeEventBookingNotes } from "@/utils/eventBookingNotes.util";
 import { formatEventDateLong, compareDateOnly, todayDateOnlyString } from "@/utils/eventDate.util";
+import { formatAppointzaDate } from "@/utils/appointzaFormatters";
 import { cn } from "@/lib/utils";
 
 const QRCodeSVG = lazy(() =>
@@ -1041,7 +1042,9 @@ const MyEventBookings: React.FC = () => {
                   {roomDetails.room_number ? ` · #${roomDetails.room_number}` : ""}
                 </p>
                 <p>
-                  {roomDetails.check_in} → {roomDetails.check_out}
+                  {formatAppointzaDate(roomDetails.check_in) || roomDetails.check_in}
+                  {" → "}
+                  {formatAppointzaDate(roomDetails.check_out) || roomDetails.check_out}
                   {roomDetails.nights > 0 ? ` · ${roomDetails.nights} night(s)` : ""}
                 </p>
                 {roomDetails.persons ? <p>Guests: {roomDetails.persons}</p> : null}

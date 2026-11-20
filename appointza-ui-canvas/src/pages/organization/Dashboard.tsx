@@ -716,14 +716,22 @@ const OrganizationDashboard = () => {
         ) : null}
 
         {showDashboardLoading ? (
-          <div className="flex min-h-[18rem] items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white px-10 py-12 text-center shadow-none">
-              <Loader2 className="mx-auto mb-4 h-9 w-9 animate-spin text-[#E85D4C]" aria-label="Loading" />
-              <p className="text-sm font-medium text-stone-600">Loading your dashboard…</p>
-              <p className="mt-1 text-xs text-stone-400">
-                {waitingForLocations ? "Loading locations…" : "Fetching appointments and payments"}
-              </p>
+          <div className="space-y-4" aria-busy="true" aria-label="Loading dashboard">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-28 animate-pulse rounded-2xl border border-stone-200 bg-stone-100"
+                />
+              ))}
             </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="h-56 animate-pulse rounded-2xl border border-stone-200 bg-stone-100" />
+              <div className="h-56 animate-pulse rounded-2xl border border-stone-200 bg-stone-100" />
+            </div>
+            <p className="text-center text-xs text-stone-400">
+              {waitingForLocations ? "Loading locations…" : "Fetching appointments and payments…"}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">

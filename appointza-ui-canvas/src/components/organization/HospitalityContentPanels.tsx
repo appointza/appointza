@@ -34,8 +34,17 @@ import {
 } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
 import { formatRoomTypeLabel } from "@/utils/roomAmenities.util";
+import { formatAppointzaInr } from "@/utils/appointzaFormatters";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+
+function formatHospPriceMeta(price: string | number | null | undefined): string | undefined {
+  if (price == null || price === "") return undefined;
+  const raw = String(price).trim();
+  if (!raw) return undefined;
+  if (raw.includes("₹")) return raw;
+  return formatAppointzaInr(raw);
+}
 
 type PersistFn<T> = (items: T[]) => Promise<void>;
 
@@ -277,7 +286,7 @@ export function HospitalityPackagesPanel({
               <HospCard
                 key={pkg.id || index}
                 title={pkg.name || "Untitled package"}
-                meta={pkg.price || undefined}
+                meta={formatHospPriceMeta(pkg.price)}
                 body={
                   <>
                     <p className="line-clamp-2">
@@ -634,7 +643,7 @@ export function HospitalityGuestServicesPanel({
               <HospCard
                 key={service.id || index}
                 title={service.name || "Guest service"}
-                meta={service.price || undefined}
+                meta={formatHospPriceMeta(service.price)}
                 body={service.description ? <p className="line-clamp-2">{service.description}</p> : null}
                 onEdit={() => editor.openEdit(index, service)}
               />
