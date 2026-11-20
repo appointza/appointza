@@ -118,6 +118,9 @@ export default function RoomBookingPage() {
     total?: number;
     checkIn?: string;
     checkOut?: string;
+    roomLabel?: string;
+    persons?: number;
+    paymentPolicy?: string;
   } | null>(null);
 
   const scopeReady = parsed.organisationId > 0 && parsed.organisationLocationId > 0;
@@ -148,6 +151,8 @@ export default function RoomBookingPage() {
 
   const datesReady = useMemo(() => {
     if (!checkIn || !checkOut) return false;
+    // Overnight: date-only readiness (policy times applied later). Hourly: include times.
+    if (checkOut > checkIn) return true;
     const start = new Date(`${checkIn}T${checkInTime || "14:00"}`);
     const end = new Date(`${checkOut}T${checkOutTime || "11:00"}`);
     return !Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime()) && end > start;
@@ -194,6 +199,22 @@ export default function RoomBookingPage() {
       }),
   });
 
+  const bootstrapOrg = useMemo(() => {
+    const page = pickRecord(bootstrapData);
+    return pickRecord(page.organisation);
+  }, [bootstrapData]);
+  const isHourlyBooking =
+    pickStr(bootstrapOrg, "booking_type", "bookingType").toLowerCase() === "hourly";
+  const policyCheckInTime = normalizeTime(
+    pickStr(bootstrapOrg, "check_in_time", "checkInTime"),
+    "14:00",
+  );
+  const policyCheckOutTime = normalizeTime(
+    pickStr(bootstrapOrg, "check_out_time", "checkOutTime"),
+    "11:00",
+  );
+  const paymentPolicy = pickStr(bootstrapOrg, "payment_policy", "paymentPolicy");
+
   // Rooms for the selected stay window only.
   const {
     data: availabilityData,
@@ -206,8 +227,9 @@ export default function RoomBookingPage() {
       parsed.organisationLocationId,
       checkIn,
       checkOut,
-      checkInTime,
-      checkOutTime,
+      // Only bind times into availability when hourly — avoids remount/mangling on keystrokes.
+      isHourlyBooking ? checkInTime : "policy",
+      isHourlyBooking ? checkOutTime : "policy",
     ],
     enabled: scopeReady && datesReady,
     queryFn: () =>
@@ -218,8 +240,8 @@ export default function RoomBookingPage() {
         packageId: parsed.packageId || undefined,
         checkIn,
         checkOut,
-        checkInTime,
-        checkOutTime,
+        checkInTime: isHourlyBooking ? checkInTime : policyCheckInTime,
+        checkOutTime: isHourlyBooking ? checkOutTime : policyCheckOutTime,
       }),
   });
 
@@ -228,9 +250,6 @@ export default function RoomBookingPage() {
     [availabilityData, bootstrapData],
   );
   const organisation = useMemo(() => pickRecord(page.organisation), [page.organisation]);
-  const isHourlyBooking = pickStr(organisation, "booking_type", "bookingType").toLowerCase() === "hourly";
-  const policyCheckInTime = normalizeTime(pickStr(organisation, "check_in_time", "checkInTime"), "14:00");
-  const policyCheckOutTime = normalizeTime(pickStr(organisation, "check_out_time", "checkOutTime"), "11:00");
 
   const preferredPackage = useMemo(() => {
     if (!preferredPackageId) return null;
@@ -246,10 +265,8 @@ export default function RoomBookingPage() {
 
   const packageRoomType = pickStr(preferredPackage ?? {}, "room_type", "roomType").toLowerCase();
 
-  const availableRooms = useMemo(() => {
-    if (!datesReady || !availabilityData) return [];
-    const raw = (pickRecord(availabilityData).rooms as unknown[]) ?? [];
-    const mapped = raw
+  const mapPublicRooms = useCallback((rawRooms: unknown[]): PublicRoom[] => {
+    return rawRooms
       .map((item) => {
         const r = pickRecord(item);
         const cap = pickRecord(r.capacity);
@@ -272,16 +289,45 @@ export default function RoomBookingPage() {
           available_for_dates: availableRaw === false ? false : true,
         } satisfies PublicRoom;
       })
-      .filter((room) => room.id && room.available_for_dates !== false);
+      .filter((room) => !!room.id);
+  }, []);
+
+  const formatRoomLabel = useCallback((room: Pick<PublicRoom, "room_number" | "room_name"> | null | undefined) => {
+    if (!room) return "";
+    const number = (room.room_number || "").trim();
+    const name = (room.room_name || "").trim();
+    if (number && name) return `Room ${number} — ${name}`;
+    if (number) return `Room ${number}`;
+    if (name) return name;
+    return "";
+  }, []);
+
+  /** Prefer bootstrap rooms so preferred-room labels never flash raw "room-1". */
+  const bootstrapRooms = useMemo(() => {
+    const raw = (pickRecord(bootstrapData).rooms as unknown[]) ?? [];
+    return mapPublicRooms(raw);
+  }, [bootstrapData, mapPublicRooms]);
+
+  const availableRooms = useMemo(() => {
+    if (!datesReady || !availabilityData) return [];
+    const raw = (pickRecord(availabilityData).rooms as unknown[]) ?? [];
+    const mapped = mapPublicRooms(raw).filter((room) => room.available_for_dates !== false);
 
     if (!packageRoomType) return mapped;
     const typed = mapped.filter((room) => room.room_type.toLowerCase() === packageRoomType);
     // Never empty the list solely due to package room_type mismatch.
     return typed.length > 0 ? typed : mapped;
-  }, [availabilityData, datesReady, packageRoomType]);
+  }, [availabilityData, datesReady, packageRoomType, mapPublicRooms]);
 
   const policyHydratedRef = useRef(false);
-  const selectedRoom = availableRooms.find((r) => r.id === roomId) ?? null;
+  const preferredRoomMeta =
+    bootstrapRooms.find((r) => r.id === preferredRoomId) ??
+    availableRooms.find((r) => r.id === preferredRoomId) ??
+    null;
+  const selectedRoom =
+    availableRooms.find((r) => r.id === roomId) ??
+    bootstrapRooms.find((r) => r.id === roomId) ??
+    null;
   const minBookingDate = todayIsoLocal();
   const minCheckOutDate = checkIn && checkIn >= minBookingDate ? checkIn : minBookingDate;
 
@@ -431,11 +477,20 @@ export default function RoomBookingPage() {
 
       if (!result) throw new Error("Booking failed.");
 
+      const roomLabel =
+        formatRoomLabel(selectedRoom) ||
+        formatRoomLabel({
+          room_number: String(result.room_number || ""),
+          room_name: String(result.room_name || ""),
+        });
       setConfirmed({
         bookingCode: result.booking_code,
         total: result.quote?.total,
         checkIn: result.check_in,
         checkOut: result.check_out,
+        roomLabel,
+        persons: values.persons,
+        paymentPolicy: paymentPolicy || undefined,
       });
       toast({
         title: "Booking confirmed",
@@ -471,6 +526,17 @@ export default function RoomBookingPage() {
   }
 
   if (confirmed) {
+    const formatConfirmDate = (iso?: string) => {
+      if (!iso) return "";
+      const d = new Date(`${iso.slice(0, 10)}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return iso;
+      return d.toLocaleDateString("en-IN", {
+        weekday: "short",
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      });
+    };
     return (
       <div className="flex min-h-screen items-center justify-center bg-stone-50 p-6">
         <Card className="w-full max-w-lg border-emerald-200">
@@ -481,10 +547,15 @@ export default function RoomBookingPage() {
             <p>
               Reference: <span className="font-semibold">{confirmed.bookingCode}</span>
             </p>
+            {confirmed.roomLabel ? <p>{confirmed.roomLabel}</p> : null}
             {confirmed.checkIn && confirmed.checkOut ? (
               <p>
-                Stay: {confirmed.checkIn} → {confirmed.checkOut}
+                Stay: {formatConfirmDate(confirmed.checkIn)} → {formatConfirmDate(confirmed.checkOut)}
               </p>
+            ) : null}
+            {confirmed.persons ? <p>Guests: {confirmed.persons}</p> : null}
+            {confirmed.paymentPolicy ? (
+              <p className="text-stone-600">Payment: {confirmed.paymentPolicy}</p>
             ) : null}
             {confirmed.total != null ? <p className="font-medium">{formatInr(confirmed.total)}</p> : null}
             <Button asChild variant="outline" className="mt-2">
@@ -572,8 +643,13 @@ export default function RoomBookingPage() {
                     </p>
                   ) : preferredRoomId ? (
                     <p className="text-sm text-stone-500">
-                      Preferred room <strong>{preferredRoomId}</strong> will be selected if it’s free
-                      for your dates.
+                      Preferred room{" "}
+                      <strong>
+                        {formatRoomLabel(preferredRoomMeta) ||
+                          formatRoomLabel(selectedRoom?.id === preferredRoomId ? selectedRoom : null) ||
+                          "selected room"}
+                      </strong>{" "}
+                      will be selected if it’s free for your dates.
                     </p>
                   ) : (
                     <p className="text-sm text-stone-500">
@@ -593,16 +669,30 @@ export default function RoomBookingPage() {
                       ) : null}
                     </div>
                   </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label>Check-in time</Label>
-                      <Input type="time" {...form.register("checkInTime")} />
+                  {isHourlyBooking ? (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Start time</Label>
+                        <Input
+                          type="time"
+                          value={checkInTime}
+                          onChange={(e) => form.setValue("checkInTime", e.target.value, { shouldDirty: true })}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>End time</Label>
+                        <Input
+                          type="time"
+                          value={checkOutTime}
+                          onChange={(e) => form.setValue("checkOutTime", e.target.value, { shouldDirty: true })}
+                        />
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Check-out time</Label>
-                      <Input type="time" {...form.register("checkOutTime")} />
-                    </div>
-                  </div>
+                  ) : (
+                    <p className="rounded-lg border border-stone-100 bg-stone-50 px-3 py-2 text-sm text-stone-600">
+                      Property times: check-in {policyCheckInTime} · check-out {policyCheckOutTime}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
 
@@ -626,13 +716,14 @@ export default function RoomBookingPage() {
                       <>
                         {preferredUnavailable ? (
                           <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                            Room <strong>{preferredRoomId}</strong> is not free for these dates. Pick
-                            another available room below.
+                            Your preferred room is not free for these dates. Pick another available
+                            room below.
                           </p>
-                        ) : preferredRoomId && roomId === preferredRoomId ? (
+                        ) : preferredRoomId && roomId === preferredRoomId && selectedRoom ? (
                           <p className="text-sm text-stone-500">
-                            Preferred room <strong>{preferredRoomId}</strong> is available for your
-                            dates.
+                            Preferred room{" "}
+                            <strong>{formatRoomLabel(selectedRoom)}</strong>{" "}
+                            is available for your dates.
                           </p>
                         ) : null}
 
@@ -644,8 +735,7 @@ export default function RoomBookingPage() {
                           <option value="">Select an available room</option>
                           {availableRooms.map((room) => (
                             <option key={room.id} value={room.id}>
-                              Room {room.room_number}
-                              {room.room_name ? ` — ${room.room_name}` : ""} (
+                              {formatRoomLabel(room)} (
                               {formatRoomTypeLabel(room.room_type)})
                               {room.pricing?.price_per_night
                                 ? ` · ${formatInr(room.pricing.price_per_night)}/night`
@@ -656,10 +746,7 @@ export default function RoomBookingPage() {
 
                         {selectedRoom ? (
                           <div className="rounded-lg border bg-stone-50 p-3 text-sm">
-                            <p className="font-medium">
-                              Room {selectedRoom.room_number}
-                              {selectedRoom.room_name ? ` · ${selectedRoom.room_name}` : ""}
-                            </p>
+                            <p className="font-medium">{formatRoomLabel(selectedRoom)}</p>
                             <p className="text-stone-500">
                               Up to {selectedRoom.capacity?.total_guests ?? 2} guests
                               {selectedRoom.pricing?.price_per_night

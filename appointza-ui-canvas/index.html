@@ -84,7 +84,21 @@
     <noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-WN5T5SND"
     height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
     <!-- End Google Tag Manager (noscript) -->
-    <div id="root"></div>
+    <div id="root"><!-- React mounts here; public template surfaces get an immediate skeleton below via noscript-free inline paint --></div>
+    <script>
+      (function () {
+        if (!window.__APPOINTZA_PUBLIC_TEMPLATE__) return;
+        var root = document.getElementById("root");
+        if (!root || root.childNodes.length) return;
+        root.innerHTML =
+          '<div style="min-height:100vh;background:linear-gradient(#f8fafc,#f1f5f9);font-family:system-ui,sans-serif">' +
+          '<div style="max-width:48rem;margin:0 auto;padding:2.5rem 1rem">' +
+          '<div style="height:2.5rem;width:12rem;border-radius:0.375rem;background:#e2e8f0;margin-bottom:2rem"></div>' +
+          '<div style="height:1.5rem;width:18rem;border-radius:0.375rem;background:#e2e8f0;margin-bottom:1rem"></div>' +
+          '<p style="color:#64748b;font-size:0.875rem;text-align:center;margin-top:2rem">Loading booking page…</p>' +
+          "</div></div>";
+      })();
+    </script>
     <script>
       (function () {
         if (window.__APPOINTZA_PUBLIC_TEMPLATE__) return;

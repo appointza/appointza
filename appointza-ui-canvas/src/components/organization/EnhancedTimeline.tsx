@@ -33,6 +33,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+import { getAppointmentStatusLabel } from "@/utils/appointmentStatus.util";
 
 interface EnhancedTimelineProps {
   appointments: BookedAppoinmentRes[];
@@ -808,7 +809,7 @@ const EnhancedTimeline = ({
               id: `appointment-${apt.id}-${dateIndex}-${itemIndex}`,
               type: "appointment",
               title: `Appointment: ${serviceNames}`,
-              description: `Status: ${apt.statuscode || "Scheduled"} | Staff: ${apt.staffname || "N/A"} | Time: ${apt.fromtime || "N/A"}`,
+              description: `Status: ${getAppointmentStatusLabel(apt.statuscode)} | Staff: ${apt.staffname || "—"} | Time: ${apt.fromtime || "—"}`,
               timestamp: aptDate,
               staff: apt.staffname || "",
               appointment: apt

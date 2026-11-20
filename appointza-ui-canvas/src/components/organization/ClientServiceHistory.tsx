@@ -3,30 +3,22 @@ import { Calendar } from "lucide-react";
 import { format } from "date-fns";
 import { BookedAppoinmentRes } from "@/models/appoinment.model";
 import { cn } from "@/lib/utils";
+import { getAppointmentStatusPresentation } from "@/utils/appointmentStatus.util";
 
 interface ClientServiceHistoryProps {
   appointments: BookedAppoinmentRes[];
 }
 
 function statusBadge(status: string) {
-  const key = status.toLowerCase();
-  if (key === "completed") {
-    return (
-      <Badge className="h-5 border-transparent bg-emerald-50 px-1.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-50">
-        Completed
-      </Badge>
-    );
-  }
-  if (key === "cancelled") {
-    return (
-      <Badge className="h-5 border-transparent bg-red-50 px-1.5 text-[10px] font-medium text-red-700 hover:bg-red-50">
-        Cancelled
-      </Badge>
-    );
-  }
+  const presentation = getAppointmentStatusPresentation(status);
   return (
-    <Badge className="h-5 border-transparent bg-[#eef2ff] px-1.5 text-[10px] font-medium text-[#2a5af5] hover:bg-[#eef2ff]">
-      Scheduled
+    <Badge
+      className={cn(
+        "h-5 px-1.5 text-[10px] font-medium hover:opacity-90",
+        presentation.className,
+      )}
+    >
+      {presentation.label}
     </Badge>
   );
 }
@@ -60,7 +52,7 @@ const ClientServiceHistory = ({ appointments }: ClientServiceHistoryProps) => {
             : [];
           const serviceNames = services.map((s) => s.servicename).filter(Boolean);
           const total = services.reduce((sum, s) => sum + (Number(s.serviceprice) || 0), 0);
-          const statusText = appointment.statuscode || "scheduled";
+          const statusText = appointment.statuscode || "";
           const staff = appointment.staffname || "";
           const dateObj = new Date(appointment.appoinmentdate);
           const time = appointment.fromtime ? String(appointment.fromtime).slice(0, 5) : "";

@@ -16,9 +16,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
-import { Calendar, Clock, User, DollarSign, FileText, Plus, Save, Upload, Loader2, X, Check, Eye, Download } from "lucide-react";
+import { Calendar, CalendarClock, Clock, User, DollarSign, FileText, Plus, Save, Upload, Loader2, X, Check, Eye, Download } from "lucide-react";
 import { format } from "date-fns";
+import { useNavigate } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
+import { canRescheduleAppointmentStatus } from "@/utils/walkInBooking.util";
 import { Appoinment, BookedAppoinmentRes, TaskItem, FileItem } from "@/models/appoinment.model";
 import { AppoinmentService } from "@/services/appoinment.service";
 import { FilesService } from "@/services/files.service";
@@ -32,6 +34,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import FileViewer from "@/components/common/FileViewer";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
+import { getAppointmentStatusPresentation } from "@/utils/appointmentStatus.util";
 
 interface UserAppointmentDetailsProps {
   appointment: BookedAppoinmentRes;
@@ -49,6 +52,7 @@ interface Task {
 
 const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpdate, onRefresh }: UserAppointmentDetailsProps) => {
   const { toast } = useToast();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const isMobile = useIsMobile();
   const [notes, setNotes] = useState(appointment.notes || "");
@@ -252,16 +256,14 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
   };
 
   const getStatusBadge = () => {
-    const appointmentDate = new Date(appointment.appoinmentdate);
-    const isUpcoming = appointmentDate >= new Date();
-    
-    if (!appointment.isactive) {
-      return <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Cancelled</Badge>;
-    } else if (isUpcoming) {
-      return <Badge className="bg-blue-100 text-blue-800 hover:bg-blue-100">Upcoming</Badge>;
-    } else {
-      return <Badge className="bg-green-100 text-green-800 hover:bg-green-100">Completed</Badge>;
-    }
+    const presentation = getAppointmentStatusPresentation(
+      currentAppointment.statuscode || appointment.statuscode,
+    );
+    return (
+      <Badge className={cn(presentation.className, "hover:opacity-90")}>
+        {presentation.label}
+      </Badge>
+    );
   };
 
   // Combined save function for all appointment data
@@ -738,6 +740,31 @@ const UserAppointmentDetails = ({ appointment, isOpen, onClose, onAppointmentUpd
         </SheetHeader>
 
         <div className="space-y-6">
+          {canRescheduleAppointmentStatus(currentAppointment.statuscode || appointment.statuscode) ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => {
+                const orgId = appointment.organizationid || 0;
+                const locId = appointment.organisationlocationid || 0;
+                if (!orgId || !locId || !appointment.id) {
+                  toast({
+                    title: "Cannot reschedule",
+                    description: "Missing organisation or appointment details.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                onClose();
+                navigate(`/book-appointment/${orgId}/${locId}?reschedule=${appointment.id}`);
+              }}
+            >
+              <CalendarClock className="mr-2 h-4 w-4" />
+              Reschedule appointment
+            </Button>
+          ) : null}
+
           {/* Appointment Overview */}
           <Card>
             <CardHeader>

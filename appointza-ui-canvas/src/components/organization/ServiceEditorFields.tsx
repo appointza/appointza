@@ -57,10 +57,11 @@ export function ServiceEditorFields({
         <NumberInput
           id={`${prefix}duration`}
           min={1}
+          max={1440}
           value={service.timetaken}
           onValueChange={(timetaken) => onChange({ ...service, timetaken })}
           className={serviceFormInputClass}
-          placeholder="Enter duration in minutes"
+          placeholder="Enter duration in minutes (1–1440)"
         />
       </div>
 
@@ -211,10 +212,11 @@ export function ComboEditorFields({
         <NumberInput
           id={`${prefix}duration`}
           min={1}
+          max={1440}
           value={service.timetaken}
           onValueChange={(timetaken) => onChange({ ...service, timetaken })}
           className={serviceFormInputClass}
-          placeholder="Enter total duration in minutes"
+          placeholder="Enter total duration in minutes (1–1440)"
         />
       </div>
 

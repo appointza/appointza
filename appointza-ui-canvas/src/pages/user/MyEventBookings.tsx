@@ -31,6 +31,7 @@ import { useLocation } from "react-router-dom";
 import { useToast } from "@/hooks/use-toast";
 import { decodeEventBookingNotes } from "@/utils/eventBookingNotes.util";
 import { formatEventDateLong, compareDateOnly, todayDateOnlyString } from "@/utils/eventDate.util";
+import { formatAppointzaDate } from "@/utils/appointzaFormatters";
 import { cn } from "@/lib/utils";
 
 const QRCodeSVG = lazy(() =>
@@ -59,6 +60,13 @@ const MyEventBookings: React.FC = () => {
   const [bookingToCancel, setBookingToCancel] = useState<EventBooking | null>(null);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [roomToCancel, setRoomToCancel] = useState<GuestHospitalityBookingMineItem | null>(null);
+  const [roomDetails, setRoomDetails] = useState<GuestHospitalityBookingMineItem | null>(null);
+  const [roomToModify, setRoomToModify] = useState<GuestHospitalityBookingMineItem | null>(null);
+  const [modifyCheckIn, setModifyCheckIn] = useState("");
+  const [modifyCheckOut, setModifyCheckOut] = useState("");
+  const [modifyNote, setModifyNote] = useState("");
+  const [isRoomActionBusy, setIsRoomActionBusy] = useState(false);
   
   // Review state
   const [reviews, setReviews] = useState<Review[]>([]);
@@ -313,17 +321,71 @@ const MyEventBookings: React.FC = () => {
     );
   };
 
-  const cardPaymentPill = (status: string) => {
+  const cardPaymentPill = (status: string, labelOverride?: string) => {
     const s = (status || "").toLowerCase();
     const label =
-      s === "paid" ? "Paid" : s === "failed" ? "Failed" : s === "refunded" ? "Refunded" : "Pending";
+      labelOverride ||
+      (s === "paid" ? "Paid" : s === "failed" ? "Failed" : s === "refunded" ? "Refunded" : "Pending");
     let pillClass = "bg-yellow-100 text-yellow-700";
-    if (s === "paid") pillClass = "bg-green-100 text-green-700";
+    if (s === "paid" || s === "pay_at_property") pillClass = "bg-green-100 text-green-700";
     if (s === "failed") pillClass = "bg-red-100 text-red-700";
     if (s === "refunded") pillClass = "bg-blue-100 text-blue-700";
     return (
-      <span className={`inline-block rounded-full px-3 py-1 text-xs ${pillClass}`}>Payment: {label}</span>
+      <span className={`inline-block rounded-full px-3 py-1 text-xs ${pillClass}`}>
+        {labelOverride ? label : `Payment: ${label}`}
+      </span>
     );
+  };
+
+  const handleCancelRoom = async () => {
+    if (!roomToCancel) return;
+    setIsRoomActionBusy(true);
+    try {
+      await roomBookingService.cancel({
+        organisation_id: roomToCancel.organisation_id,
+        room_id: roomToCancel.room_id,
+        booking_id: roomToCancel.booking_id,
+        booking_guid: roomToCancel.booking_guid,
+      });
+      toast({ title: "Booking cancelled" });
+      setRoomToCancel(null);
+      await fetchBookings();
+    } catch (error) {
+      toast({
+        title: "Cancel failed",
+        description: error instanceof Error ? error.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRoomActionBusy(false);
+    }
+  };
+
+  const handleRequestRoomModify = async () => {
+    if (!roomToModify || !modifyCheckIn || !modifyCheckOut) return;
+    setIsRoomActionBusy(true);
+    try {
+      await roomBookingService.requestModify({
+        organisation_id: roomToModify.organisation_id,
+        room_id: roomToModify.room_id,
+        booking_id: roomToModify.booking_id,
+        booking_guid: roomToModify.booking_guid,
+        requested_check_in: modifyCheckIn,
+        requested_check_out: modifyCheckOut,
+        note: modifyNote || undefined,
+      });
+      toast({ title: "Modification requested", description: "The property will review your new dates." });
+      setRoomToModify(null);
+      await fetchBookings();
+    } catch (error) {
+      toast({
+        title: "Request failed",
+        description: error instanceof Error ? error.message : "Try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsRoomActionBusy(false);
+    }
   };
 
   const cardCheckInPill = (status: string) => {
@@ -697,7 +759,51 @@ const MyEventBookings: React.FC = () => {
                                   {room.closed ? "Completed" : room.status.replaceAll("_", " ") || "Reserved"}
                                 </span>
                               </div>
-                              {room.balance > 0 ? cardPaymentPill("pending") : room.total > 0 ? cardPaymentPill("paid") : null}
+                              {room.pay_at_property
+                                ? cardPaymentPill("pay_at_property", "Pay at property")
+                                : room.balance > 0
+                                  ? cardPaymentPill("pending")
+                                  : room.total > 0
+                                    ? cardPaymentPill("paid")
+                                    : null}
+                              <div className="flex flex-wrap gap-2 pt-1">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8"
+                                  onClick={() => setRoomDetails(room)}
+                                >
+                                  View details
+                                </Button>
+                                {!room.closed && room.can_cancel ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8 text-red-600"
+                                    onClick={() => setRoomToCancel(room)}
+                                  >
+                                    Cancel
+                                  </Button>
+                                ) : null}
+                                {!room.closed && room.status !== "checked_in" ? (
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-8"
+                                    onClick={() => {
+                                      setRoomToModify(room);
+                                      setModifyCheckIn(room.check_in?.slice(0, 10) || "");
+                                      setModifyCheckOut(room.check_out?.slice(0, 10) || "");
+                                      setModifyNote("");
+                                    }}
+                                  >
+                                    Modify dates
+                                  </Button>
+                                ) : null}
+                              </div>
                             </div>
                           </div>
                         );
@@ -896,6 +1002,103 @@ const MyEventBookings: React.FC = () => {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
+
+        <AlertDialog open={Boolean(roomToCancel)} onOpenChange={(open) => !open && setRoomToCancel(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Cancel room booking</AlertDialogTitle>
+              <AlertDialogDescription>
+                Cancel {roomToCancel?.booking_id}?{" "}
+                {roomToCancel?.cancellation_policy
+                  ? `Policy: ${roomToCancel.cancellation_policy}`
+                  : "Free cancellation is typically allowed up to 24 hours before check-in."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isRoomActionBusy}>Keep booking</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => void handleCancelRoom()}
+                disabled={isRoomActionBusy}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                {isRoomActionBusy ? "Cancelling…" : "Cancel booking"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <Dialog open={Boolean(roomDetails)} onOpenChange={(open) => !open && setRoomDetails(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Room booking details</DialogTitle>
+              <DialogDescription>
+                {roomDetails?.organisation_name || "Stay"} · Ref {roomDetails?.booking_id}
+              </DialogDescription>
+            </DialogHeader>
+            {roomDetails ? (
+              <div className="space-y-2 text-sm">
+                <p>
+                  {roomDetails.room_name || `Room ${roomDetails.room_number}`}
+                  {roomDetails.room_number ? ` · #${roomDetails.room_number}` : ""}
+                </p>
+                <p>
+                  {formatAppointzaDate(roomDetails.check_in) || roomDetails.check_in}
+                  {" → "}
+                  {formatAppointzaDate(roomDetails.check_out) || roomDetails.check_out}
+                  {roomDetails.nights > 0 ? ` · ${roomDetails.nights} night(s)` : ""}
+                </p>
+                {roomDetails.persons ? <p>Guests: {roomDetails.persons}</p> : null}
+                <p className="capitalize">Status: {(roomDetails.status || "").replaceAll("_", " ")}</p>
+                {roomDetails.pay_at_property ? (
+                  <p>Payment: Pay at property</p>
+                ) : roomDetails.total > 0 ? (
+                  <p>
+                    Amount: ₹{roomDetails.total.toLocaleString("en-IN")}
+                    {roomDetails.balance > 0
+                      ? ` · ₹${roomDetails.balance.toLocaleString("en-IN")} due`
+                      : " · Paid"}
+                  </p>
+                ) : null}
+                {roomDetails.cancellation_policy ? (
+                  <p className="text-xs text-zinc-500">{roomDetails.cancellation_policy}</p>
+                ) : null}
+              </div>
+            ) : null}
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={Boolean(roomToModify)} onOpenChange={(open) => !open && setRoomToModify(null)}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Request date change</DialogTitle>
+              <DialogDescription>
+                Submit new dates for {roomToModify?.booking_id}. The property will confirm.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 py-2">
+              <div className="space-y-1.5">
+                <Label>New check-in</Label>
+                <Input type="date" value={modifyCheckIn} onChange={(e) => setModifyCheckIn(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>New check-out</Label>
+                <Input type="date" value={modifyCheckOut} onChange={(e) => setModifyCheckOut(e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Note (optional)</Label>
+                <Textarea value={modifyNote} onChange={(e) => setModifyNote(e.target.value)} rows={3} />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRoomToModify(null)} disabled={isRoomActionBusy}>
+                Close
+              </Button>
+              <Button onClick={() => void handleRequestRoomModify()} disabled={isRoomActionBusy || !modifyCheckIn || !modifyCheckOut}>
+                {isRoomActionBusy ? "Submitting…" : "Submit request"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* Review Dialog */}
         <Dialog open={showReviewDialog} onOpenChange={setShowReviewDialog}>

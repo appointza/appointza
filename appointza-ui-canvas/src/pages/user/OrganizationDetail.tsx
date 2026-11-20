@@ -27,71 +27,12 @@ interface SelectedService {
   quantity: number;
 }
 
-// Dummy data for testing
-const dummyOrganization = {
-  id: 1,
-  name: "City Medical Center",
-  category: "Healthcare",
-  about: "A comprehensive medical center providing quality healthcare services with experienced doctors and modern facilities.",
-  address: "123 Health Street, Medical District, Chennai, Tamil Nadu",
-  phone: "+91 98765 43210",
-  email: "contact@citymedical.com",
-  rating: 4.5,
-  reviews: 128
-};
-
-const dummyServices = [
-  {
-    id: 1,
-    name: "General Consultation",
-    description: "General health checkup and consultation",
-    price: 500,
-    duration: 30
-  },
-  {
-    id: 2,
-    name: "Cardiology Consultation",
-    description: "Heart specialist consultation",
-    price: 1200,
-    duration: 45
-  },
-  {
-    id: 3,
-    name: "Dental Checkup",
-    description: "Complete dental examination",
-    price: 800,
-    duration: 60
-  },
-  {
-    id: 4,
-    name: "Blood Test",
-    description: "Complete blood count and analysis",
-    price: 300,
-    duration: 15
-  }
-];
-
-const dummyStaff = [
-  {
-    id: 1,
-    name: "Dr. Priya Sharma"
-  },
-  {
-    id: 2,
-    name: "Dr. Rajesh Kumar"
-  },
-  {
-    id: 3,
-    name: "Dr. Meera Nair"
-  }
-];
-
 const OrganizationDetail = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const { toast } = useToast();
-  const organizationId = parseInt(id || "0");
+  const organizationId = parseInt(id || "0", 10);
   
   const { getOrganizationQuery } = useOrganizations();
   const { data: fetchedOrganization, isLoading: orgLoading } = getOrganizationQuery(organizationId);
@@ -99,10 +40,9 @@ const OrganizationDetail = () => {
   const { staff: fetchedStaff, isLoading: staffLoading } = useStaff(organizationId);
   const { createAppointment, isCreating } = useAppointments();
   
-  // Use dummy data if real data is not available
-  const organization = fetchedOrganization || dummyOrganization;
-  const services = fetchedServices?.length > 0 ? fetchedServices : dummyServices;
-  const staff = fetchedStaff?.length > 0 ? fetchedStaff : dummyStaff;
+  const organization = fetchedOrganization;
+  const services = fetchedServices ?? [];
+  const staff = fetchedStaff ?? [];
   
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [selectedServices, setSelectedServices] = useState<SelectedService[]>([]);
@@ -165,7 +105,7 @@ const OrganizationDetail = () => {
         description: "Please log in to book an appointment",
         variant: "default",
       });
-      navigate('/login', { state: { from: `/organization/${id}` } });
+      navigate('/login', { state: { from: `/explore/organization/${id}` } });
       return;
     }
 
@@ -249,6 +189,46 @@ const OrganizationDetail = () => {
     );
   }
 
+  if (!organizationId || !organization) {
+    return (
+      <UserLayout>
+        <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+          <h2 className="text-2xl font-semibold">Organisation not found</h2>
+          <p className="text-muted-foreground">This page is no longer available.</p>
+          <Link to="/explore" className="text-blue-600 underline">
+            Back to Explore
+          </Link>
+        </div>
+      </UserLayout>
+    );
+  }
+
+  const orgName = (organization as { name?: string; organisationname?: string }).name
+    || (organization as { organisationname?: string }).organisationname
+    || "Organisation";
+  const orgAddress =
+    (organization as { address?: string }).address ||
+    [
+      (organization as { organisationlocationaddressline1?: string }).organisationlocationaddressline1,
+      (organization as { organisationlocationcity?: string }).organisationlocationcity,
+    ]
+      .filter(Boolean)
+      .join(", ") ||
+    "";
+  const orgPhone =
+    (organization as { phone?: string; mobile?: string }).phone ||
+    (organization as { mobile?: string }).mobile ||
+    "";
+  const orgAbout =
+    (organization as { about?: string; notes?: string; organisationnotes?: string }).about ||
+    (organization as { organisationnotes?: string }).organisationnotes ||
+    (organization as { notes?: string }).notes ||
+    "";
+  const orgCategory =
+    (organization as { category?: string; organisationprimarytypecode?: string }).category ||
+    (organization as { organisationprimarytypecode?: string }).organisationprimarytypecode ||
+    "";
+
   return (
     <UserLayout>
       <div className="space-y-6 p-4">
@@ -263,22 +243,22 @@ const OrganizationDetail = () => {
           
           <div className="flex flex-col md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-3xl font-bold tracking-tight">{organization.name}</h2>
+              <h2 className="text-3xl font-bold tracking-tight">{orgName}</h2>
               <div className="flex items-center mt-1 space-x-4">
-                <div className="flex items-center">
-                  <Star className="h-4 w-4 text-amber-500 fill-current" />
-                  <span className="ml-1 text-sm">{dummyOrganization.rating} ({dummyOrganization.reviews} reviews)</span>
-                </div>
-                <div className="flex items-center text-sm text-muted-foreground">
-                  <MapPin className="h-4 w-4 mr-1" />
-                  {dummyOrganization.address}
-                </div>
+                {orgAddress ? (
+                  <div className="flex items-center text-sm text-muted-foreground">
+                    <MapPin className="h-4 w-4 mr-1" />
+                    {orgAddress}
+                  </div>
+                ) : null}
               </div>
             </div>
-            <Button className="mt-4 md:mt-0">
-              <Phone className="h-4 w-4 mr-2" />
-              {dummyOrganization.phone}
-            </Button>
+            {orgPhone ? (
+              <Button className="mt-4 md:mt-0">
+                <Phone className="h-4 w-4 mr-2" />
+                {orgPhone}
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -286,11 +266,11 @@ const OrganizationDetail = () => {
           <div className="lg:col-span-2">
             <Card>
               <CardHeader>
-                <CardTitle>About {organization.name}</CardTitle>
-                <CardDescription>{dummyOrganization.category}</CardDescription>
+                <CardTitle>About {orgName}</CardTitle>
+                {orgCategory ? <CardDescription>{orgCategory}</CardDescription> : null}
               </CardHeader>
               <CardContent className="space-y-6">
-                <p>{dummyOrganization.about}</p>
+                {orgAbout ? <p>{orgAbout}</p> : null}
 
                 <div>
                   <h4 className="font-medium mb-3">Available Services</h4>

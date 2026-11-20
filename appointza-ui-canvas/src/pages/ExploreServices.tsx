@@ -936,16 +936,12 @@ const ExploreServices = () => {
                       <>
                         <a
                           href={urls.fullUrl}
-                          target="_blank"
-                          rel="noreferrer"
                           className="mb-3 block truncate text-xs text-slate-500 hover:text-[#2a5af5]"
                         >
                           {urls.displayUrl}
                         </a>
                         <a
                           href={urls.fullUrl}
-                          target="_blank"
-                          rel="noreferrer"
                           className="inline-flex items-center gap-2 rounded-[6px] bg-[#528ff0] px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-[#3d7ae8]"
                         >
                           View profile &amp; book

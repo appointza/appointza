@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { format, parseISO } from "date-fns";
 import { Loader2, MapPin, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -29,6 +31,28 @@ type RoomStatusPanelProps = {
   onEditRoom?: (roomId: number) => void;
 };
 
+function todayIsoLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function formatBoardDate(value?: string) {
+  if (!value) return "";
+  try {
+    return format(parseISO(value), "EEE, d MMM yyyy");
+  } catch {
+    return value;
+  }
+}
+
+function roomHasGuestForBoardDay(room: OrganisationRoom): boolean {
+  const state = (room.availability_state || "").toLowerCase();
+  if (state === "available" || state === "unavailable" || state === "cleaning") return false;
+  const status = (room.status || "").toLowerCase();
+  if (status === "available" || status === "maintenance" || status === "blocked") return false;
+  return Boolean(room.guest?.name?.trim());
+}
+
 export function RoomStatusPanel({
   locationId,
   locationName,
@@ -39,6 +63,7 @@ export function RoomStatusPanel({
   const { user } = useAuth();
   const organisationId = user?.organisationid ?? 0;
 
+  const [asOfDate, setAsOfDate] = useState(todayIsoLocal);
   const [loading, setLoading] = useState(true);
   const [board, setBoard] = useState<OrganisationRoomStatusBoardRes | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<OrganisationRoom | null>(null);
@@ -57,6 +82,7 @@ export function RoomStatusPanel({
         organisation_id: organisationId,
         organisation_location_id: locationId,
         room_id: selectedRoomId,
+        date: asOfDate,
       });
       setBoard(data);
       setSelectedRoom(data?.selected_room ?? null);
@@ -69,7 +95,7 @@ export function RoomStatusPanel({
     } finally {
       setLoading(false);
     }
-  }, [locationId, organisationId, selectedRoomId, toast]);
+  }, [asOfDate, locationId, organisationId, selectedRoomId, toast]);
 
   useEffect(() => {
     void loadBoard();
@@ -128,15 +154,35 @@ export function RoomStatusPanel({
     );
   }
 
+  const asOfLabel = formatBoardDate(board?.as_of || asOfDate);
+
   return (
     <div className="space-y-4">
-      {locationName ? (
-        <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-[#667085]">
-          <MapPin className="h-3.5 w-3.5 shrink-0 text-[#2a5af5]" />
-          Status for <span className="font-medium text-[#1a1a1a]">{locationName}</span>
-          {board?.as_of ? <span className="text-[#98a2b3]">· {board.as_of}</span> : null}
-        </p>
-      ) : null}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="min-w-0">
+          {locationName ? (
+            <p className="flex flex-wrap items-center gap-1.5 text-[13px] text-[#667085]">
+              <MapPin className="h-3.5 w-3.5 shrink-0 text-[#2a5af5]" />
+              Status for <span className="font-medium text-[#1a1a1a]">{locationName}</span>
+              {asOfLabel ? <span className="text-[#98a2b3]">· {asOfLabel}</span> : null}
+            </p>
+          ) : asOfLabel ? (
+            <p className="text-[13px] text-[#667085]">Board date · {asOfLabel}</p>
+          ) : null}
+        </div>
+        <div className="space-y-1">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#9aa3b2]">
+            Board date
+          </p>
+          <Input
+            type="date"
+            value={asOfDate}
+            onChange={(e) => setAsOfDate(e.target.value || todayIsoLocal())}
+            className={cn(org.input, "h-9 w-[160px]")}
+            aria-label="Room status board date"
+          />
+        </div>
+      </div>
 
       <div className="flex flex-wrap gap-2">
         {(board?.status_summary ?? []).map((item) => (
@@ -182,12 +228,12 @@ export function RoomStatusPanel({
                   <p className="mt-1 text-[12px] text-[#667085]">{room.room_name}</p>
                 ) : null}
                 <p className="mt-2 text-[12px] text-[#667085]">
-                  {room.guest?.name ? (
+                  {roomHasGuestForBoardDay(room) ? (
                     <>
-                      Guest: <span className="font-medium text-[#344054]">{room.guest.name}</span>
+                      Guest: <span className="font-medium text-[#344054]">{room.guest?.name}</span>
                     </>
                   ) : (
-                    <span className="text-[#98a2b3]">No guest assigned</span>
+                    <span className="text-[#98a2b3]">No guest on this date</span>
                   )}
                 </p>
               </button>
@@ -215,7 +261,7 @@ export function RoomStatusPanel({
           <div className="flex flex-wrap items-end gap-2.5">
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.06em] text-[#9aa3b2]">
-                Set status
+                Housekeeping status
               </p>
               <Select
                 value={selectedRoom.status}
@@ -249,27 +295,11 @@ export function RoomStatusPanel({
               onClick={() =>
                 void runAction(
                   () =>
-                    hospitalityService.checkoutRoom({
-                      id: selectedRoom.id,
-                      organisation_id: organisationId,
-                    }),
-                  "Room is available now.",
-                )
-              }
-            >
-              Checkout — available
-            </Button>
-            <Button
-              disabled={busy}
-              className={org.btnPrimary}
-              onClick={() =>
-                void runAction(
-                  () =>
                     hospitalityService.markRoomClean({
                       id: selectedRoom.id,
                       organisation_id: organisationId,
                     }),
-                  "Room marked clean and available.",
+                  `Room ${selectedRoom.room_number} marked clean.`,
                 )
               }
             >
@@ -281,3 +311,5 @@ export function RoomStatusPanel({
     </div>
   );
 }
+
+export default RoomStatusPanel;

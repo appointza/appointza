@@ -15,6 +15,8 @@ import {
   UsersRegisterReq,
   UsersRegisterRes,
   UsersSelectReq,
+  StaffInviteLookupReq,
+  StaffInviteLookupRes,
   UsersSupplierInviteScreenReq,
   UsersSupplierInviteScreenRes,
   UserUpdateOrderStatusReq,
@@ -38,6 +40,17 @@ export class UsersService {
     postdata.item = req;
     let resp = await this.http.post<ActionRes<Array<Users>>>(
       this.baseurl + '/select',
+      postdata,
+    );
+    return resp.item!;
+  }
+
+  /** Org-admin staff invite lookup — no cross-org name/email. */
+  async lookupForStaffInvite(mobile: string) {
+    const postdata: ActionReq<StaffInviteLookupReq> = new ActionReq<StaffInviteLookupReq>();
+    postdata.item = Object.assign(new StaffInviteLookupReq(), { mobile });
+    const resp = await this.http.post<ActionRes<StaffInviteLookupRes>>(
+      this.baseurl + '/LookupForStaffInvite',
       postdata,
     );
     return resp.item!;

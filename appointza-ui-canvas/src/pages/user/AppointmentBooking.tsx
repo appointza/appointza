@@ -38,7 +38,12 @@ import { Organisation, OrganisationSelectReq } from "@/models/organisation.model
 import { OrganisationLocation, OrganisationLocationSelectReq } from "@/models/organisationlocation.model";
 import { OrganisationServiceTiming, OrganisationServiceTimingSelectReq, Weeks } from "@/models/organisationservicetiming.model";
 import { OrganisationServices, OrganisationServicesSelectReq } from "@/models/organisationservices.model";
-import { AppoinmentFinal, SelectedSerivice, AppoinmentSelectReq } from "@/models/appoinment.model";
+import {
+  AppoinmentFinal,
+  SelectedSerivice,
+  AppoinmentSelectReq,
+  UpdateStatusReq,
+} from "@/models/appoinment.model";
 import { DayOfWeekUtil } from "@/utils/dayofweek.util";
 import type { CreatePaymentOrderReq, VerifyPaymentReq } from "@/services/payment.service";
 import { environment } from "@/utils/environment";
@@ -58,12 +63,42 @@ interface HolidayInfo {
   endTime?: string;
 }
 
+function isBookingSuccessResponse(response: string | null | undefined): boolean {
+  const text = String(response ?? "");
+  return text === "Successfully booked." || text === "Successfully booked" || text.startsWith("Successfully booked.|");
+}
+
+function parseBookingReference(response: string | null | undefined): string {
+  const text = String(response ?? "");
+  const marker = "Successfully booked.|";
+  if (!text.startsWith(marker)) return "";
+  return text.slice(marker.length).trim();
+}
+
+async function cancelPriorAppointmentIfRescheduling(
+  appointmentService: AppoinmentService,
+  organisationId: number,
+  organisationLocationId: number,
+  appointmentId: number,
+) {
+  if (appointmentId <= 0) return;
+  const req = new UpdateStatusReq();
+  req.appoinmentid = appointmentId;
+  req.statuscode = "CANCELLED";
+  req.statustype = "APPOINTMENTSTATUS";
+  req.organisationid = organisationId;
+  req.organisationlocationid = organisationLocationId;
+  req.cancellationreason = "Rescheduled by customer";
+  await appointmentService.UpdateStatus(req);
+}
+
 const AppointmentBooking = () => {
   const { organisationId, organisationLocationId } = useParams<{
     organisationId: string;
     organisationLocationId: string;
   }>();
   const [searchParams] = useSearchParams();
+  const rescheduleAppointmentId = Number(searchParams.get("reschedule") || 0) || 0;
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const { toast } = useToast();
@@ -82,7 +117,17 @@ const AppointmentBooking = () => {
   const [locationDetails, setLocationDetails] = useState<OrganisationLocation | null>(null);
   const [services, setServices] = useState<OrganisationServices[]>([]);
   const [timeSlots, setTimeSlots] = useState<AppoinmentFinal[]>([]);
-  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const prefillDateParam = (searchParams.get("date") || "").trim();
+  const prefillFromParam = (searchParams.get("from") || "").trim();
+  const initialPrefillDate = useMemo(() => {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(prefillDateParam)) {
+      const parsed = new Date(`${prefillDateParam}T12:00:00`);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+    return new Date();
+  }, [prefillDateParam]);
+
+  const [selectedDate, setSelectedDate] = useState<Date>(initialPrefillDate);
   const [selectedTimeSlot, setSelectedTimeSlot] = useState<AppoinmentFinal>(new AppoinmentFinal());
   const [selectedServices, setSelectedServices] = useState<SelectedSerivice[]>([]);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -98,6 +143,7 @@ const AppointmentBooking = () => {
   const [isLoadingLeaveRequests, setIsLoadingLeaveRequests] = useState(false);
   const [bookingWindowDays, setBookingWindowDays] = useState<number>(5); // Default to 5 days if not loaded
   const appliedServicePreselect = useRef(false);
+  const appliedSlotPrefill = useRef(false);
 
   // Auth tokens live on the main app host only. Never book on org subdomains.
   useEffect(() => {
@@ -305,7 +351,9 @@ const AppointmentBooking = () => {
         const paymentRequired = locRes[0].isPaymentRequired === true || locRes[0].isPaymentRequired === 'true';
         setIsPaymentRequired(paymentRequired);
         console.log('💰 Payment required (final):', paymentRequired);
-        
+        // Unblock the booking UI as soon as org/location are ready; credentials can finish after.
+        setIsLoading(false);
+
         // Check if payment gateway credentials exist and are active for the organization
         // If no records OR is_active = false, make it free booking
         if (paymentRequired && parseInt(organisationId || '0') > 0) {
@@ -580,6 +628,25 @@ const AppointmentBooking = () => {
     handleServiceSelection(match);
   }, [preselectedServiceId, services, handleServiceSelection]);
 
+  // Walk-in / calendar slot click: pre-select matching time when slots load.
+  useEffect(() => {
+    if (appliedSlotPrefill.current || !prefillFromParam || timeSlots.length === 0) {
+      return;
+    }
+    const normalize = (value: string) => value.trim().slice(0, 5);
+    const target = normalize(prefillFromParam);
+    const match = timeSlots.find((slot) => {
+      const from =
+        typeof slot.fromtime === "string"
+          ? normalize(slot.fromtime)
+          : normalize(String(slot.fromtime || ""));
+      return from === target;
+    });
+    if (!match) return;
+    appliedSlotPrefill.current = true;
+    handleTimeSlotSelection(match);
+  }, [prefillFromParam, timeSlots]);
+
   // Handle time slot selection
   const handleTimeSlotSelection = (timeSlot: AppoinmentFinal) => {
     if (isTimeSlotInPastForToday(selectedDate, timeSlot.fromtime)) {
@@ -740,13 +807,23 @@ const AppointmentBooking = () => {
           appointment.ispaid = true; // Mark as paid to allow free booking
           const freeBookingResponse = await organisationServiceTimingService.Bookappoinment(appointment);
           
-          if (freeBookingResponse === "Successfully booked." || freeBookingResponse === "Successfully booked") {
+          if (isBookingSuccessResponse(freeBookingResponse)) {
+            await cancelPriorAppointmentIfRescheduling(
+              appointmentService,
+              parseInt(organisationId || "0", 10),
+              parseInt(organisationLocationId || "0", 10),
+              rescheduleAppointmentId,
+            );
             setSelectedServices([]);
             setSelectedTimeSlot(new AppoinmentFinal());
-            
+            const ref = parseBookingReference(freeBookingResponse);
             toast({
-              title: "Appointment Booked Successfully!",
-              description: `Your appointment has been booked successfully (free booking).`,
+              title: rescheduleAppointmentId
+                ? "Appointment rescheduled"
+                : "Appointment Booked Successfully!",
+              description: ref
+                ? `Reference ${ref}. Your appointment is confirmed.`
+                : "Your appointment has been booked successfully.",
             });
             
             navigate('/user/dashboard');
@@ -758,14 +835,24 @@ const AppointmentBooking = () => {
             });
           }
         }
-      } else if (validationResponse === "Successfully booked." || validationResponse === "Successfully booked") {
+      } else if (isBookingSuccessResponse(validationResponse)) {
         // Slot is available, no payment required - already booked
+        await cancelPriorAppointmentIfRescheduling(
+          appointmentService,
+          parseInt(organisationId || "0", 10),
+          parseInt(organisationLocationId || "0", 10),
+          rescheduleAppointmentId,
+        );
         setSelectedServices([]);
         setSelectedTimeSlot(new AppoinmentFinal());
-        
+        const ref = parseBookingReference(validationResponse);
         toast({
-          title: "Appointment Booked Successfully!",
-          description: `Your appointment has been booked successfully!`,
+          title: rescheduleAppointmentId
+            ? "Appointment rescheduled"
+            : "Appointment Booked Successfully!",
+          description: ref
+            ? `Reference ${ref}. Your appointment is confirmed.`
+            : "Your appointment has been booked successfully!",
         });
         
         navigate('/user/dashboard');
@@ -804,13 +891,16 @@ const AppointmentBooking = () => {
 
       const response = await organisationServiceTimingService.Bookappoinment(appointment);
 
-      if (response === "Successfully booked." || response === "Successfully booked") {
+      if (isBookingSuccessResponse(response)) {
         setSelectedServices([]);
         setSelectedTimeSlot(new AppoinmentFinal());
+        const ref = parseBookingReference(response);
 
         toast({
           title: "Appointment Booked Successfully!",
-          description: `Your appointment has been booked successfully!`,
+          description: ref
+            ? `Reference ${ref}. Your appointment is confirmed.`
+            : "Your appointment has been booked successfully!",
         });
 
         navigate('/user/dashboard');
@@ -1119,10 +1209,13 @@ const AppointmentBooking = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [prevImage, nextImage, locationDetails]);
 
-  // Load time slots and leave requests when date changes
+  // Debounce availability checks when the date changes quickly.
   useEffect(() => {
-    loadTimeSlots();
-    loadLeaveRequests();
+    const handle = window.setTimeout(() => {
+      void loadTimeSlots();
+      void loadLeaveRequests();
+    }, 280);
+    return () => window.clearTimeout(handle);
   }, [loadTimeSlots, loadLeaveRequests, selectedDate]);
 
   useEffect(() => {
@@ -1138,10 +1231,16 @@ const AppointmentBooking = () => {
   if (isLoading) {
     return (
       <UserLayout>
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4" />
-            <p className="text-gray-600">Loading appointment booking...</p>
+        <div className="mx-auto max-w-5xl space-y-4 px-4 py-8">
+          <div className="h-8 w-48 animate-pulse rounded-lg bg-stone-200" />
+          <div className="h-40 animate-pulse rounded-2xl bg-stone-100" />
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="h-28 animate-pulse rounded-2xl bg-stone-100" />
+            <div className="h-28 animate-pulse rounded-2xl bg-stone-100" />
+          </div>
+          <div className="flex items-center gap-2 text-sm text-stone-500">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading appointment booking…
           </div>
         </div>
       </UserLayout>
@@ -1658,7 +1757,7 @@ const AppointmentBooking = () => {
             </div>
 
             <div className="bg-blue-50 border border-blue-200 rounded-3xl p-5 text-center text-blue-700 font-medium">
-              {isPaymentRequired && hasPaymentCredentials && calculateTotalAmount() > 0
+              {calculateTotalAmount() > 0
                 ? `Total Amount: ₹${calculateTotalAmount().toLocaleString("en-IN")}`
                 : "Appointment is free"}
             </div>
@@ -1673,7 +1772,9 @@ const AppointmentBooking = () => {
                 ? "Login to Book Appointment"
                 : isPaymentRequired && hasPaymentCredentials && calculateTotalAmount() > 0
                   ? `Pay ₹${calculateTotalAmount().toLocaleString("en-IN")} & Book`
-                  : "Confirm Booking"}
+                  : calculateTotalAmount() > 0
+                    ? `Confirm · ₹${calculateTotalAmount().toLocaleString("en-IN")}`
+                    : "Confirm Booking"}
             </Button>
           </div>
         </div>

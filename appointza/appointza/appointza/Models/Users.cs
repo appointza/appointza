@@ -145,6 +145,28 @@ namespace appointza.Models
         public long organisationtype { get; set; }
 
     }
+
+    /// <summary>Org-admin staff invite phone lookup — never returns cross-org PII.</summary>
+    public class StaffInviteLookupReq
+    {
+        public string mobile { get; set; }
+    }
+
+    public class StaffInviteLookupRes
+    {
+        public bool exists { get; set; }
+        /// <summary>True when the account can be invited into this organisation (same org or no org).</summary>
+        public bool can_invite { get; set; }
+        /// <summary>True when the mobile belongs to a user in another organisation.</summary>
+        public bool belongs_to_other_organisation { get; set; }
+        public long userid { get; set; }
+        /// <summary>Full name only when can_invite; otherwise empty or masked.</summary>
+        public string display_name { get; set; } = "";
+        /// <summary>Email only when can_invite; never for other orgs.</summary>
+        public string email { get; set; } = "";
+        public string mobile { get; set; } = "";
+        public string message { get; set; } = "";
+    }
     public class UsersGetOtpRes
     {
         public string mobile { get; set; }

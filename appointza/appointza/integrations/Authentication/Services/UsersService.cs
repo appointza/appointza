@@ -61,6 +61,85 @@ namespace appointza.Authentication.Services
             }
             return result;
         }
+
+        /// <summary>
+        /// Org-scoped staff invite lookup. Never returns name/email for users in another organisation.
+        /// </summary>
+        public async Task<StaffInviteLookupRes> LookupForStaffInvite(string mobile, long callerOrganisationId)
+        {
+            var res = new StaffInviteLookupRes
+            {
+                exists = false,
+                can_invite = false,
+                belongs_to_other_organisation = false,
+                mobile = (mobile ?? "").Trim(),
+            };
+
+            if (string.IsNullOrWhiteSpace(res.mobile) || callerOrganisationId <= 0)
+            {
+                res.message = "Mobile number is required.";
+                return res;
+            }
+
+            var digits = Regex.Replace(res.mobile, @"\D", "");
+            if (digits.Length < 8)
+            {
+                res.message = "Enter a valid mobile number.";
+                return res;
+            }
+
+            var matches = await Select(new UsersSelectReq { mobile = res.mobile });
+            // Also try last-10 digits match if exact miss (common IN mobile formatting).
+            if ((matches == null || matches.Count == 0) && digits.Length >= 10)
+            {
+                var tail = digits[^10..];
+                matches = await Select(new UsersSelectReq { mobile = tail });
+            }
+
+            var user = matches?.FirstOrDefault();
+            if (user == null || user.id <= 0)
+            {
+                res.exists = false;
+                res.message = "No Appointza account found for this number. You can invite them by phone after they register.";
+                return res;
+            }
+
+            res.exists = true;
+            res.mobile = string.IsNullOrWhiteSpace(user.mobile) ? res.mobile : user.mobile;
+
+            var userOrg = user.organisationid;
+            if (userOrg > 0 && userOrg != callerOrganisationId)
+            {
+                res.belongs_to_other_organisation = true;
+                res.can_invite = false;
+                res.userid = 0;
+                res.display_name = StaffInvitePrivacy.MaskDisplayName(user.name);
+                res.email = "";
+                res.message = "This number is already linked to another organisation. Invite by phone is not available.";
+                return res;
+            }
+
+            if (!StaffInvitePrivacy.CanRevealIdentity(userOrg, callerOrganisationId))
+            {
+                // User exists outside the caller's org (e.g. customer account, organisationid 0):
+                // allow invite by phone without revealing full name or email PII.
+                res.belongs_to_other_organisation = false;
+                res.can_invite = true;
+                res.userid = user.id;
+                res.display_name = StaffInvitePrivacy.MaskDisplayName(user.name);
+                res.email = "";
+                res.message = "Appointza account exists. You can invite this user by phone (name and email are hidden for privacy).";
+                return res;
+            }
+
+            // Same organisation — safe to display existing member details.
+            res.can_invite = true;
+            res.userid = user.id;
+            res.display_name = string.IsNullOrWhiteSpace(user.name) ? "Appointza user" : user.name.Trim();
+            res.email = user.email ?? "";
+            res.message = "User already belongs to your organisation.";
+            return res;
+        }
         public async Task<List<Users>> SelectTransaction(IDb db, UsersSelectReq req)
         {
             List<Users> result = new List<Users>();

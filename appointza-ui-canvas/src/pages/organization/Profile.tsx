@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams, Navigate } from 'react-router-dom';
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -252,6 +252,20 @@ const OrganizationProfile = () => {
   // State
   const [profile, setProfile] = useState<Users>(new Users());
   const [isLoading, setIsLoading] = useState(false);
+  const [isProfileHydrated, setIsProfileHydrated] = useState(false);
+  const profileDirtyRef = useRef(false);
+
+  const markProfileDirty = useCallback(() => {
+    profileDirtyRef.current = true;
+  }, []);
+
+  const setProfileField = useCallback(
+    (patch: Partial<Users>) => {
+      markProfileDirty();
+      setProfile((prev) => Object.assign(Object.create(Object.getPrototypeOf(prev)), prev, patch));
+    },
+    [markProfileDirty],
+  );
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [profileImageVersion, setProfileImageVersion] = useState(0);
@@ -325,6 +339,11 @@ const OrganizationProfile = () => {
       req.id = userId;
       
       const response = await usersService.select(req);
+
+      // Never overwrite fields the user already edited while this request was in flight.
+      if (profileDirtyRef.current) {
+        return;
+      }
       
       if (response && response.length > 0) {
         const userData = response[0];
@@ -332,19 +351,14 @@ const OrganizationProfile = () => {
         
         // Update user_context in localStorage with latest data
         await updateUserContext(userData);
-      } else {
+      } else if (!profileDirtyRef.current && user) {
         // Fallback to user context data if API returns empty
-        if (user) {
-          const fallbackProfile = usersProfileFromAuthUser(user);
-          console.log('✅ Setting fallback profile with ID:', fallbackProfile.id);
-          setProfile(fallbackProfile);
-        }
+        const fallbackProfile = usersProfileFromAuthUser(user);
+        setProfile(fallbackProfile);
       }
     } catch (error) {
-      // Fallback to user context data on error
-      if (user) {
+      if (!profileDirtyRef.current && user) {
         const fallbackProfile = usersProfileFromAuthUser(user);
-        console.log('✅ Setting error fallback profile with ID:', fallbackProfile.id);
         setProfile(fallbackProfile);
       }
       
@@ -355,6 +369,7 @@ const OrganizationProfile = () => {
       });
     } finally {
       setIsLoading(false);
+      setIsProfileHydrated(true);
     }
   }, [isAuthenticated, userId, usersService, toast, user, updateUserContext]);
 
@@ -469,14 +484,13 @@ const OrganizationProfile = () => {
     }
   }, [activeTab, isStaff, loadReferralStatus]);
 
-  // Immediate fallback if user context is available but profile is empty
+  // One-time fallback before first hydration only — never overwrite dirty edits.
   useEffect(() => {
-    if (user && (!profile.name || profile.name === '')) {
-      const immediateProfile = usersProfileFromAuthUser(user);
-      console.log('✅ Setting immediate fallback profile with ID:', immediateProfile.id);
-      setProfile(immediateProfile);
+    if (isProfileHydrated || profileDirtyRef.current) return;
+    if (user && (!profile.name || profile.name === "")) {
+      setProfile(usersProfileFromAuthUser(user));
     }
-  }, [user, profile.name]);
+  }, [user, profile.name, isProfileHydrated]);
 
   // Load profile image via authenticated fetch (img src cannot send Authorization header)
   useEffect(() => {
@@ -1000,10 +1014,11 @@ const OrganizationProfile = () => {
                     <Input
                       id="name"
                       value={profile.name || ""}
-                      onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+                      onChange={(e) => setProfileField({ name: e.target.value })}
                       placeholder="Enter your name"
                       className={profileFieldInputClass}
                       autoComplete="name"
+                      disabled={isLoading && !isProfileHydrated}
                     />
                   </div>
                   <div className="min-w-0">
@@ -1011,12 +1026,13 @@ const OrganizationProfile = () => {
                     <Input
                       id="mobile"
                       value={profile.mobile || ""}
-                      onChange={(e) => setProfile({ ...profile, mobile: e.target.value })}
+                      onChange={(e) => setProfileField({ mobile: e.target.value })}
                       placeholder="Enter your contact number"
                       type="tel"
                       inputMode="tel"
                       className={profileFieldInputClass}
                       autoComplete="tel"
+                      disabled={isLoading && !isProfileHydrated}
                     />
                   </div>
                 </div>

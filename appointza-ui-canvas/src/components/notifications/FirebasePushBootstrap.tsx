@@ -26,6 +26,7 @@ const PushNotificationPrompt = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">("default");
   const [dismissed, setDismissed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   useEffect(() => {
     if (Capacitor.isNativePlatform()) return;
@@ -39,6 +40,20 @@ const PushNotificationPrompt = () => {
     if (until && Date.now() < Number(until)) {
       setDismissed(true);
     }
+  }, []);
+
+  useEffect(() => {
+    const readCollapsed = () =>
+      localStorage.getItem("user_sidebar_collapsed") === "1" ||
+      localStorage.getItem("org_sidebar_collapsed") === "1";
+    setSidebarCollapsed(readCollapsed());
+    const handler = () => setSidebarCollapsed(readCollapsed());
+    window.addEventListener("user-sidebar-toggle", handler as EventListener);
+    window.addEventListener("org-sidebar-toggle", handler as EventListener);
+    return () => {
+      window.removeEventListener("user-sidebar-toggle", handler as EventListener);
+      window.removeEventListener("org-sidebar-toggle", handler as EventListener);
+    };
   }, []);
 
   const handleDismiss = () => {
@@ -68,8 +83,22 @@ const PushNotificationPrompt = () => {
     return null;
   }
 
+  const location = useLocation();
+  const path = location.pathname || "";
+  // Align with fixed sidebar on dashboard shells so the banner is not clipped underneath.
+  const underSidebar =
+    path.startsWith("/user/") || path.startsWith("/organization/");
+
   return (
-    <div className="w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 flex items-center justify-between gap-3">
+    <div
+      className={`relative z-40 w-full bg-amber-50 border-b border-amber-200 px-4 py-2 text-sm text-amber-900 flex items-center justify-between gap-3 ${
+        underSidebar
+          ? sidebarCollapsed
+            ? "lg:pl-[calc(4.5rem+1rem)]"
+            : "lg:pl-[calc(16rem+1rem)]"
+          : ""
+      }`}
+    >
       <span className="flex-1">
         Enable notifications to get appointment updates.
         {permission === "denied" && (

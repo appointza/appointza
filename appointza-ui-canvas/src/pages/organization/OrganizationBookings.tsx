@@ -30,7 +30,6 @@ import { ReferenceValueService } from "@/services/referencevalue.service";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { REFERENCETYPE } from "@/models/users.model";
 import { ReferenceValue, ReferenceValueSelectReq } from "@/models/referencevalue.model";
-import { sortReferenceValuesByDisplayOrder } from "@/utils/referencevalue.util";
 import { cn } from "@/lib/utils";
 import OrganizationPageShell from "@/components/layout/OrganizationPageShell";
 import { org } from "@/lib/orgTheme";
@@ -48,10 +47,28 @@ import OrganizationCalendarDayPanel, {
   TimingSlot,
 } from "@/pages/organization/OrganizationCalendarDayPanel";
 import {
+  formatAppointmentTime,
   getAppointmentDayNumber,
   sendAppointmentDateToApi,
   toDateKey,
 } from "@/utils/appointmentTime.util";
+import {
+  getAppointmentStatusLabel,
+  normalizeAppointmentStatusCode,
+  sortAppointmentStatusesByCanonicalOrder,
+} from "@/utils/appointmentStatus.util";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
 
 type CalendarKind = "services" | "rooms" | "events";
 
@@ -95,6 +112,12 @@ const OrganizationBookings = () => {
   const [selectedRoomBooking, setSelectedRoomBooking] = useState<OrganisationRoom | null>(null);
   const [isRoomDetailsOpen, setIsRoomDetailsOpen] = useState(false);
   const [busyRoomId, setBusyRoomId] = useState<number | null>(null);
+  const [statusUpdatingId, setStatusUpdatingId] = useState<number | null>(null);
+  const [cancelDialog, setCancelDialog] = useState<{
+    appointmentId: number;
+    previousStatus: string;
+  } | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const mountRoomDetailsDialog = useMountWhenOpened(isRoomDetailsOpen);
 
   const appointmentService = useMemo(() => new AppoinmentService(), []);
@@ -234,7 +257,9 @@ const OrganizationBookings = () => {
       req.referencetypeid = REFERENCETYPE.APPOINTMENTSTATUS;
       req.organisationid = organizationId;
       const response = await referenceValueService.select(req);
-      setAppointmentStatusList(sortReferenceValuesByDisplayOrder(response || []));
+      setAppointmentStatusList(
+        sortAppointmentStatusesByCanonicalOrder(response || []),
+      );
     } catch (error) {
       console.error("❌ Error fetching status types:", error);
     }
@@ -398,7 +423,41 @@ const OrganizationBookings = () => {
     navigate(`/organization/appointments/${appointment.id}/record`);
   };
 
-  const handleStatusChange = async (appointmentId: number, status: string) => {
+  const handleReschedule = (appointment: BookedAppoinmentRes) => {
+    const orgId = appointment.organizationid || organizationId;
+    const locId = appointment.organisationlocationid || organisationLocationId;
+    if (!orgId || !locId || !appointment.id) {
+      toast({
+        title: "Cannot reschedule",
+        description: "Missing organisation or appointment details.",
+        variant: "destructive",
+      });
+      return;
+    }
+    navigate(`/book-appointment/${orgId}/${locId}?reschedule=${appointment.id}`);
+  };
+
+  const applyStatusLocally = (appointmentId: number, status: string) => {
+    const key = bookedAppointmentsQueryKey({
+      organisationId: organizationId,
+      organisationLocationId,
+      appointmentDate: appointmentDateKey,
+    });
+    queryClient.setQueryData<BookedAppoinmentRes[]>(key, (prev) =>
+      (prev ?? []).map((apt) =>
+        apt.id === appointmentId ? { ...apt, statuscode: status } : apt,
+      ),
+    );
+    setSelectedAppointment((prev) =>
+      prev?.id === appointmentId ? { ...prev, statuscode: status } : prev,
+    );
+  };
+
+  const commitStatusChange = async (
+    appointmentId: number,
+    status: string,
+    options?: { cancellationreason?: string; previousStatus?: string },
+  ) => {
     const organisationlocationid = globalLocationId
       ? Number(globalLocationId)
       : user?.locationid || 0;
@@ -412,29 +471,76 @@ const OrganizationBookings = () => {
       return;
     }
 
+    const normalized = normalizeAppointmentStatusCode(status);
+    const previousStatus =
+      options?.previousStatus ||
+      appointments.find((a) => a.id === appointmentId)?.statuscode ||
+      "PENDING";
+
+    applyStatusLocally(appointmentId, normalized);
+    setStatusUpdatingId(appointmentId);
+
     try {
       const req = new UpdateStatusReq();
       req.appoinmentid = appointmentId;
-      req.statuscode = status;
+      req.statuscode = normalized;
       req.organisationid = organizationId;
       req.organisationlocationid = organisationlocationid;
-      await appointmentService.UpdateStatus(req);
+      if (options?.cancellationreason) {
+        req.cancellationreason = options.cancellationreason;
+      }
+      const result = await appointmentService.UpdateStatus(req);
+      if (result && result.success === false) {
+        throw new Error("Status update was not saved");
+      }
+
+      const channels = (result?.channels || []).map((c) => c.toLowerCase());
+      const channelLabel = channels.length
+        ? channels
+            .map((c) => (c === "sms" ? "SMS" : c === "whatsapp" ? "WhatsApp" : c === "email" ? "email" : c))
+            .join(", ")
+        : "";
+      const label = getAppointmentStatusLabel(normalized);
+      toast({
+        title: "Status updated",
+        description: result?.notified && channelLabel
+          ? `Changed to ${label}. Customer notified via ${channelLabel}.`
+          : `Changed to ${label}. Customer was not notified.`,
+      });
+
       await Promise.all([
         refetchAppointments(),
         fetchSlotsForDate(selectedDate),
+        queryClient.invalidateQueries({ queryKey: ["booked-appointments"] }),
+        queryClient.invalidateQueries({
+          predicate: (q) =>
+            String(q.queryKey[0] || "").toLowerCase().includes("dashboard") ||
+            String(q.queryKey[0] || "").toLowerCase().includes("client"),
+        }),
       ]);
-      toast({
-        title: "Status updated",
-        description: `Appointment status changed to ${status}.`,
-      });
     } catch (error) {
       console.error("❌ Error updating status:", error);
+      applyStatusLocally(appointmentId, previousStatus);
       toast({
         title: "Error",
         description: "Failed to update appointment status",
         variant: "destructive",
       });
+    } finally {
+      setStatusUpdatingId(null);
     }
+  };
+
+  const handleStatusChange = (appointmentId: number, status: string) => {
+    const normalized = normalizeAppointmentStatusCode(status);
+    const previousStatus =
+      appointments.find((a) => a.id === appointmentId)?.statuscode || "PENDING";
+    if (normalized === "CANCELLED") {
+      setCancelReason("");
+      setCancelDialog({ appointmentId, previousStatus });
+      return;
+    }
+    void commitStatusChange(appointmentId, normalized, { previousStatus });
   };
 
   const handleViewRoomDetails = (room: OrganisationRoom) => {
@@ -487,6 +593,15 @@ const OrganizationBookings = () => {
   };
 
   const handleRoomCheckout = (room: OrganisationRoom) => {
+    const status = (room.status || "").toLowerCase();
+    if (status !== "occupied" && status !== "checkout_pending") {
+      toast({
+        title: "Check in first",
+        description: "Checkout is only available after the guest has checked in.",
+        variant: "destructive",
+      });
+      return;
+    }
     void runRoomAction(
       room,
       () =>
@@ -495,6 +610,7 @@ const OrganizationBookings = () => {
           organisation_id: organizationId,
         }),
       `Room ${room.room_number} is available now.`,
+      { status: "available", availability_state: "Available", guest: null },
     );
   };
 
@@ -507,6 +623,39 @@ const OrganizationBookings = () => {
           organisation_id: organizationId,
         }),
       `Room ${room.room_number} marked clean.`,
+      { status: "available", availability_state: "Available" },
+    );
+  };
+
+  const handleStayAction = (
+    room: OrganisationRoom,
+    action: string,
+    extra?: {
+      cancel_reason?: string;
+      check_in?: string;
+      check_out?: string;
+      guest_name?: string;
+      guest_phone?: string;
+      persons?: number;
+    },
+  ) => {
+    void runRoomAction(
+      room,
+      () =>
+        hospitalityService.updateStayAction({
+          organisation_id: organizationId,
+          room_id: room.id,
+          booking_id: room.booking?.booking_id || "",
+          booking_guid: "",
+          action,
+          cancel_reason: extra?.cancel_reason,
+          check_in: extra?.check_in,
+          check_out: extra?.check_out,
+          guest_name: extra?.guest_name,
+          guest_phone: extra?.guest_phone,
+          persons: extra?.persons,
+        }),
+      `Booking ${action.replaceAll("_", " ")} saved.`,
     );
   };
 
@@ -663,9 +812,21 @@ const OrganizationBookings = () => {
         selectedDayBookings={selectedDayBookings}
         isLoadingAppointments={isLoadingAppointments}
         appointmentStatusList={appointmentStatusList}
+        statusUpdatingId={statusUpdatingId}
         onViewDetails={handleViewDetails}
         onManageRecord={handleManageRecord}
+        onReschedule={handleReschedule}
         onStatusChange={handleStatusChange}
+        onSlotClick={(slot) => {
+          const date = format(selectedDate, "yyyy-MM-dd");
+          const from =
+            typeof slot.fromtime === "string"
+              ? slot.fromtime
+              : formatAppointmentTime(slot.fromtime);
+          navigate(
+            `/organization/clients/on-spot-registration?date=${encodeURIComponent(date)}&from=${encodeURIComponent(from || "")}`,
+          );
+        }}
       />
     );
 
@@ -700,6 +861,48 @@ const OrganizationBookings = () => {
           </div>
         </div>
       )}
+
+      <AlertDialog
+        open={!!cancelDialog}
+        onOpenChange={(open) => {
+          if (!open) setCancelDialog(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel this booking?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The customer may be notified. You can optionally add a reason that is saved with the booking.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="cancel-reason">Reason (optional)</Label>
+            <Textarea
+              id="cancel-reason"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="e.g. Customer requested cancellation"
+              rows={3}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep booking</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!cancelDialog) return;
+                const { appointmentId, previousStatus } = cancelDialog;
+                setCancelDialog(null);
+                void commitStatusChange(appointmentId, "CANCELLED", {
+                  cancellationreason: cancelReason.trim(),
+                  previousStatus,
+                });
+              }}
+            >
+              Cancel booking
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {selectedAppointment ? (
         <UserAppointmentDetails
@@ -739,6 +942,7 @@ const OrganizationBookings = () => {
           onStatusChange={handleRoomStatusChange}
           onCheckout={handleRoomCheckout}
           onMarkClean={handleRoomMarkClean}
+          onStayAction={handleStayAction}
         />
       ) : null}    </OrganizationPageShell>
   );

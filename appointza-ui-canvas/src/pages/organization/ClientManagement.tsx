@@ -1,5 +1,5 @@
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -49,7 +49,7 @@ import {
   getRoomBookingStartDate,
   roomBookingLabel,
   roomBookingReference,
-  roomHasActiveBooking,
+  expandClientRoomStays,
   roomPaymentSummary,
   roomStatusDisplay,
 } from "@/utils/roomBooking.util";
@@ -75,6 +75,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  CLIENT_PAGE_SIZE,
+  useOrganisationClients,
+} from "@/hooks/useOrganisationClients";
 
 function loyaltyRewardLabel(type: string, value: number, maxDiscount = 0) {
   switch (type) {
@@ -122,6 +126,8 @@ const ClientManagement = () => {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isOnSpotDialogOpen, setIsOnSpotDialogOpen] = useState(false);
   const [mobileInput, setMobileInput] = useState("");
+  const [listSearch, setListSearch] = useState("");
+  const [debouncedListSearch, setDebouncedListSearch] = useState("");
   const [isSearching, setIsSearching] = useState(false);
   type CrmTabId = "today" | "history" | "timeline" | "events" | "rooms";
   const [crmTab, setCrmTab] = useState<CrmTabId>("today");
@@ -314,7 +320,7 @@ const ClientManagement = () => {
 
   const loadRoomStaysForClient = useCallback(
     async (client: ClientInfoRes): Promise<OrganisationRoom[]> => {
-      if (!client.is_room_customer) return [];
+      if (!client.is_room_customer && !(client.mobile || "").trim()) return [];
       const organisationlocationid = globalLocationId
         ? Number(globalLocationId)
         : (user?.locationid || 0);
@@ -327,13 +333,10 @@ const ClientManagement = () => {
           status: "",
         })) || [];
 
-      const phoneDigits = (client.mobile || "").replace(/\D/g, "");
-      return rooms.filter((room) => {
-        if (!roomHasActiveBooking(room)) return false;
-        if (client.room_id && room.id === client.room_id) return true;
-        const guestPhone = (room.guest?.phone || "").replace(/\D/g, "");
-        if (phoneDigits.length >= 6 && guestPhone.length >= 6 && guestPhone === phoneDigits) return true;
-        return false;
+      // Include closed history stays (e.g. BK-… after checkout), not only the active header.
+      return expandClientRoomStays(rooms, {
+        mobile: client.mobile,
+        room_id: client.room_id,
       });
     },
     [globalLocationId, hospitalityService, user?.locationid, user?.organisationid],
@@ -540,8 +543,37 @@ const ClientManagement = () => {
     }
   };
 
+  useEffect(() => {
+    const handle = window.setTimeout(() => {
+      setDebouncedListSearch(listSearch.trim());
+    }, 300);
+    return () => window.clearTimeout(handle);
+  }, [listSearch]);
+
+  const organisationIdForList = resolveOrganisationId(user?.organisationid);
+  const locationIdForList = Number(globalLocationId || user?.locationid || 0);
+
+  const {
+    data: clientPages,
+    isLoading: isLoadingClientList,
+    isFetchingNextPage,
+    hasNextPage,
+    fetchNextPage,
+    refetch: refetchClientList,
+  } = useOrganisationClients({
+    organisationId: organisationIdForList,
+    organisationLocationId: locationIdForList,
+    search: debouncedListSearch,
+    enabled: !selectedClient && organisationIdForList > 0,
+  });
+
+  const listedClients = useMemo(
+    () => (clientPages?.pages ?? []).flat(),
+    [clientPages],
+  );
+
   const handleClientCreated = () => {
-    // No list to refresh — look up the new customer by mobile when needed.
+    void refetchClientList();
   };
 
   const handleAddAppointmentRecord = () => {
@@ -1094,14 +1126,120 @@ const ClientManagement = () => {
             </div>
           </>
         ) : (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-4 py-16 text-center">
-            <div className="flex h-14 w-14 items-center justify-center rounded-xl border border-[#e6eaf0] bg-white shadow-sm">
-              <Search className="h-6 w-6 text-[#2a5af5]" aria-hidden />
+          <div className={cn("space-y-4 py-4", pagePad)}>
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 className="text-[15px] font-semibold text-[#1a1a1a]">Customers</h2>
+                <p className="mt-0.5 text-[12px] text-[#5b6572]">
+                  Browse the list or search by mobile. Select a row to open their profile.
+                </p>
+              </div>
+              <div className="relative w-full sm:max-w-xs">
+                <Search
+                  className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[#9aa3af]"
+                  aria-hidden
+                />
+                <Input
+                  value={listSearch}
+                  onChange={(e) => setListSearch(e.target.value.replace(/[^\d]/g, ""))}
+                  placeholder="Search mobile"
+                  className={cn(org.input, "h-9 rounded-md border-[#e6eaf0] pl-9 text-[13px]")}
+                  aria-label="Search customers by mobile"
+                />
+              </div>
             </div>
-            <h3 className="mt-5 text-[15px] font-semibold text-[#1a1a1a]">Look up a customer</h3>
-            <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-[#5b6572]">
-              Type their mobile number above and press Enter to see appointments, history, and events.
-            </p>
+
+            {isLoadingClientList ? (
+              <div className="flex items-center justify-center py-16 text-sm text-[#5b6572]">
+                <Loader2 className="mr-2 h-4 w-4 animate-spin text-[#2a5af5]" />
+                Loading customers…
+              </div>
+            ) : listedClients.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-[#e6eaf0] bg-white px-4 py-12 text-center">
+                <p className="text-[15px] font-semibold text-[#1a1a1a]">No customers yet</p>
+                <p className="mt-1 text-[13px] text-[#5b6572]">
+                  Use mobile lookup above or On-Spot to add the first customer.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-xl border border-[#e6eaf0] bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Mobile</TableHead>
+                      <TableHead className="hidden sm:table-cell">Type</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {listedClients.map((client) => (
+                      <TableRow
+                        key={`${client.userid}-${client.mobile}`}
+                        className="cursor-pointer hover:bg-[#f8fafc]"
+                        onClick={() => {
+                          const digits = (client.mobile || "").replace(/\D/g, "");
+                          setMobileInput(digits);
+                          if (digits) {
+                            void handleClientSearch(digits);
+                          } else {
+                            const userId = Number(client.userid);
+                            const displayName = client.username || "Customer";
+                            setCrmTab("today");
+                            setSelectedClient({
+                              id: userId,
+                              name: displayName,
+                              mobile: "",
+                              email: "",
+                              lastVisit: new Date(),
+                              totalAppointments: 0,
+                              totalSpent: 0,
+                              isRoomCustomer: Boolean(
+                                (client as { is_room_customer?: boolean }).is_room_customer,
+                              ),
+                            });
+                            void loadClientData(userId, user?.organisationid || 0);
+                            void loadRoomStaysForClient(client);
+                            void loadLoyaltyForClient(userId, displayName, "");
+                          }
+                        }}
+                      >
+                        <TableCell className="font-medium text-[#1a1a1a]">
+                          {client.username || "—"}
+                        </TableCell>
+                        <TableCell className="tabular-nums text-[#5b6572]">
+                          {client.mobile || "—"}
+                        </TableCell>
+                        <TableCell className="hidden sm:table-cell">
+                          {(client as { is_room_customer?: boolean }).is_room_customer ? (
+                            <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                              Room guest
+                            </Badge>
+                          ) : (
+                            <span className="text-[12px] text-[#9aa3af]">Customer</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                {hasNextPage ? (
+                  <div className="border-t border-[#e6eaf0] p-3 text-center">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={isFetchingNextPage}
+                      onClick={() => void fetchNextPage()}
+                    >
+                      {isFetchingNextPage ? (
+                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                      ) : null}
+                      Load more ({CLIENT_PAGE_SIZE})
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
         )}
       </main>

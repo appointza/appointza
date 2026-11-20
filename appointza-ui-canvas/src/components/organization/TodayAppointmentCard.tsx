@@ -4,6 +4,7 @@ import { Clock, User, CheckCircle, Play, Pause } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+import { getAppointmentStatusPresentation } from "@/utils/appointmentStatus.util";
 
 interface TodayAppointmentCardProps {
   appointment: {
@@ -19,32 +20,18 @@ interface TodayAppointmentCardProps {
 }
 
 function statusBadge(status: string) {
-  switch (status) {
-    case "completed":
-      return (
-        <Badge className="h-5 border-transparent bg-emerald-50 px-1.5 text-[10px] font-medium text-emerald-700 hover:bg-emerald-50">
-          Completed
-        </Badge>
-      );
-    case "in-progress":
-      return (
-        <Badge className="h-5 border-transparent bg-[#eef2ff] px-1.5 text-[10px] font-medium text-[#2a5af5] hover:bg-[#eef2ff]">
-          In progress
-        </Badge>
-      );
-    case "scheduled":
-      return (
-        <Badge className="h-5 border-transparent bg-amber-50 px-1.5 text-[10px] font-medium text-amber-700 hover:bg-amber-50">
-          Scheduled
-        </Badge>
-      );
-    default:
-      return (
-        <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
-          {status || "—"}
-        </Badge>
-      );
-  }
+  const mapped =
+    status === "in-progress" || status === "in_progress"
+      ? "IN_PROGRESS"
+      : status === "scheduled"
+        ? "PENDING"
+        : status;
+  const presentation = getAppointmentStatusPresentation(mapped);
+  return (
+    <Badge className={cn("h-5 px-1.5 text-[10px] font-medium hover:opacity-90", presentation.className)}>
+      {presentation.label}
+    </Badge>
+  );
 }
 
 const TodayAppointmentCard = ({ appointment }: TodayAppointmentCardProps) => {

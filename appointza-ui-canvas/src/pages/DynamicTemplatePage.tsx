@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Loader2 } from "lucide-react";
+import { useNavigate, useParams } from "react-router-dom";
+import { AlertCircle, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import {
   readPublicSiteGuidMap,
   shouldForcePublicSiteRefresh,
@@ -18,17 +19,38 @@ import {
 } from "@/utils/templateBookingNav.util";
 import { nextHtmlIfChanged, preparePublicSiteIframeHtml } from "@/utils/publicTemplateHtml.util";
 import { getPublicHtmlByGuid } from "@/services/publicHtml.service";
-import { useNavigate } from "react-router-dom";
+
+const LOAD_TIMEOUT_MS = 20_000;
+
+const TemplateSkeleton = () => (
+  <div className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100">
+    <div className="mx-auto max-w-3xl px-4 py-10">
+      <div className="mb-8 h-10 w-48 animate-pulse rounded-md bg-slate-200" />
+      <div className="mb-4 h-6 w-72 animate-pulse rounded-md bg-slate-200" />
+      <div className="mb-10 h-4 w-full max-w-md animate-pulse rounded-md bg-slate-200" />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="h-40 animate-pulse rounded-xl bg-white shadow-sm" />
+        <div className="h-40 animate-pulse rounded-xl bg-white shadow-sm" />
+      </div>
+      <div className="mt-8 flex items-center justify-center gap-2 text-sm text-slate-500">
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+        Loading your booking page…
+      </div>
+    </div>
+  </div>
+);
 
 const DynamicTemplatePage = () => {
   const { templateId } = useParams();
   const navigate = useNavigate();
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const titleSetRef = useRef(false);
   const token = decodeURIComponent(templateId?.trim() || "");
 
-  const mapped = isOrgLocTempId(token) && !shouldForcePublicSiteRefresh()
-    ? readPublicSiteGuidMap(token)
-    : null;
+  const mapped =
+    isOrgLocTempId(token) && !shouldForcePublicSiteRefresh()
+      ? readPublicSiteGuidMap(token)
+      : null;
   const cachedHtml =
     mapped?.locationId && !isPublicSiteCacheStale(mapped.locationId)
       ? readPublicSiteCache(mapped.locationId)?.renderedHtml
@@ -38,6 +60,7 @@ const DynamicTemplatePage = () => {
   const [organisationId, setOrganisationId] = useState(0);
   const [loading, setLoading] = useState(!cachedHtml);
   const [error, setError] = useState("");
+  const [retryToken, setRetryToken] = useState(0);
 
   const iframeHtml = useMemo(
     () => preparePublicSiteIframeHtml(html, organisationId),
@@ -59,6 +82,24 @@ const DynamicTemplatePage = () => {
 
   useEffect(() => {
     let cancelled = false;
+    let timedOut = false;
+    titleSetRef.current = false;
+
+    const timeoutId = window.setTimeout(() => {
+      timedOut = true;
+      if (!cancelled) {
+        setLoading(false);
+        setError((prev) => prev || "This booking page is taking too long to load.");
+      }
+    }, LOAD_TIMEOUT_MS);
+
+    const setBusinessTitle = (name?: string) => {
+      if (titleSetRef.current) return;
+      const trimmed = (name || "").trim();
+      if (!trimmed) return;
+      document.title = trimmed;
+      titleSetRef.current = true;
+    };
 
     const load = async () => {
       if (!isOrgLocTempId(token)) {
@@ -69,8 +110,6 @@ const DynamicTemplatePage = () => {
         return;
       }
 
-      // Cached HTML is already in state from the initial render. Do not setHtml
-      // again with the same string — that reloads iframe srcDoc.
       const existingMap = readPublicSiteGuidMap(token);
       const forceRefresh = shouldForcePublicSiteRefresh();
       const cachedFromMap =
@@ -92,7 +131,9 @@ const DynamicTemplatePage = () => {
         const result = await getPublicHtmlByGuid(token, {
           versionKey: staleCache?.versionKey,
         });
-        if (cancelled) return;
+        if (cancelled || timedOut) return;
+
+        setBusinessTitle(result?.organisationname);
 
         if (result.notModified && staleCache?.renderedHtml) {
           writePublicSiteCache(existingMap!.locationId, {
@@ -131,7 +172,6 @@ const DynamicTemplatePage = () => {
             writePublicSiteCache(locationId, { versionKey, renderedHtml });
           }
         } else if (locationId > 0) {
-          // Same version — refresh cache timestamp / clear stale flag.
           writePublicSiteCache(locationId, {
             versionKey,
             renderedHtml: previous.renderedHtml,
@@ -140,13 +180,15 @@ const DynamicTemplatePage = () => {
 
         setError("");
       } catch (e) {
-        if (cancelled) return;
+        if (cancelled || timedOut) return;
         const hasCached =
-          !!existingMap?.locationId && !!readPublicSiteCache(existingMap.locationId)?.renderedHtml;
+          !!existingMap?.locationId &&
+          !!readPublicSiteCache(existingMap.locationId)?.renderedHtml;
         if (!hasCached) {
           setError(e instanceof Error ? e.message : "Failed to load template");
         }
       } finally {
+        window.clearTimeout(timeoutId);
         if (!cancelled) setLoading(false);
       }
     };
@@ -154,22 +196,30 @@ const DynamicTemplatePage = () => {
     void load();
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- only reload when GUID changes
-  }, [token]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reload when GUID or retry changes
+  }, [token, retryToken]);
 
   if (loading && !html) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-[#E85D4C]" aria-label="Loading" />
-      </div>
-    );
+    return <TemplateSkeleton />;
   }
 
   if (error && !html) {
     return (
-      <div className="flex min-h-screen items-center justify-center p-6 text-center text-red-600">
-        {error}
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-center">
+        <AlertCircle className="h-10 w-10 text-red-500" aria-hidden />
+        <p className="max-w-md text-red-600">{error}</p>
+        <Button
+          type="button"
+          onClick={() => {
+            setError("");
+            setLoading(true);
+            setRetryToken((n) => n + 1);
+          }}
+        >
+          Retry
+        </Button>
       </div>
     );
   }
@@ -181,7 +231,7 @@ const DynamicTemplatePage = () => {
         srcDoc={iframeHtml}
         sandbox="allow-scripts allow-same-origin allow-forms"
         style={{ width: "100%", height: "100%", border: "none" }}
-        title="Template"
+        title="Booking page"
         onLoad={() => syncParentFromTemplateIframe(iframeRef.current, navigate)}
       />
     </div>

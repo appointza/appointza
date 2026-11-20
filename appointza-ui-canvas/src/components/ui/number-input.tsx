@@ -54,7 +54,8 @@ export const NumberInput = React.forwardRef<HTMLInputElement, NumberInputProps>(
     const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const parsed = parseRawValue(e.target.value, float);
       if (parsed !== null) {
-        onValueChange(parsed);
+        // Clamp while typing so negatives/over-max cannot linger until blur.
+        onValueChange(clamp(parsed, min, max));
       }
     };
 

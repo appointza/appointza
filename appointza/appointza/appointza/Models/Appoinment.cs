@@ -263,6 +263,17 @@ public string notes { get; set; }
 
         public long organisationid { get; set; }
         public long organisationlocationid { get; set; }
+        /// <summary>Optional reason saved with the booking when status is Cancelled.</summary>
+        public string cancellationreason { get; set; }
+    }
+
+    public class UpdateStatusRes
+    {
+        public bool success { get; set; }
+        public bool notified { get; set; }
+        /// <summary>Channels attempted: sms, whatsapp, email.</summary>
+        public List<string> channels { get; set; } = new();
+        public string statuscode { get; set; } = "";
     }
 
     public class UpdatePaymentReq

@@ -62,11 +62,19 @@ export type GuestHospitalityBookingMineItem = {
   check_in: string;
   check_out: string;
   nights: number;
+  persons?: number;
   closed: boolean;
   status: string;
   total: number;
   paid: number;
   balance: number;
+  payment_policy?: string;
+  cancellation_policy?: string;
+  can_cancel?: boolean;
+  pay_at_property?: boolean;
+  requested_check_in?: string;
+  requested_check_out?: string;
+  modify_request_note?: string;
 };
 
 export type GuestHospitalityBookingResult = {
@@ -189,6 +197,47 @@ export class GuestHospitalityBookingService {
       return resp.item ?? [];
     } catch (err) {
       throw new Error(getApiErrorMessage(err, "Could not load room bookings."));
+    }
+  }
+
+  async cancel(req: {
+    organisation_id: number;
+    room_id: number;
+    booking_id: string;
+    booking_guid?: string;
+    reason?: string;
+  }) {
+    try {
+      const postdata = new ActionReq<typeof req>();
+      postdata.item = req;
+      const resp = await this.http.post<ActionRes<boolean>>(`${this.base}/Cancel`, postdata);
+      if (resp.error) throw new Error(resp.error);
+      return resp.item ?? false;
+    } catch (err) {
+      throw new Error(getApiErrorMessage(err, "Could not cancel room booking."));
+    }
+  }
+
+  async requestModify(req: {
+    organisation_id: number;
+    room_id: number;
+    booking_id: string;
+    booking_guid?: string;
+    requested_check_in: string;
+    requested_check_out: string;
+    note?: string;
+  }) {
+    try {
+      const postdata = new ActionReq<typeof req>();
+      postdata.item = req;
+      const resp = await this.http.post<ActionRes<boolean>>(
+        `${this.base}/RequestModify`,
+        postdata,
+      );
+      if (resp.error) throw new Error(resp.error);
+      return resp.item ?? false;
+    } catch (err) {
+      throw new Error(getApiErrorMessage(err, "Could not submit modification request."));
     }
   }
 }

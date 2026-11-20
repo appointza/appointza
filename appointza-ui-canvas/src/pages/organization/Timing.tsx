@@ -60,6 +60,9 @@ import {
   isPendingBusinessOnboarding,
   setBusinessOnboardingStep,
 } from "@/utils/businessOnboarding.util";
+import { AppoinmentService } from "@/services/appoinment.service";
+import { AppoinmentSelectReq } from "@/models/appoinment.model";
+import { formatAppointzaDate, formatAppointzaTime } from "@/utils/appointzaFormatters";
 
 function formatTimingTimeForApi(value: Date | string): string {
   if (value instanceof Date) {
@@ -147,6 +150,40 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   // API services - use useMemo to prevent recreation on every render
   const timingService = useMemo(() => new OrganisationServiceTimingService(), []);
   const leaveDatesService = useMemo(() => new LeaveDatesService(), []);
+  const appointmentService = useMemo(() => new AppoinmentService(), []);
+
+  const checkLeaveConflictsForDate = async (date: Date, locationId: number) => {
+    if (!organizationId || !locationId || Number.isNaN(date.getTime())) {
+      setLeaveConflictBookings([]);
+      return;
+    }
+    setIsCheckingLeaveConflicts(true);
+    try {
+      const req = new AppoinmentSelectReq();
+      req.organisationid = organizationId;
+      req.organisationlocationid = locationId;
+      req.appointmentdate = date;
+      const rows = (await appointmentService.select(req)) ?? [];
+      setLeaveConflictBookings(
+        rows
+          .filter((row: any) => {
+            const status = String(row.status || row.appointmentstatus || "").toUpperCase();
+            return !["CANCELLED", "CANCELED", "NO_SHOW", "NOSHOW"].includes(status);
+          })
+          .map((row: any) => ({
+            id: Number(row.id) || 0,
+            name: String(row.username || row.customername || row.mobile || "Customer"),
+            fromtime: String(row.fromtime || ""),
+            totime: String(row.totime || ""),
+          })),
+      );
+    } catch (error) {
+      console.error("Failed to check leave conflicts:", error);
+      setLeaveConflictBookings([]);
+    } finally {
+      setIsCheckingLeaveConflicts(false);
+    }
+  };
   
   // Timing states
   const [dayTimeSlots, setDayTimeSlots] = useState<Record<number, OrganisationServiceTiming[]>>({});
@@ -161,6 +198,10 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
   const [leaveList, setLeaveList] = useState<any[]>([]);
   const [editingLeave, setEditingLeave] = useState<any | null>(null);
   const [showLeaveList, setShowLeaveList] = useState(false);
+  const [leaveConflictBookings, setLeaveConflictBookings] = useState<
+    Array<{ id: number; name: string; fromtime: string; totime: string }>
+  >([]);
+  const [isCheckingLeaveConflicts, setIsCheckingLeaveConflicts] = useState(false);
 
   // Days of week
   const daysOfWeek = [
@@ -510,16 +551,22 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         title: "Success",
         description: editingLeave ? "Leave updated successfully" : "Leave booked successfully",
       });
-      setShowLeaveForm(false);
       setEditingLeave(null);
       setLeaveRequest(new Leavereq());
       setSelectedLeaveDate(null);
       setStartTime('');
       setEndTime('');
-      
-      // Refresh leave list
+      setLeaveConflictBookings([]);
+
+      // Refresh leave list, then restore a visible panel (single-location was going blank).
       if (selectedLocation) {
         await fetchLeaveList(selectedLocation.id);
+        setShowLeaveForm(false);
+        setShowLeaveList(true);
+        setShowTimingForm(false);
+      } else {
+        setShowLeaveForm(false);
+        returnToSingleLocationHours();
       }
     } catch (error) {
       console.error('❌ Error saving leave:', error);
@@ -719,16 +766,20 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
         description: "Leave updated successfully",
       });
       
-      setShowLeaveForm(false);
       setEditingLeave(null);
       setLeaveRequest(new Leavereq());
       setSelectedLeaveDate(null);
       setStartTime('');
       setEndTime('');
-      
-      // Refresh leave list
+      setLeaveConflictBookings([]);
+
       if (selectedLocation) {
         await fetchLeaveList(selectedLocation.id);
+        setShowLeaveForm(false);
+        setShowLeaveList(true);
+        setShowTimingForm(false);
+      } else {
+        setShowLeaveForm(false);
       }
     } catch (error) {
       console.error('❌ Error editing leave:', error);
@@ -1316,6 +1367,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                     
                     // Re-validate when date changes - check if this date has a leave
                     if (selectedLocation) {
+                      void checkLeaveConflictsForDate(date, selectedLocation.id);
                       // Refresh leave list to ensure we have latest data
                       const req = {
                         organisationid: organizationId,
@@ -1348,7 +1400,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                           setLeaveRequest(prev => ({ ...prev, isfullday: false }));
                           toast({
                             title: "Half Day Leave Exists",
-                            description: `This date already has a leave from ${existingLeave.start_time?.slice(0, 5)} to ${existingLeave.end_time?.slice(0, 5)}.`,
+                            description: `This date already has a leave from ${formatAppointzaTime(existingLeave.start_time)} to ${formatAppointzaTime(existingLeave.end_time)}.`,
                             variant: "default"
                           });
                         }
@@ -1365,6 +1417,39 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                   }}
                   className={cn(org.input, "h-11 w-full")}
                 />
+                {(isCheckingLeaveConflicts || leaveConflictBookings.length > 0) && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-950">
+                    {isCheckingLeaveConflicts ? (
+                      <p className="flex items-center gap-2">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Checking existing bookings…
+                      </p>
+                    ) : (
+                      <>
+                        <p className="font-medium">
+                          {leaveConflictBookings.length} booking
+                          {leaveConflictBookings.length === 1 ? "" : "s"} on{" "}
+                          {formatAppointzaDate(selectedLeaveDate)}
+                        </p>
+                        <ul className="mt-1 space-y-0.5 text-amber-900/90">
+                          {leaveConflictBookings.slice(0, 8).map((booking) => (
+                            <li key={booking.id}>
+                              {booking.name}
+                              {booking.fromtime
+                                ? ` · ${formatAppointzaTime(booking.fromtime)}${
+                                    booking.totime ? `–${formatAppointzaTime(booking.totime)}` : ""
+                                  }`
+                                : ""}
+                            </li>
+                          ))}
+                          {leaveConflictBookings.length > 8 ? (
+                            <li>+{leaveConflictBookings.length - 8} more</li>
+                          ) : null}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">
@@ -1535,7 +1620,7 @@ const TimingScreen = ({ embedded = false }: { embedded?: boolean }) => {
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
                               <div className="min-w-0 flex-1">
                                 <p className="font-medium text-appointza-navy">
-                                  {new Date(leave.appointmentdate).toLocaleDateString()}
+                                  {formatAppointzaDate(leave.appointmentdate)}
                                 </p>
                                 <p className="text-sm text-stone-500">
                                   {leave.isfullday ? 'Full day' : `${leave.start_time} – ${leave.end_time}`}

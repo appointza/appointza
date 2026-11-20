@@ -645,31 +645,39 @@ namespace appointza.Services
         }
 
 
-        public async Task<bool> UpdateStatus(UpdateStatusReq req)
+        public async Task<UpdateStatusRes> UpdateStatus(UpdateStatusReq req)
         {
-            bool result = false;
             using (IDb db = await dbprovider.GetDb())
             {
                 await db.Connect();
-                result = await this.UpdateStatusTransaction(db, req);
+                return await this.UpdateStatusTransaction(db, req);
             }
-            return result;
         }
-        public async Task<bool> UpdateStatusTransaction(IDb db, UpdateStatusReq req)
+        public async Task<UpdateStatusRes> UpdateStatusTransaction(IDb db, UpdateStatusReq req)
         {
-            bool result = false;
+            var result = new UpdateStatusRes { success = false, channels = new List<string>() };
 
             Appoinment appoinment = (await this.SelectTransaction(db, new AppoinmentSelectReq { id = req.appoinmentid })).FirstOrDefault();
 
             if (appoinment == null)
             {
-                return false;
+                return result;
             }
 
-            int oldStatus = appoinment.status;
-            appoinment.status = (int)req.statusid;
             string oldStatusCode = appoinment.statuscode ?? "";
-            appoinment.statuscode = req.statuscode;
+            var normalizedStatus = (req.statuscode ?? "").Trim().ToUpperInvariant();
+            req.statuscode = normalizedStatus;
+            appoinment.status = (int)req.statusid;
+            appoinment.statuscode = normalizedStatus;
+
+            if (normalizedStatus == "CANCELLED"
+                && !string.IsNullOrWhiteSpace(req.cancellationreason))
+            {
+                var reason = req.cancellationreason.Trim();
+                appoinment.notes = string.IsNullOrWhiteSpace(appoinment.notes)
+                    ? $"Cancellation reason: {reason}"
+                    : $"{appoinment.notes.Trim()}\nCancellation reason: {reason}";
+            }
 
             await this.UpdateTransaction(db, appoinment);
 
@@ -680,39 +688,35 @@ namespace appointza.Services
                 appoinmentid = req.appoinmentid,
                 tasktypeid = (long)TimelineStatus.Status,
                 taskcode = "Status to",
-                apoinmentstatuscode = req.statuscode,
+                apoinmentstatuscode = normalizedStatus,
                 appoinmenstatustype=req.statustype,
                 appoinmentstatusid = req.statusid
 
         });
-            result = true;
+            result.success = true;
+            result.statuscode = normalizedStatus;
 
             // Send SMS notification to customer when appointment status changes
             try
             {
-                // Get customer user details
                 var customerUser = (await usersService.SelectTransaction(db, new UsersSelectReq { id = appoinment.userid })).FirstOrDefault();
-                // Get organization details
                 var organisation = (await organisationService.SelectTransaction(db, new OrganisationSelectReq { id = appoinment.organizationid })).FirstOrDefault();
-                // Get location details
                 var organisationLocation = (await organisationLocationService.SelectTransaction(db, new OrganisationLocationSelectReq { id = appoinment.organisationlocationid })).FirstOrDefault();
                 
-                // Get ReferenceValue for status display text
-                string statusDisplayText = req.statuscode ?? "";
+                string statusDisplayText = normalizedStatus;
                 try
                 {
-                    // Get APPOINTMENTSTATUS reference type
                     var statusRefType = (await referenceTypeService.SelectTransaction(db, new ReferenceTypeSelectReq { identifier = "APPOINTMENTSTATUS" })).FirstOrDefault();
                     if (statusRefType != null)
                     {
-                        // Get all ReferenceValues for this type and organization, then filter by identifier
                         var statusRefValues = (await referenceValueService.SelectTransaction(db, new ReferenceValueSelectReq 
                         { 
                             referencetypeid = (int)statusRefType.id,
                             organisationid = appoinment.organizationid
                         }));
                         
-                        var statusRefValue = statusRefValues?.FirstOrDefault(rv => rv.identifier == req.statuscode);
+                        var statusRefValue = statusRefValues?.FirstOrDefault(rv =>
+                            string.Equals(rv.identifier, normalizedStatus, StringComparison.OrdinalIgnoreCase));
                         
                         if (statusRefValue != null && !string.IsNullOrEmpty(statusRefValue.displaytext))
                         {
@@ -722,16 +726,13 @@ namespace appointza.Services
                 }
                 catch (Exception refEx)
                 {
-                    // If ReferenceValue lookup fails, use statuscode as fallback
                     Console.WriteLine($"Error getting status ReferenceValue: {refEx.Message}");
                 }
                 
                 if (customerUser != null && organisation != null && !string.IsNullOrEmpty(customerUser.mobile))
                 {
-                    // Format appointment date as dd/MM/yy
                     string appointmentDate = appoinment.appoinmentdate.ToString("dd/MM/yy");
                     
-                    // Format appointment time as HH.mm a.m/p.m
                     int hours = appoinment.fromtime.Hours;
                     int minutes = appoinment.fromtime.Minutes;
                     string period = hours < 12 ? "a.m" : "p.m";
@@ -739,7 +740,6 @@ namespace appointza.Services
                     if (hours == 0) hours = 12;
                     string appointmentTime = $"{hours:00}.{minutes:00} {period}";
                     
-                    // Get service type from appointment attributes
                     string serviceType = "General";
                     if (appoinment.attributes != null && appoinment.attributes.servicelist != null && appoinment.attributes.servicelist.Any())
                     {
@@ -747,10 +747,8 @@ namespace appointza.Services
                         serviceType = string.Join(", ", serviceNames);
                     }
                     
-                    // Get location name
                     string locationName = organisationLocation?.name ?? organisationLocation?.city ?? "N/A";
                     
-                    // Send SMS status notification to customer
                     await smsService.SendAppointmentStatus(new AppointmentStatusSmsReq
                     {
                         mobilenumber = customerUser.mobile,
@@ -762,19 +760,18 @@ namespace appointza.Services
                         ServiceType = serviceType,
                         OrganisationName = organisation.name ?? "Organization"
                     });
+                    result.channels.Add("sms");
+                    result.notified = true;
                 }
             }
             catch (Exception ex)
             {
-                // Log error but don't fail the status update
                 Console.WriteLine($"Error sending status SMS notification: {ex.Message}");
             }
 
-            // Award loyalty points and evaluate reward rules when appointment is completed
             try
             {
-                var newStatusCode = (req.statuscode ?? "").Trim();
-                if (string.Equals(newStatusCode, "COMPLETED", StringComparison.OrdinalIgnoreCase)
+                if (string.Equals(normalizedStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase)
                     && !string.Equals(oldStatusCode, "COMPLETED", StringComparison.OrdinalIgnoreCase))
                 {
                     decimal amountSpent = 0;
@@ -804,11 +801,24 @@ namespace appointza.Services
 
             try
             {
-                var code = (req.statuscode ?? "").Trim().ToUpperInvariant();
-                if (code is "CONFIRMED" or "CONFIRM" or "BOOKED" or "APPROVED")
+                if (normalizedStatus is "CONFIRMED" or "CONFIRM" or "BOOKED" or "APPROVED")
+                {
                     await PublishAppointmentAutomation(db, appoinment, WhatsAppAutomationTriggers.BookingConfirmed);
-                else if (code == "COMPLETED")
+                    if (!result.channels.Contains("whatsapp")) result.channels.Add("whatsapp");
+                    result.notified = true;
+                }
+                else if (normalizedStatus == "COMPLETED")
+                {
                     await PublishAppointmentAutomation(db, appoinment, WhatsAppAutomationTriggers.BookingCompleted);
+                    if (!result.channels.Contains("whatsapp")) result.channels.Add("whatsapp");
+                    result.notified = true;
+                }
+                else if (normalizedStatus == "CANCELLED")
+                {
+                    await PublishAppointmentAutomation(db, appoinment, WhatsAppAutomationTriggers.BookingCancelled);
+                    if (!result.channels.Contains("whatsapp")) result.channels.Add("whatsapp");
+                    result.notified = true;
+                }
             }
             catch (Exception autoEx)
             {

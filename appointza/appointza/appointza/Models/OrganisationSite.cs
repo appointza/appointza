@@ -53,6 +53,8 @@ namespace appointza.Models
         public string html { get; set; } = "";
         /// <summary>Fingerprint for client cache revalidation.</summary>
         public string versionKey { get; set; } = "";
+        /// <summary>Business display name for the page title.</summary>
+        public string organisationname { get; set; } = "";
     }
 
     public class PublicSiteLocationResolve

@@ -11,6 +11,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { ResponsiveEditSheet } from "@/components/organization/ResponsiveEditSheet";
 import {
   HospitalityFoodItem,
@@ -24,8 +34,17 @@ import {
 } from "@/models/hospitality.model";
 import { hospitalityService } from "@/services/hospitality.service";
 import { formatRoomTypeLabel } from "@/utils/roomAmenities.util";
+import { formatAppointzaInr } from "@/utils/appointzaFormatters";
 import { cn } from "@/lib/utils";
 import { org } from "@/lib/orgTheme";
+
+function formatHospPriceMeta(price: string | number | null | undefined): string | undefined {
+  if (price == null || price === "") return undefined;
+  const raw = String(price).trim();
+  if (!raw) return undefined;
+  if (raw.includes("₹")) return raw;
+  return formatAppointzaInr(raw);
+}
 
 type PersistFn<T> = (items: T[]) => Promise<void>;
 
@@ -85,6 +104,8 @@ function useContentEditor<T>(items: T[], setItems: (items: T[]) => void) {
   const [editorIndex, setEditorIndex] = useState<number | null>(null);
   const [draft, setDraft] = useState<T | null>(null);
   const [saving, setSaving] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [pendingDeletePersist, setPendingDeletePersist] = useState<PersistFn<T> | null>(null);
 
   const openCreate = (empty: T) => {
     setEditorIndex(null);
@@ -103,6 +124,8 @@ function useContentEditor<T>(items: T[], setItems: (items: T[]) => void) {
     setEditorOpen(false);
     setEditorIndex(null);
     setDraft(null);
+    setDeleteConfirmOpen(false);
+    setPendingDeletePersist(null);
   };
 
   const saveDraft = async (onPersist: PersistFn<T>) => {
@@ -120,13 +143,19 @@ function useContentEditor<T>(items: T[], setItems: (items: T[]) => void) {
     }
   };
 
-  const deleteDraft = async (onPersist: PersistFn<T>) => {
+  const requestDelete = (onPersist: PersistFn<T>) => {
     if (editorIndex == null || saving) return;
+    setPendingDeletePersist(() => onPersist);
+    setDeleteConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (editorIndex == null || saving || !pendingDeletePersist) return;
     setSaving(true);
     try {
       const next = items.filter((_, index) => index !== editorIndex);
       setItems(next);
-      await onPersist(next);
+      await pendingDeletePersist(next);
       closeEditor();
     } finally {
       setSaving(false);
@@ -138,13 +167,56 @@ function useContentEditor<T>(items: T[], setItems: (items: T[]) => void) {
     editorIndex,
     draft,
     saving,
+    deleteConfirmOpen,
+    setDeleteConfirmOpen,
     setDraft,
     openCreate,
     openEdit,
     closeEditor,
     saveDraft,
-    deleteDraft,
+    requestDelete,
+    confirmDelete,
   };
+}
+
+function HospDeleteConfirmDialog({
+  open,
+  onOpenChange,
+  title,
+  description,
+  saving,
+  onConfirm,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  description: string;
+  saving: boolean;
+  onConfirm: () => void;
+}) {
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{title}</AlertDialogTitle>
+          <AlertDialogDescription>{description}</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={saving}>Keep</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={saving}
+            className="bg-red-600 hover:bg-red-700"
+            onClick={(e) => {
+              e.preventDefault();
+              onConfirm();
+            }}
+          >
+            {saving ? "Deleting…" : "Delete"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
 
 type PackagesPanelProps = {
@@ -214,7 +286,7 @@ export function HospitalityPackagesPanel({
               <HospCard
                 key={pkg.id || index}
                 title={pkg.name || "Untitled package"}
-                meta={pkg.price || undefined}
+                meta={formatHospPriceMeta(pkg.price)}
                 body={
                   <>
                     <p className="line-clamp-2">
@@ -249,7 +321,7 @@ export function HospitalityPackagesPanel({
           onCancel={editor.closeEditor}
           onDelete={
             editor.editorIndex != null ?
-              () => void editor.deleteDraft(onPersist)
+              () => editor.requestDelete(onPersist)
             : undefined
           }
           onSave={() => void editor.saveDraft(onPersist)}
@@ -329,6 +401,14 @@ export function HospitalityPackagesPanel({
           </div>
         </ResponsiveEditSheet>
       : null}
+      <HospDeleteConfirmDialog
+        open={editor.deleteConfirmOpen}
+        onOpenChange={editor.setDeleteConfirmOpen}
+        title="Delete package?"
+        description="This package will be removed from your hospitality offerings. This cannot be undone."
+        saving={editor.saving}
+        onConfirm={() => void editor.confirmDelete()}
+      />
     </>
   );
 }
@@ -379,7 +459,7 @@ export function HospitalityFoodPanel({ foodMenu, setFoodMenu, onPersist, newItem
           isEdit={editor.editorIndex != null}
           saving={editor.saving}
           onCancel={editor.closeEditor}
-          onDelete={editor.editorIndex != null ? () => void editor.deleteDraft(onPersist) : undefined}
+          onDelete={editor.editorIndex != null ? () => editor.requestDelete(onPersist) : undefined}
           onSave={() => void editor.saveDraft(onPersist)}
           saveLabel="Save item"
         >
@@ -415,6 +495,14 @@ export function HospitalityFoodPanel({ foodMenu, setFoodMenu, onPersist, newItem
           </div>
         </ResponsiveEditSheet>
       : null}
+      <HospDeleteConfirmDialog
+        open={editor.deleteConfirmOpen}
+        onOpenChange={editor.setDeleteConfirmOpen}
+        title="Delete menu item?"
+        description="This food menu item will be removed. This cannot be undone."
+        saving={editor.saving}
+        onConfirm={() => void editor.confirmDelete()}
+      />
     </>
   );
 }
@@ -469,7 +557,7 @@ export function HospitalityNearbyPanel({
           isEdit={editor.editorIndex != null}
           saving={editor.saving}
           onCancel={editor.closeEditor}
-          onDelete={editor.editorIndex != null ? () => void editor.deleteDraft(onPersist) : undefined}
+          onDelete={editor.editorIndex != null ? () => editor.requestDelete(onPersist) : undefined}
           onSave={() => void editor.saveDraft(onPersist)}
           saveLabel="Save place"
         >
@@ -514,6 +602,14 @@ export function HospitalityNearbyPanel({
           </div>
         </ResponsiveEditSheet>
       : null}
+      <HospDeleteConfirmDialog
+        open={editor.deleteConfirmOpen}
+        onOpenChange={editor.setDeleteConfirmOpen}
+        title="Delete nearby place?"
+        description="This nearby place will be removed from your listing. This cannot be undone."
+        saving={editor.saving}
+        onConfirm={() => void editor.confirmDelete()}
+      />
     </>
   );
 }
@@ -547,7 +643,7 @@ export function HospitalityGuestServicesPanel({
               <HospCard
                 key={service.id || index}
                 title={service.name || "Guest service"}
-                meta={service.price || undefined}
+                meta={formatHospPriceMeta(service.price)}
                 body={service.description ? <p className="line-clamp-2">{service.description}</p> : null}
                 onEdit={() => editor.openEdit(index, service)}
               />
@@ -569,7 +665,7 @@ export function HospitalityGuestServicesPanel({
           isEdit={editor.editorIndex != null}
           saving={editor.saving}
           onCancel={editor.closeEditor}
-          onDelete={editor.editorIndex != null ? () => void editor.deleteDraft(onPersist) : undefined}
+          onDelete={editor.editorIndex != null ? () => editor.requestDelete(onPersist) : undefined}
           onSave={() => void editor.saveDraft(onPersist)}
           saveLabel="Save service"
         >
@@ -604,6 +700,14 @@ export function HospitalityGuestServicesPanel({
           </div>
         </ResponsiveEditSheet>
       : null}
+      <HospDeleteConfirmDialog
+        open={editor.deleteConfirmOpen}
+        onOpenChange={editor.setDeleteConfirmOpen}
+        title="Delete guest service?"
+        description="This guest service will be removed. This cannot be undone."
+        saving={editor.saving}
+        onConfirm={() => void editor.confirmDelete()}
+      />
     </>
   );
 }

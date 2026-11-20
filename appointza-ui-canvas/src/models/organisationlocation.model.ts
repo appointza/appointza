@@ -102,6 +102,8 @@ export class UsersGenerateQRCodeRes {
 
 export class OrgLocationReq {
   orglocid: number = 0;
+  date_from?: string;
+  date_to?: string;
 }
 
 export class PaymentSummary {

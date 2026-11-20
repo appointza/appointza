@@ -329,13 +329,26 @@ namespace appointza.Services
 
             RoomStayHistory.OverlayBoardDay(room, asOf);
 
-            if (RoomStayHistory.AnyStayCoversDay(room, asOf))
+            // Never rewrite an explicit Available (post-checkout / mark-clean) back to Reserved
+            // while a closed or stale stay window still exists — that caused Occupied badge +
+            // Reserved dropdown mismatches after reload.
+            if (stored == "available")
+            {
+                room.status = "available";
+                if (!RoomStayHistory.AnyStayCoversDay(room, asOf)
+                    && !RoomStayHistory.AnyStayOnCheckoutMorning(room, asOf))
+                {
+                    room.guest = null;
+                }
+            }
+            else if (RoomStayHistory.AnyStayCoversDay(room, asOf))
             {
                 room.status = stored is "occupied" or "checkout_pending" ? stored : "reserved";
             }
-            else if (RoomStayHistory.AnyStayOnCheckoutMorning(room, asOf) && stored == "checkout_pending")
+            else if (RoomStayHistory.AnyStayOnCheckoutMorning(room, asOf))
             {
-                room.status = "checkout_pending";
+                // Keep departing guest visible on turnover day.
+                room.status = stored is "occupied" or "checkout_pending" ? stored : "checkout_pending";
             }
             else
             {
@@ -343,9 +356,11 @@ namespace appointza.Services
                 room.guest = null;
             }
 
+            // Recompute after status normalization so badge and dropdown share one truth.
+            availabilityState = RoomStayHistory.GetAvailabilityState(room, asOf);
             room.availability_state = availabilityState;
-            room.has_active_booking = hasBooking;
-            room.can_manage = hasBooking && availabilityState != "Available";
+            room.has_active_booking = RoomStayHistory.HasActiveBooking(room);
+            room.can_manage = room.has_active_booking && availabilityState != "Available";
         }
 
         public async Task<bool> UpdateStatus(OrganisationRoomStatusUpdateReq req)
@@ -383,6 +398,141 @@ namespace appointza.Services
             }
 
             return true;
+        }
+
+        public async Task<bool> UpdateStayAction(OrganisationRoomStayActionReq req)
+        {
+            var action = (req.action ?? "").Trim().ToLowerInvariant();
+            if (req.organisation_id <= 0 || req.room_id <= 0)
+                throw new ArgumentException("organisation_id and room_id are required.");
+            if (string.IsNullOrWhiteSpace(action))
+                throw new ArgumentException("action is required.");
+
+            using IDb db = await dbprovider.GetDb();
+            await db.Connect();
+            await HospitalitySchemaBootstrap.EnsureSchemaTransaction(db);
+
+            var room = await GetByIdTransaction(db, req.room_id, req.organisation_id)
+                ?? throw new InvalidOperationException("Room not found.");
+
+            var stays = RoomStayHistory.Collect(room);
+            var stay = FindStay(stays, req.booking_id, req.booking_guid)
+                ?? throw new InvalidOperationException("Booking not found on this room.");
+
+            var previousRoomStatus = (room.status ?? "").Trim().ToLowerInvariant();
+            var previousStayStatus = string.IsNullOrWhiteSpace(stay.status)
+                ? (stay.closed ? "checked_out" : "reserved")
+                : stay.status.Trim().ToLowerInvariant();
+            var notes = "";
+
+            switch (action)
+            {
+                case "confirm":
+                    if (stay.closed)
+                        throw new InvalidOperationException("Cannot confirm a closed booking.");
+                    stay.status = "confirmed";
+                    if (previousRoomStatus is "available" or "reserved" or "")
+                        room.status = "reserved";
+                    break;
+
+                case "check_in":
+                    if (stay.closed)
+                        throw new InvalidOperationException("Cannot check in a closed booking.");
+                    stay.status = "checked_in";
+                    room.status = "occupied";
+                    break;
+
+                case "check_out":
+                    if (!string.Equals(stay.status, "checked_in", StringComparison.OrdinalIgnoreCase)
+                        && previousRoomStatus is not ("occupied" or "checkout_pending"))
+                        throw new InvalidOperationException("Check-out is only available after check-in.");
+                    stay.status = "checked_out";
+                    stay.closed = true;
+                    room.status = "checkout_pending";
+                    break;
+
+                case "cancel":
+                    stay.status = "cancelled";
+                    stay.closed = true;
+                    stay.cancel_reason = (req.cancel_reason ?? "").Trim();
+                    notes = stay.cancel_reason;
+                    if (!stays.Any(RoomStayHistory.IsOccupyingStay))
+                    {
+                        room.status = "available";
+                        room.guest = null;
+                    }
+                    break;
+
+                case "no_show":
+                    stay.status = "no_show";
+                    stay.closed = true;
+                    if (!stays.Any(RoomStayHistory.IsOccupyingStay))
+                    {
+                        room.status = "available";
+                        room.guest = null;
+                    }
+                    break;
+
+                case "edit":
+                    if (stay.closed)
+                        throw new InvalidOperationException("Cannot edit a closed booking.");
+                    if (!string.IsNullOrWhiteSpace(req.check_in))
+                        stay.check_in = req.check_in.Trim();
+                    if (!string.IsNullOrWhiteSpace(req.check_out))
+                        stay.check_out = req.check_out.Trim();
+                    if (req.persons is > 0)
+                        stay.persons = req.persons.Value;
+                    stay.guest ??= new RoomGuestData();
+                    if (!string.IsNullOrWhiteSpace(req.guest_name))
+                        stay.guest.name = req.guest_name.Trim();
+                    if (!string.IsNullOrWhiteSpace(req.guest_phone))
+                        stay.guest.phone = req.guest_phone.Trim();
+                    if (req.guest_email != null)
+                        stay.guest.email = string.IsNullOrWhiteSpace(req.guest_email) ? null : req.guest_email.Trim();
+                    if (RoomStayHistory.TryParseDate(stay.check_in, out var inDate)
+                        && RoomStayHistory.TryParseDate(stay.check_out, out var outDate)
+                        && outDate > inDate)
+                        stay.nights = outDate.DayNumber - inDate.DayNumber;
+                    break;
+
+                default:
+                    throw new ArgumentException("Unsupported booking action.");
+            }
+
+            RoomStayHistory.ApplyToRoom(room, stays, DateOnly.FromDateTime(DateTime.Now));
+            await UpdateTransactionWithoutStatusLog(db, room);
+
+            var nextRoomStatus = (room.status ?? "").Trim().ToLowerInvariant();
+            if (!string.Equals(previousRoomStatus, nextRoomStatus, StringComparison.Ordinal)
+                || !string.Equals(previousStayStatus, stay.status, StringComparison.OrdinalIgnoreCase)
+                || action == "edit")
+            {
+                await InsertStatusEventTransaction(
+                    db,
+                    room,
+                    previousRoomStatus,
+                    nextRoomStatus,
+                    action == "edit" ? "edit_booking" : action,
+                    notes);
+            }
+
+            return true;
+        }
+
+        static RoomStayRecord? FindStay(List<RoomStayRecord> stays, string? bookingId, string? bookingGuid)
+        {
+            if (!string.IsNullOrWhiteSpace(bookingGuid))
+            {
+                var byGuid = stays.FirstOrDefault(s =>
+                    string.Equals(s.booking_guid, bookingGuid.Trim(), StringComparison.OrdinalIgnoreCase));
+                if (byGuid != null) return byGuid;
+            }
+            if (!string.IsNullOrWhiteSpace(bookingId))
+            {
+                return stays.FirstOrDefault(s =>
+                    string.Equals(s.booking_id, bookingId.Trim(), StringComparison.OrdinalIgnoreCase));
+            }
+            return stays.LastOrDefault(RoomStayHistory.IsOccupyingStay) ?? stays.LastOrDefault();
         }
 
         public async Task<bool> Checkout(OrganisationRoomIdReq req) =>

@@ -115,6 +115,10 @@ public string whatsapp_mobile { get; set; } = "";
     public class OrgLocationStaffReq
     {
         public long orglocid { get; set; }
+        /// <summary>Optional yyyy-MM-dd inclusive start for dashboard revenue/stats.</summary>
+        public string? date_from { get; set; }
+        /// <summary>Optional yyyy-MM-dd inclusive end for dashboard revenue/stats.</summary>
+        public string? date_to { get; set; }
     }
 
     public class orgnisationlocationstaffreq

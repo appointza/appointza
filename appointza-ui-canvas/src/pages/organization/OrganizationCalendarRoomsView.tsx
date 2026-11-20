@@ -94,9 +94,15 @@ export function OrganizationCalendarRoomsView({
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {rooms.map((room) => {
+              // One source of truth: board availability_state (derived from stays + ops status).
               const state = room.availability_state || "Available";
               const isBusy = busyRoomId === room.id;
               const canManage = room.can_manage;
+              const isCheckedIn =
+                (room.status || "").toLowerCase() === "occupied" ||
+                (room.status || "").toLowerCase() === "checkout_pending" ||
+                state === "Occupied" ||
+                state === "Check-out";
               const guestName = room.guest?.name?.trim() ? roomGuestName(room) : null;
               const guestPhone = room.guest?.phone?.trim() ? roomGuestPhone(room) : null;
               const guestEmail = room.guest?.email?.trim() || "";
@@ -104,6 +110,15 @@ export function OrganizationCalendarRoomsView({
               const checkOutLabel = formatStayDate(room.booking?.check_out);
               const nights = room.booking?.nights ?? 0;
               const bookingRef = room.booking?.booking_id?.trim() || "";
+              const selectedKey = format(selectedDate, "yyyy-MM-dd");
+              const isCheckoutDay =
+                Boolean(room.booking?.check_out?.trim()) &&
+                room.booking!.check_out!.slice(0, 10) === selectedKey;
+              const checkoutTimeHint = isCheckoutDay
+                ? state === "Check-out" || state === "Occupied"
+                  ? "Checking out today"
+                  : null
+                : null;
 
               return (
                 <div
@@ -124,7 +139,11 @@ export function OrganizationCalendarRoomsView({
                     </Badge>
                   </div>
 
-                  {canManage ? (
+                  {checkoutTimeHint ? (
+                    <p className="mt-2 text-[12px] font-medium text-[#b54708]">{checkoutTimeHint}</p>
+                  ) : null}
+
+                  {canManage || (isCheckoutDay && guestName) ? (
                     <div className="mt-3 space-y-1.5 rounded-lg border border-[#eef1f5] bg-[#f8fafc] px-3 py-2.5">
                       <p className="text-[13px] font-semibold text-[#1a1a1a]">
                         {guestName || "Guest details"}
@@ -188,7 +207,7 @@ export function OrganizationCalendarRoomsView({
                           </Button>
                         ) : null}
                         <div className="flex gap-2">
-                          {onCheckout ? (
+                          {onCheckout && isCheckedIn ? (
                             <Button
                               type="button"
                               className={cn(org.btnPrimary, "h-9 w-full")}
@@ -198,7 +217,9 @@ export function OrganizationCalendarRoomsView({
                               Checkout — room available
                             </Button>
                           ) : null}
-                          {onMarkClean ? (
+                          {onMarkClean &&
+                          (state === "Cleaning" ||
+                            (room.status || "").toLowerCase() === "cleaning") ? (
                             <Button
                               type="button"
                               variant="outline"

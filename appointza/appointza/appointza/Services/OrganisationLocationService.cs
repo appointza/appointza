@@ -682,36 +682,111 @@ FROM appointment_counts ac";
         public async Task<OrganisationDashboardStatsRes> SelectOrganisationDashboardStatsTransaction(IDb db, OrgLocationStaffReq req)
         {
             var result = new OrganisationDashboardStatsRes();
+            DateOnly? dateFrom = null;
+            DateOnly? dateTo = null;
+            if (!string.IsNullOrWhiteSpace(req.date_from) && DateOnly.TryParse(req.date_from, out var parsedFrom))
+                dateFrom = parsedFrom;
+            if (!string.IsNullOrWhiteSpace(req.date_to) && DateOnly.TryParse(req.date_to, out var parsedTo))
+                dateTo = parsedTo;
+
             const string query = @"
 WITH appointment_counts AS (
     SELECT
-        COUNT(*) AS total_appointments,
+        -- Active bookings only (cancelled excluded from total bookings)
+        COUNT(*) FILTER (WHERE UPPER(COALESCE(statuscode, '')) <> 'CANCELLED') AS total_appointments,
         SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'CONFIRMED' THEN 1 ELSE 0 END) AS confirmed_count,
         SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_count,
         SUM(CASE WHEN UPPER(COALESCE(statuscode, '')) = 'CANCELLED' THEN 1 ELSE 0 END) AS cancelled_count,
         -- Pending = needs action on today or a future date (matches what staff look for on the calendar)
         SUM(CASE
-            WHEN UPPER(COALESCE(statuscode, '')) NOT IN ('CONFIRMED', 'COMPLETED', 'CANCELLED')
+            WHEN UPPER(COALESCE(statuscode, '')) NOT IN ('CONFIRMED', 'COMPLETED', 'CANCELLED', 'IN_PROGRESS', 'NO_SHOW')
              AND DATE(appoinmentdate) >= CURRENT_DATE
             THEN 1 ELSE 0 END) AS pending_count
     FROM appoinment
     WHERE organisationlocationid = @orglocid
+      AND (@date_from::date IS NULL OR DATE(appoinmentdate) >= @date_from::date)
+      AND (@date_to::date IS NULL OR DATE(appoinmentdate) <= @date_to::date)
+),
+-- Appointment revenue = listed service prices on COMPLETED bookings.
+-- Accept common key casings (serviceprice / ServicePrice / prize / offerprize).
+appointment_revenue AS (
+    SELECT COALESCE(SUM(item.service_price), 0) AS total_revenue
+    FROM appoinment a
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(
+            NULLIF(COALESCE(el->>'serviceprice', el->>'ServicePrice', el->>'servicePrice'), '')::numeric,
+            NULLIF(COALESCE(el->>'offerprize', el->>'OfferPrize', el->>'offerPrize'), '')::numeric,
+            NULLIF(COALESCE(el->>'prize', el->>'Prize', el->>'price', el->>'Price'), '')::numeric,
+            0
+        ) AS service_price
+        FROM jsonb_array_elements(
+            CASE
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'servicelist') = 'array'
+                    THEN a.attributes::jsonb->'servicelist'
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'ServiceList') = 'array'
+                    THEN a.attributes::jsonb->'ServiceList'
+                ELSE '[]'::jsonb
+            END
+        ) el
+    ) item
+    WHERE a.organisationlocationid = @orglocid
+      AND UPPER(COALESCE(a.statuscode, '')) IN ('COMPLETED', 'COMPLETE', 'DONE')
+      AND (@date_from::date IS NULL OR DATE(a.appoinmentdate) >= @date_from::date)
+      AND (@date_to::date IS NULL OR DATE(a.appoinmentdate) <= @date_to::date)
+),
+-- Room revenue = stay payment total (paid + due) for non-cancelled stays.
+room_revenue AS (
+    SELECT COALESCE(SUM(
+        COALESCE(
+            NULLIF(s.stay->'payment'->>'total', '')::numeric,
+            COALESCE(NULLIF(s.stay->'payment'->>'paid', '')::numeric, 0)
+              + COALESCE(NULLIF(s.stay->'payment'->>'balance', '')::numeric, 0),
+            0
+        )
+    ), 0) AS total_revenue
+    FROM organisation_rooms r
+    CROSS JOIN LATERAL (
+        SELECT jsonb_array_elements(
+            CASE
+                WHEN jsonb_typeof(COALESCE(r.booking::jsonb->'stays', '[]'::jsonb)) = 'array'
+                     AND jsonb_array_length(COALESCE(r.booking::jsonb->'stays', '[]'::jsonb)) > 0
+                    THEN r.booking::jsonb->'stays'
+                WHEN COALESCE(r.booking::jsonb->>'check_in', '') <> ''
+                    THEN jsonb_build_array(jsonb_build_object(
+                        'check_in', r.booking::jsonb->>'check_in',
+                        'check_out', r.booking::jsonb->>'check_out',
+                        'status', COALESCE(r.status, 'reserved'),
+                        'closed', false,
+                        'payment', COALESCE(r.payment::jsonb, '{}'::jsonb)
+                    ))
+                ELSE '[]'::jsonb
+            END
+        ) AS stay
+    ) s
+    WHERE r.organisation_location_id = @orglocid
+      AND r.isactive = TRUE
+      AND LOWER(COALESCE(s.stay->>'status', '')) NOT IN ('cancelled', 'no_show')
+      AND (@date_from::date IS NULL OR COALESCE(NULLIF(s.stay->>'check_in', '')::date, CURRENT_DATE) >= @date_from::date)
+      AND (@date_to::date IS NULL OR COALESCE(NULLIF(s.stay->>'check_in', '')::date, CURRENT_DATE) <= @date_to::date)
 ),
 revenue_total AS (
-    SELECT COALESCE(SUM(p.amount), 0) AS total_revenue
-    FROM payment p
-    INNER JOIN appoinment a ON p.appoinmentid = a.id
-    WHERE a.organisationlocationid = @orglocid
+    SELECT COALESCE((SELECT total_revenue FROM appointment_revenue), 0)
+         + COALESCE((SELECT total_revenue FROM room_revenue), 0) AS total_revenue
 ),
 trend AS (
     SELECT
         d::date AS day,
         TRIM(TO_CHAR(d::date, 'Dy')) AS day_name,
         COALESCE(COUNT(a.id), 0) AS appointment_count
-    FROM generate_series(CURRENT_DATE - INTERVAL '6 days', CURRENT_DATE, INTERVAL '1 day') AS d
+    FROM generate_series(
+            COALESCE(@date_from::date, CURRENT_DATE - INTERVAL '6 days'),
+            COALESCE(@date_to::date, CURRENT_DATE),
+            INTERVAL '1 day'
+        ) AS d
     LEFT JOIN appoinment a
         ON DATE(a.appoinmentdate) = d::date
         AND a.organisationlocationid = @orglocid
+        AND UPPER(COALESCE(a.statuscode, '')) <> 'CANCELLED'
     GROUP BY d::date
     ORDER BY d::date
 ),
@@ -723,11 +798,34 @@ revenue_weeks AS (
             WHEN EXTRACT(DAY FROM a.appoinmentdate) <= 21 THEN 3
             ELSE 4
         END AS week_num,
-        COALESCE(SUM(p.amount), 0) AS revenue
+        COALESCE(SUM(item.service_price), 0) AS revenue
     FROM appoinment a
-    LEFT JOIN payment p ON p.appoinmentid = a.id
+    CROSS JOIN LATERAL (
+        SELECT COALESCE(
+            NULLIF(COALESCE(el->>'serviceprice', el->>'ServicePrice', el->>'servicePrice'), '')::numeric,
+            NULLIF(COALESCE(el->>'offerprize', el->>'OfferPrize', el->>'offerPrize'), '')::numeric,
+            NULLIF(COALESCE(el->>'prize', el->>'Prize', el->>'price', el->>'Price'), '')::numeric,
+            0
+        ) AS service_price
+        FROM jsonb_array_elements(
+            CASE
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'servicelist') = 'array'
+                    THEN a.attributes::jsonb->'servicelist'
+                WHEN jsonb_typeof(COALESCE(a.attributes::jsonb, '{}'::jsonb)->'ServiceList') = 'array'
+                    THEN a.attributes::jsonb->'ServiceList'
+                ELSE '[]'::jsonb
+            END
+        ) el
+    ) item
     WHERE a.organisationlocationid = @orglocid
-      AND DATE_TRUNC('month', a.appoinmentdate) = DATE_TRUNC('month', CURRENT_DATE)
+      AND UPPER(COALESCE(a.statuscode, '')) IN ('COMPLETED', 'COMPLETE', 'DONE')
+      AND (
+            (@date_from::date IS NOT NULL AND @date_to::date IS NOT NULL
+                AND DATE(a.appoinmentdate) >= @date_from::date
+                AND DATE(a.appoinmentdate) <= @date_to::date)
+            OR (@date_from::date IS NULL AND @date_to::date IS NULL
+                AND DATE_TRUNC('month', a.appoinmentdate) = DATE_TRUNC('month', CURRENT_DATE))
+          )
     GROUP BY week_num
 )
 SELECT
@@ -769,6 +867,10 @@ CROSS JOIN revenue_total rt";
             var queryBuilder = querybuilderprovider.GetQueryBuilder(query);
             var command = queryBuilder.GetCommand(db);
             db.AddParameter(command, "orglocid", DbTypes.Types.Long).Value = req.orglocid;
+            db.AddParameter(command, "date_from", DbTypes.Types.String).Value =
+                dateFrom.HasValue ? dateFrom.Value.ToString("yyyy-MM-dd") : (object)DBNull.Value;
+            db.AddParameter(command, "date_to", DbTypes.Types.String).Value =
+                dateTo.HasValue ? dateTo.Value.ToString("yyyy-MM-dd") : (object)DBNull.Value;
             using (DbDataReader reader = await db.Execute(command))
             {
                 while (await reader.ReadAsync())
@@ -1018,10 +1120,24 @@ CROSS JOIN revenue_total rt";
                   AND customurl IS NOT NULL
                   AND TRIM(customurl) <> ''
                   AND (@exclude_id <= 0 OR id <> @exclude_id)
+                  AND LOWER(
+                    REGEXP_REPLACE(
+                      SPLIT_PART(
+                        SPLIT_PART(
+                          REGEXP_REPLACE(TRIM(customurl), '^https?://', '', 'i'),
+                          '/', 1
+                        ),
+                        '.', 1
+                      ),
+                      '[^a-z0-9]', '', 'g'
+                    )
+                  ) = @slug
+                LIMIT 1
             ";
 
             DbCommand command = db.GetCommand(query);
             db.AddParameter(command, "exclude_id", DbTypes.Types.Long).Value = excludeLocationId;
+            db.AddParameter(command, "slug", DbTypes.Types.String).Value = normalizedSlug;
 
             using DbDataReader reader = await db.Execute(command);
             while (await reader.ReadAsync())
@@ -1062,23 +1178,33 @@ CROSS JOIN revenue_total rt";
                 return null;
             }
 
+            // Filter in SQL (slug extract + alphanum normalize) instead of loading every customurl row.
             const string query = @"
                 SELECT id, organisationid, orgloctempid::text AS orgloctempid, templateid, customurl
                 FROM OrganisationLocation
                 WHERE isactive = true
                   AND customurl IS NOT NULL
-                  AND TRIM(customurl) <> ''";
+                  AND TRIM(customurl) <> ''
+                  AND LOWER(
+                    REGEXP_REPLACE(
+                      SPLIT_PART(
+                        SPLIT_PART(
+                          REGEXP_REPLACE(TRIM(customurl), '^https?://', '', 'i'),
+                          '/', 1
+                        ),
+                        '.', 1
+                      ),
+                      '[^a-z0-9]', '', 'g'
+                    )
+                  ) = @slug
+                LIMIT 1";
 
             using DbCommand command = db.GetCommand(query);
+            db.AddParameter(command, "slug", DbTypes.Types.String).Value = normalizedSlug;
             using DbDataReader reader = await db.Execute(command);
-            while (await reader.ReadAsync())
+            if (await reader.ReadAsync())
             {
                 var stored = reader["customurl"] == DBNull.Value ? "" : reader["customurl"].ToString() ?? "";
-                if (!SlugHelper.CustomUrlSlugMatches(stored, normalizedSlug))
-                {
-                    continue;
-                }
-
                 return new PublicSiteLocationResolve
                 {
                     id = reader["id"] == DBNull.Value ? 0 : Convert.ToInt64(reader["id"]),

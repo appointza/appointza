@@ -148,6 +148,52 @@ namespace appointza.Controllers
             }
         }
 
+        [HttpPost("Cancel")]
+        [Authenticate]
+        public async Task<ActionResult<ActionRes<bool>>> Cancel(ActionReq<GuestHospitalityBookingCancelReq>? req)
+        {
+            if (req?.item == null)
+                return BadRequest(new ActionRes<bool> { error = "Cancel payload is required." });
+
+            try
+            {
+                var ok = await guestHospitalityBookingService.CancelMine(req.item);
+                return Ok(new ActionRes<bool> { item = ok });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new ActionRes<bool> { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "GuestHospitalityBooking Cancel failed");
+                return BadRequest(new ActionRes<bool> { error = ex.Message });
+            }
+        }
+
+        [HttpPost("RequestModify")]
+        [Authenticate]
+        public async Task<ActionResult<ActionRes<bool>>> RequestModify(ActionReq<GuestHospitalityBookingModifyReq>? req)
+        {
+            if (req?.item == null)
+                return BadRequest(new ActionRes<bool> { error = "Modify payload is required." });
+
+            try
+            {
+                var ok = await guestHospitalityBookingService.RequestModifyMine(req.item);
+                return Ok(new ActionRes<bool> { item = ok });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new ActionRes<bool> { error = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "GuestHospitalityBooking RequestModify failed");
+                return BadRequest(new ActionRes<bool> { error = ex.Message });
+            }
+        }
+
         static List<string>? SplitIds(string? value) =>
             string.IsNullOrWhiteSpace(value)
                 ? null

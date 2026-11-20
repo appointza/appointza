@@ -29,6 +29,7 @@ import {
   buildOrganisationPublicSiteOriginFromHost,
 } from "@/utils/orgPublicSiteUrl.util";
 import { normalizeCustomUrlSlug } from "@/utils/slug.util";
+import { getAppointmentStatusPresentation } from "@/utils/appointmentStatus.util";
 
 const DashboardChartsPanel = lazy(
   () => import("@/components/organization/DashboardChartsPanel"),
@@ -109,6 +110,8 @@ const OrganizationDashboard = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [dashboardStats, setDashboardStats] = useState<OrganisationDashboardStats>(EMPTY_DASHBOARD_STATS);
   const [selectedLocationId, setSelectedLocationId] = useState<number>(0);
+  const [statsDateFrom, setStatsDateFrom] = useState("");
+  const [statsDateTo, setStatsDateTo] = useState("");
   
   // Search functionality
   const [searchPhone, setSearchPhone] = useState('');
@@ -198,6 +201,8 @@ const OrganizationDashboard = () => {
     try {
       const req = new OrgLocationReq();
       req.orglocid = selectedLocationId;
+      if (statsDateFrom) req.date_from = statsDateFrom;
+      if (statsDateTo) req.date_to = statsDateTo;
       const response = await organisationLocationService.selectOrganisationDashboardStats(req);
       setDashboardStats(response ?? EMPTY_DASHBOARD_STATS);
     } catch (error) {
@@ -211,7 +216,7 @@ const OrganizationDashboard = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, selectedLocationId, organisationLocationService, toast]);
+  }, [isAuthenticated, selectedLocationId, statsDateFrom, statsDateTo, organisationLocationService, toast]);
 
   // Staff with no location: stop waiting for stats
   useEffect(() => {
@@ -526,6 +531,23 @@ const OrganizationDashboard = () => {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
+            <div className="flex items-center gap-1.5 rounded-md border border-stone-200 bg-white px-2 py-1">
+              <input
+                type="date"
+                value={statsDateFrom}
+                onChange={(e) => setStatsDateFrom(e.target.value)}
+                className="h-8 border-0 bg-transparent text-[12px] text-stone-700 outline-none"
+                aria-label="Revenue from date"
+              />
+              <span className="text-[11px] text-stone-400">to</span>
+              <input
+                type="date"
+                value={statsDateTo}
+                onChange={(e) => setStatsDateTo(e.target.value)}
+                className="h-8 border-0 bg-transparent text-[12px] text-stone-700 outline-none"
+                aria-label="Revenue to date"
+              />
+            </div>
             <Button
               type="button"
               variant="outline"
@@ -694,14 +716,22 @@ const OrganizationDashboard = () => {
         ) : null}
 
         {showDashboardLoading ? (
-          <div className="flex min-h-[18rem] items-center justify-center">
-            <div className="rounded-2xl border border-stone-200 bg-white px-10 py-12 text-center shadow-none">
-              <Loader2 className="mx-auto mb-4 h-9 w-9 animate-spin text-[#E85D4C]" aria-label="Loading" />
-              <p className="text-sm font-medium text-stone-600">Loading your dashboard…</p>
-              <p className="mt-1 text-xs text-stone-400">
-                {waitingForLocations ? "Loading locations…" : "Fetching appointments and payments"}
-              </p>
+          <div className="space-y-4" aria-busy="true" aria-label="Loading dashboard">
+            <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="h-28 animate-pulse rounded-2xl border border-stone-200 bg-stone-100"
+                />
+              ))}
             </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="h-56 animate-pulse rounded-2xl border border-stone-200 bg-stone-100" />
+              <div className="h-56 animate-pulse rounded-2xl border border-stone-200 bg-stone-100" />
+            </div>
+            <p className="text-center text-xs text-stone-400">
+              {waitingForLocations ? "Loading locations…" : "Fetching appointments and payments…"}
+            </p>
           </div>
         ) : (
           <div className="space-y-4">
@@ -874,13 +904,10 @@ const OrganizationDashboard = () => {
                                 <Badge 
                                   className={cn(
                                     "rounded-full font-medium",
-                                    appointment.statuscode === 'COMPLETED' && "border-0 bg-emerald-50 text-emerald-800",
-                                    appointment.statuscode === 'CONFIRMED' && "border-0 bg-sky-50 text-sky-800",
-                                    appointment.statuscode === 'CANCELLED' && "border-0 bg-red-50 text-red-800",
-                                    appointment.statuscode !== 'COMPLETED' && appointment.statuscode !== 'CONFIRMED' && appointment.statuscode !== 'CANCELLED' && "border-0 bg-amber-50 text-amber-900"
+                                    getAppointmentStatusPresentation(appointment.statuscode).className,
                                   )}
                                 >
-                                  {appointment.statuscode || 'PENDING'}
+                                  {getAppointmentStatusPresentation(appointment.statuscode).label}
                                 </Badge>
                                 {appointment.ispaid && (
                                   <Badge className="rounded-full border-0 bg-emerald-100 text-emerald-800">

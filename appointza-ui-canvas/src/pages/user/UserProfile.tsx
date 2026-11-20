@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -72,7 +72,9 @@ const UserProfile = () => {
   const filesService = useMemo(() => new FilesService(), []);
 
   const [profile, setProfile] = useState<Users>(new Users());
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProfileHydrated, setIsProfileHydrated] = useState(false);
+  const profileDirtyRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   const [profileImageVersion, setProfileImageVersion] = useState(0);
@@ -146,6 +148,11 @@ const UserProfile = () => {
 
       const response = await usersService.select(req);
 
+      // Never overwrite fields the user already edited while this request was in flight.
+      if (profileDirtyRef.current) {
+        return;
+      }
+
       if (response && response.length > 0) {
         const userData = withResolvedProfileImage(response[0], user?.imageid);
         setProfile(userData);
@@ -161,7 +168,7 @@ const UserProfile = () => {
       }
     } catch (error) {
       console.error("Error loading profile:", error);
-      if (user) {
+      if (!profileDirtyRef.current && user) {
         const fallbackProfile = new Users();
         fallbackProfile.id = user.id || 0;
         fallbackProfile.mobile = user.mobile || "";
@@ -177,6 +184,7 @@ const UserProfile = () => {
       });
     } finally {
       setIsLoading(false);
+      setIsProfileHydrated(true);
     }
   }, [isAuthenticated, userId, usersService, toast, user, updateUserContext]);
 
@@ -397,8 +405,11 @@ const UserProfile = () => {
   };
 
   const handleInputChange = (field: keyof Users, value: string) => {
+    profileDirtyRef.current = true;
     setProfile((prev) => ({ ...prev, [field]: value }));
   };
+
+  const profileFieldsDisabled = isLoading || !isProfileHydrated;
 
   const handleLogout = async () => {
     try {
@@ -509,6 +520,7 @@ const UserProfile = () => {
                         placeholder="Enter your name"
                         className={profileFieldInputClass}
                         autoComplete="name"
+                        disabled={profileFieldsDisabled}
                       />
                     </div>
                     <div className="min-w-0">
@@ -524,6 +536,7 @@ const UserProfile = () => {
                         inputMode="tel"
                         className={profileFieldInputClass}
                         autoComplete="tel"
+                        disabled={profileFieldsDisabled}
                       />
                     </div>
                     <div className="min-w-0">
@@ -538,6 +551,7 @@ const UserProfile = () => {
                         type="email"
                         className={profileFieldInputClass}
                         autoComplete="email"
+                        disabled={profileFieldsDisabled}
                       />
                     </div>
                     <div className="min-w-0">
@@ -550,6 +564,7 @@ const UserProfile = () => {
                         onChange={(e) => handleInputChange("designation", e.target.value)}
                         placeholder="Enter your role"
                         className={profileFieldInputClass}
+                        disabled={profileFieldsDisabled}
                       />
                     </div>
                   </div>

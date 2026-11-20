@@ -110,6 +110,38 @@ namespace appointza.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Deterministic live-block website draft (no paid LLM). Nothing is published until the client saves.
+        /// </summary>
+        [HttpPost("GenerateTemplateDraft")]
+        public async Task<ActionResult<ActionRes<SiteTemplateDraftResult>>> GenerateTemplateDraft(
+            ActionReq<SiteTemplateDraftRequest> req)
+        {
+            var item = req?.item ?? new SiteTemplateDraftRequest();
+            if (item.organisation_location_id > 0)
+            {
+                try
+                {
+                    var sites = await organisationsiteService.GetSiteDetails(item.organisation_location_id);
+                    var site = sites?.FirstOrDefault();
+                    if (site != null)
+                    {
+                        item.has_services = item.has_services || (site.orgnaisatinservice?.Count ?? 0) > 0;
+                        item.has_rooms = item.has_rooms || (site.hospitality_rooms?.Count ?? 0) > 0;
+                        if (string.IsNullOrWhiteSpace(item.organisation_name))
+                            item.organisation_name = site.organisationdetail?.name ?? "";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "GenerateTemplateDraft could not load site details for location {LocationId}", item.organisation_location_id);
+                }
+            }
+
+            var draft = SiteTemplateDraftGenerator.Generate(item);
+            return Ok(new ActionRes<SiteTemplateDraftResult> { item = draft });
+        }
+
         [HttpGet("GetSiteDetailsByOrgLocTempId/{orgloctempid}")]
         public async Task<ActionResult<ActionRes<List<Sitedetails>>>> GetSiteDetailsByOrgLocTempId(string orgloctempid)
         {
@@ -369,7 +401,7 @@ namespace appointza.Controllers
                 Facilities = facilities,
                 OrganisationDetail = organisationDetail,
                 TemplateHtml = templateHtml,
-                VersionKey = BuildPublicHtmlVersionKey(siteDetail, events),
+                VersionKey = BuildPublicHtmlVersionKey(siteDetail, events, templateHtml),
                 OrgLocTempIdHint = orgLocTempIdHint ?? "",
                 OrgId = orgId,
                 LocId = locId,
@@ -401,6 +433,7 @@ namespace appointza.Controllers
                 templateid = context.TemplateId,
                 html = boundHtml,
                 versionKey = context.VersionKey,
+                organisationname = context.OrganisationDetail?.organisationname ?? "",
             };
         }
 
@@ -444,17 +477,15 @@ namespace appointza.Controllers
                 .Any(value => string.Equals(value, etag, StringComparison.Ordinal));
         }
 
-        private static string BuildPublicHtmlVersionKey(Sitedetails site, IList<Event> events)
+        /// <summary>
+        /// Public so unit tests can assert ETag invalidation when template/services/rooms change.
+        /// </summary>
+        public static string BuildPublicHtmlVersionKey(
+            Sitedetails site,
+            IList<Event> events,
+            string? templateHtml = null)
         {
-            var locUpdated = site.locationdetail?.modifiedon ?? site.locationdetail?.createdon ?? DateTime.MinValue;
-            var orgUpdated = site.organisationdetail?.modifiedon ?? site.organisationdetail?.createdon ?? DateTime.MinValue;
-            var eventStamp = events?
-                .Select(e => e.updated_at)
-                .DefaultIfEmpty(DateTime.MinValue)
-                .Max() ?? DateTime.MinValue;
-            var serviceCount = site.orgnaisatinservice?.Count ?? 0;
-            var roomCount = site.hospitality_rooms?.Count ?? 0;
-            return $"{site.locationdetail?.id}:{locUpdated:O}:{orgUpdated:O}:{eventStamp:O}:s{serviceCount}:r{roomCount}";
+            return PublicHtmlVersionKey.Build(site, events, templateHtml);
         }
 
         private static string BuildErrorHtml(string title, string message)
@@ -630,6 +661,7 @@ namespace appointza.Controllers
             }
 
             // Prefer SPA route /template/{orgloctempid} — same renderer as direct booking links.
+            // Skip a second org join when the GUID is already known (title comes from GetPublicHtml).
             if (!string.IsNullOrWhiteSpace(publicSite.orgloctempid))
             {
                 result.item = new OrganisationTemplateResolveRes
@@ -651,6 +683,7 @@ namespace appointza.Controllers
                     organisationid = publicSite.organisationid,
                     organisationlocationid = publicSite.id,
                     templateid = publicSite.templateid,
+                    organisationname = organisationDetail?.organisationname ?? "",
                 };
                 return Ok(result);
             }

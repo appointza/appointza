@@ -208,11 +208,15 @@ namespace appointza.Services
                 booking_guid = bookingId,
                 check_in = checkIn,
                 check_out = checkOut,
+                check_in_time = checkInTime,
+                check_out_time = checkOutTime,
                 nights = quote.nights,
+                persons = req.persons,
                 guest = guest,
                 payment = payment,
                 package_ids = req.package_ids ?? [],
                 user_id = loggedInUserId,
+                status = "reserved",
             });
             room.status = "reserved";
             RoomStayHistory.ApplyToRoom(room, stays, DateOnly.FromDateTime(DateTime.Now));
@@ -234,6 +238,126 @@ namespace appointza.Services
                 persons = req.persons,
                 extra_beds = req.extra_beds,
             };
+        }
+
+        public async Task<bool> CancelMine(GuestHospitalityBookingCancelReq req)
+        {
+            var ctx = requeststate.usercontext;
+            if (ctx == null || ctx.userid <= 0)
+                throw new UnauthorizedAccessException("Sign in to cancel a room booking.");
+
+            var room = (await roomService.Select(new OrganisationRoomSelectReq
+            {
+                id = req.room_id,
+                organisation_id = req.organisation_id,
+            })).FirstOrDefault()
+                ?? throw new InvalidOperationException("Room not found.");
+
+            var email = (ctx.useremail ?? "").Trim().ToLowerInvariant();
+            var phoneDigits = new string((ctx.usermobile ?? "").Where(char.IsDigit).ToArray());
+            var phoneTail = phoneDigits.Length >= 10 ? phoneDigits[^10..] : phoneDigits;
+
+            var stays = RoomStayHistory.Collect(room);
+            var stay = stays.FirstOrDefault(s =>
+                    (!string.IsNullOrWhiteSpace(req.booking_guid)
+                        && string.Equals(s.booking_guid, req.booking_guid, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(req.booking_id)
+                        && string.Equals(s.booking_id, req.booking_id, StringComparison.OrdinalIgnoreCase)))
+                ?? throw new InvalidOperationException("Booking not found.");
+
+            if (!StayMatches(stay, ctx.userid, email, phoneTail))
+                throw new UnauthorizedAccessException("You can only cancel your own bookings.");
+            if (stay.closed || stay.status is "cancelled" or "checked_out" or "no_show")
+                throw new InvalidOperationException("This booking is already closed.");
+
+            var profile = await hospitalityContentService.GetProfile(req.organisation_id);
+            if (!CanCancelByPolicy(stay, profile, out var policyMessage))
+                throw new InvalidOperationException(policyMessage);
+
+            return await roomService.UpdateStayAction(new OrganisationRoomStayActionReq
+            {
+                organisation_id = req.organisation_id,
+                room_id = req.room_id,
+                booking_id = stay.booking_id,
+                booking_guid = stay.booking_guid,
+                action = "cancel",
+                cancel_reason = req.reason,
+            });
+        }
+
+        public async Task<bool> RequestModifyMine(GuestHospitalityBookingModifyReq req)
+        {
+            var ctx = requeststate.usercontext;
+            if (ctx == null || ctx.userid <= 0)
+                throw new UnauthorizedAccessException("Sign in to request a booking change.");
+
+            if (string.IsNullOrWhiteSpace(req.requested_check_in) || string.IsNullOrWhiteSpace(req.requested_check_out))
+                throw new ArgumentException("Requested check-in and check-out dates are required.");
+
+            var rooms = await roomService.Select(new OrganisationRoomSelectReq
+            {
+                id = req.room_id,
+                organisation_id = req.organisation_id,
+            });
+            var room = rooms.FirstOrDefault()
+                ?? throw new InvalidOperationException("Room not found.");
+
+            var email = (ctx.useremail ?? "").Trim().ToLowerInvariant();
+            var phoneDigits = new string((ctx.usermobile ?? "").Where(char.IsDigit).ToArray());
+            var phoneTail = phoneDigits.Length >= 10 ? phoneDigits[^10..] : phoneDigits;
+
+            var stays = RoomStayHistory.Collect(room);
+            var stay = stays.FirstOrDefault(s =>
+                    (!string.IsNullOrWhiteSpace(req.booking_guid)
+                        && string.Equals(s.booking_guid, req.booking_guid, StringComparison.OrdinalIgnoreCase))
+                    || (!string.IsNullOrWhiteSpace(req.booking_id)
+                        && string.Equals(s.booking_id, req.booking_id, StringComparison.OrdinalIgnoreCase)))
+                ?? throw new InvalidOperationException("Booking not found.");
+
+            if (!StayMatches(stay, ctx.userid, email, phoneTail))
+                throw new UnauthorizedAccessException("You can only modify your own bookings.");
+            if (stay.closed)
+                throw new InvalidOperationException("This booking is already closed.");
+
+            stay.status = "modification_requested";
+            stay.requested_check_in = req.requested_check_in.Trim();
+            stay.requested_check_out = req.requested_check_out.Trim();
+            stay.modify_request_note = (req.note ?? "").Trim();
+            RoomStayHistory.ApplyToRoom(room, stays, DateOnly.FromDateTime(DateTime.Now));
+            await roomService.Save(room);
+            return true;
+        }
+
+        static bool CanCancelByPolicy(RoomStayRecord stay, OrganisationHospitalityProfile profile, out string message)
+        {
+            message = "";
+            if (!RoomStayHistory.TryParseDate(stay.check_in, out var checkIn))
+            {
+                message = "Check-in date is invalid.";
+                return false;
+            }
+
+            var hoursUntil = (checkIn.ToDateTime(TimeOnly.MinValue) - DateTime.Now).TotalHours;
+            // Default: free cancellation up to 24h before check-in (matches typical hospitality policy text).
+            var freeWindowHours = 24;
+            var policyText = (profile.cancellation_policy ?? "").ToLowerInvariant();
+            if (policyText.Contains("48"))
+                freeWindowHours = 48;
+            else if (policyText.Contains("12"))
+                freeWindowHours = 12;
+            else if (policyText.Contains("non-refundable") || policyText.Contains("no cancellation"))
+            {
+                message = "This booking is non-cancellable under the property policy.";
+                return false;
+            }
+
+            if (hoursUntil < freeWindowHours)
+            {
+                message = $"Free cancellation ends {freeWindowHours} hours before check-in.";
+                return false;
+            }
+
+            return true;
         }
 
         public async Task<List<GuestHospitalityBookingMineItem>> ListMine()
@@ -331,12 +455,50 @@ namespace appointza.Services
                 }
             }
 
+            var profiles = new Dictionary<long, OrganisationHospitalityProfile>();
+            foreach (var orgId in items.Select(i => i.organisation_id).Distinct())
+            {
+                try
+                {
+                    profiles[orgId] = await hospitalityContentService.GetProfile(orgId);
+                }
+                catch
+                {
+                    profiles[orgId] = new OrganisationHospitalityProfile { organisation_id = orgId };
+                }
+            }
+
+            foreach (var item in items)
+            {
+                if (!profiles.TryGetValue(item.organisation_id, out var profile))
+                    continue;
+                item.payment_policy = profile.payment_policy ?? "";
+                item.cancellation_policy = profile.cancellation_policy ?? "";
+                item.pay_at_property = IsPayAtProperty(profile.payment_policy);
+                item.can_cancel = !item.closed
+                    && item.status is not ("cancelled" or "checked_out" or "no_show" or "checked_in")
+                    && CanCancelByPolicy(
+                        new RoomStayRecord { check_in = item.check_in, closed = item.closed, status = item.status },
+                        profile,
+                        out _);
+            }
+
             return items
                 .GroupBy(i => string.IsNullOrWhiteSpace(i.booking_guid) ? $"{i.room_id}:{i.booking_id}:{i.check_in}" : i.booking_guid)
                 .Select(g => g.First())
                 .OrderByDescending(i => i.check_in)
                 .ThenByDescending(i => i.booking_id)
                 .ToList();
+        }
+
+        static bool IsPayAtProperty(string? policy)
+        {
+            var text = (policy ?? "").Trim().ToLowerInvariant();
+            return text.Contains("pay at property")
+                || text.Contains("pay at hotel")
+                || text.Contains("pay on arrival")
+                || text.Contains("pay later")
+                || text == "property";
         }
 
         static bool StayMatches(RoomStayRecord stay, long userId, string email, string phoneTail)
@@ -371,9 +533,13 @@ namespace appointza.Services
         {
             var guest = stay.guest ?? room.guest;
             var payment = stay.payment ?? room.payment;
-            var status = stay.closed
-                ? "completed"
-                : string.IsNullOrWhiteSpace(room.status) ? "reserved" : room.status;
+            var stayStatus = (stay.status ?? "").Trim().ToLowerInvariant();
+            if (string.IsNullOrWhiteSpace(stayStatus))
+            {
+                stayStatus = stay.closed
+                    ? "checked_out"
+                    : string.IsNullOrWhiteSpace(room.status) ? "reserved" : room.status.Trim().ToLowerInvariant();
+            }
             return new GuestHospitalityBookingMineItem
             {
                 booking_id = stay.booking_id,
@@ -394,11 +560,15 @@ namespace appointza.Services
                 check_in = stay.check_in,
                 check_out = stay.check_out,
                 nights = stay.nights,
+                persons = stay.persons,
                 closed = stay.closed,
-                status = status,
+                status = stayStatus,
                 total = payment?.total ?? 0,
                 paid = payment?.paid ?? 0,
-                balance = payment?.balance ?? 0,
+                balance = payment?.balance ?? Math.Max(0, (payment?.total ?? 0) - (payment?.paid ?? 0)),
+                requested_check_in = stay.requested_check_in ?? "",
+                requested_check_out = stay.requested_check_out ?? "",
+                modify_request_note = stay.modify_request_note ?? "",
             };
         }
 
@@ -469,29 +639,54 @@ namespace appointza.Services
             room.isactive && !StructurallyBlockedStatuses.Contains(room.status ?? "");
 
         /// <summary>
-        /// Match organisation appointments board (<c>getRoomAvailabilityState</c>):
-        /// a stay is blocked when any requested night is not Available.
+        /// Blocks when the requested datetime window overlaps an occupying stay.
+        /// Hourly/same-day uses precise time ranges; overnight uses night coverage plus housekeeping.
         /// </summary>
         static bool HasRoomConflict(OrganisationRoom room, DateTime windowStart, DateTime windowEnd)
         {
+            if (windowEnd <= windowStart)
+                return true;
+
+            if (RoomStayHistory.OverlapsAnyStayWindow(room, windowStart, windowEnd))
+                return true;
+
             var requestStart = DateOnly.FromDateTime(windowStart);
             var requestEnd = DateOnly.FromDateTime(windowEnd);
 
-            if (RoomStayHistory.OverlapsAnyStay(room, requestStart, requestEnd))
-                return true;
-
-            // Hourly same calendar day — check that one day.
+            // Hourly same calendar day — also respect housekeeping for that day.
             if (requestEnd <= requestStart)
-                return !IsDayAvailableForGuest(room, requestStart);
+                return !IsDayAvailableForGuestIgnoringStayWindows(room, requestStart);
 
-            // Overnight nights: [check-in date, check-out date)
+            // Overnight nights: [check-in date, check-out date) housekeeping only
+            // (stay windows already checked above).
             for (var day = requestStart; day < requestEnd; day = day.AddDays(1))
             {
-                if (!IsDayAvailableForGuest(room, day))
+                if (!IsDayAvailableForGuestIgnoringStayWindows(room, day))
                     return true;
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// Housekeeping / structural day availability without re-checking stay date windows
+        /// (those are handled by <see cref="RoomStayHistory.OverlapsAnyStayWindow"/>).
+        /// </summary>
+        static bool IsDayAvailableForGuestIgnoringStayWindows(OrganisationRoom room, DateOnly day)
+        {
+            var status = (room.status ?? "").Trim().ToLowerInvariant();
+
+            if (status is "maintenance" or "blocked" or "cleaning")
+                return false;
+
+            if (RoomStayHistory.HasAnyStay(room))
+                return true;
+
+            var today = DateOnly.FromDateTime(DateTime.Now);
+            if (day != today)
+                return true;
+
+            return status is not ("occupied" or "reserved" or "checkout_pending" or "hold");
         }
 
         /// <summary>

@@ -298,7 +298,9 @@ const AppRoutes = () => {
         <Route path="/services" element={<PublicBrowseServicesPage />} />
         <Route path="/organisations" element={<PublicBrowseOrganisationsPage />} />
         <Route path="/turf" element={<TurfDirectoryPage />} />
-        <Route path="/organization/:id" element={<OrganizationDetail />} />
+        {/* Public org browse detail — must NOT collide with /organization/* admin paths */}
+        <Route path="/explore/organization/:id" element={<OrganizationDetail />} />
+        <Route path="/public/organization/:id" element={<OrganizationDetail />} />
         <Route path="/org/template/:orgId/:templateType" element={<OrganizationTemplate />} />
         <Route path="/public/org/:organizationId" element={<OrganizationPublicPage />} />
         <Route path="/template/:templateId" element={<DynamicTemplatePage />} />
@@ -350,6 +352,9 @@ const AppRoutes = () => {
           <Route path="services" element={<OrganizationServices />} />
           <Route path="appointments/:id/record" element={<AppointmentRecordPage />} />
           <Route path="appointments" element={<OrganizationAppointments />} />
+          {/* Legacy / demo paths — never show City Medical Center mock */}
+          <Route path="bookings" element={<Navigate to="/organization/appointments" replace />} />
+          <Route path="customers" element={<Navigate to="/organization/clients" replace />} />
           <Route path="calendar" element={<Navigate to="/organization/appointments" replace />} />
           <Route
             path="event-bookings"
@@ -400,6 +405,7 @@ const AppRoutes = () => {
           <Route path="organisation" element={<OrganisationLegacyRedirect />} />
           <Route path="rooms/definitions" element={<RoomDefinitionsPage />} />
           <Route path="rooms/status" element={<RoomStatusPage />} />
+          <Route path="*" element={<NotFound />} />
         </Route>
         
         {/* Campusza route - no Appointza layout */}

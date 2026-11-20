@@ -12,6 +12,7 @@ import {
   ClientInfoRes,
   UpdatePaymentReq,
   UpdateStatusReq,
+  UpdateStatusRes,
 } from '../models/appoinment.model';
 import { AxiosHelperUtils } from '../utils/axioshelper.utils';
 import { environment } from '../utils/environment';
@@ -100,11 +101,20 @@ export class AppoinmentService {
     async UpdateStatus(req: UpdateStatusReq) {
         let postdata: ActionReq<UpdateStatusReq> = new ActionReq<UpdateStatusReq>();
         postdata.item = req;
-        let resp = await this.http.post<ActionRes<boolean>>(
+        let resp = await this.http.post<ActionRes<UpdateStatusRes | boolean>>(
             this.baseurl + '/UpdateStatus',
             postdata
         );
-        return resp.item;
+        const item = resp.item;
+        if (item && typeof item === "object") {
+          return item as UpdateStatusRes;
+        }
+        return {
+          success: !!item,
+          notified: false,
+          channels: [],
+          statuscode: req.statuscode,
+        } as UpdateStatusRes;
     }
 
     async UpdatePayment(req: UpdatePaymentReq) {
